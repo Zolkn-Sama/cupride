@@ -1,0 +1,49 @@
+# Mesures de performance
+
+Historique des mesures des opérations critiques. Chaque série indique la date, le commit, la
+machine et la commande, pour pouvoir comparer d'une série à l'autre.
+
+Les mesures en conteneur ou en CI servent à détecter des régressions relatives ; les objectifs se
+vérifient en natif, en mode release.
+
+## Objectifs
+
+| Mesure | Objectif | Statut |
+|---|---|---|
+| Insertion au milieu d'un fichier de 100 Mo | < 1 ms | ✅ 0,72 µs (2026-11-19) |
+| Démarrage | < 100 ms | à mesurer (phase 3) |
+| Mémoire au repos | < 50 Mo | à mesurer (phase 3) |
+| CPU au repos | 0 % | à mesurer (phase 3) |
+| Latence de frappe | imperceptible | à mesurer (phase 3) |
+
+## Buffer de texte (`cupride-text`)
+
+Commande : `cargo bench -p cupride-text` (rapports HTML dans `target/criterion/`).
+
+Texte mesuré : du code source réaliste, en lignes de ~60 octets mêlant ASCII et caractères
+multi-octets (`é`, `😀`), répété jusqu'à 1 Mo ou 100 Mo. Valeurs : médiane de criterion.
+
+### 2026-11-19 — TEXT-08, première série
+
+- Machine : Apple M3 Pro, 18 Go, macOS ; Rust 1.95.0, profil `bench` (release)
+- Rope : feuilles de 1 à 4 Ko, 8 à 16 enfants par nœud
+
+| Opération | 1 Mo | 100 Mo |
+|---|---|---|
+| Insertion d'un caractère au milieu — rope | 0,65 µs | **0,72 µs** |
+| Insertion d'un caractère au milieu — `String` (référence) | 8,6 µs | 938 µs |
+| Suppression d'un caractère au milieu — rope | 0,44 µs | 0,52 µs |
+| Conversion position → ligne | 0,27 µs | 0,53 µs |
+| Conversion ligne → position | 0,38 µs | 0,74 µs |
+| Lecture de 60 lignes visibles (une par une) | 48,8 µs | 45,6 µs |
+| Chargement (`Rope::from_text`) | 0,18 ms | 21,6 ms |
+
+Lecture :
+
+- Les modifications et les conversions restent sous la microseconde à 100 Mo, et ne coûtent
+  qu'environ 10 à 100 % de plus qu'à 1 Mo : le coût est bien logarithmique. La `String` de
+  référence est 1 300 fois plus lente à 100 Mo, parce qu'elle décale toute la fin du texte.
+- La lecture des lignes visibles (~0,8 µs par ligne) alloue une `String` par ligne et refait la
+  descente dans l'arbre pour chacune. C'est largement suffisant pour l'affichage (60 lignes en
+  moins de 0,05 ms) ; un itérateur de lignes à partir d'une position pourra l'améliorer si le rendu
+  le demande.
