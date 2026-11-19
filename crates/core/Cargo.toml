@@ -12,7 +12,9 @@ publish.workspace = true
 clap.workspace = true
 cupride-layout.workspace = true
 cupride-text.workspace = true
+shlex.workspace = true
 slotmap.workspace = true
+strsim.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 

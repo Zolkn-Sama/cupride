@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use cupride_layout::Workspace;
 use slotmap::SlotMap;
 
-use crate::command::{CommandError, CommandRegistry, CommandResult};
+use crate::command::{CommandError, CommandOutput, CommandRegistry, CommandResult, parser};
 use crate::document::{Document, DocumentError};
 
 slotmap::new_key_type! {
@@ -137,6 +137,16 @@ impl Editor {
         &mut self.commands
     }
 
+    /// Exécute une ligne de commande, telle que tapée par l'utilisateur :
+    /// `file open "mon fichier.rs"`. `<commande> --help` renvoie l'aide de la commande.
+    /// Une ligne vide ne fait rien.
+    pub fn execute(&mut self, line: &str) -> CommandResult {
+        match parser::parse(&self.commands, line)? {
+            Some(parsed) => self.run(&parsed.name, &parsed.args),
+            None => Ok(CommandOutput::None),
+        }
+    }
+
     /// Exécute la commande `full_name` (`file open`) avec les arguments `args`, déjà découpés.
     pub fn run(&mut self, full_name: &str, args: &[String]) -> CommandResult {
         let command = self
@@ -144,14 +154,14 @@ impl Editor {
             .get(full_name)
             .ok_or_else(|| CommandError::Unknown {
                 name: full_name.to_owned(),
-                suggestion: None,
+                suggestion: parser::suggest(&self.commands, full_name),
             })?;
+        if args.iter().any(|a| a == "--help" || a == "-h") {
+            return Ok(CommandOutput::Message(command.help_text()));
+        }
         let matches = command
             .parse(args)
-            .map_err(|error| CommandError::InvalidArguments {
-                command: full_name.to_owned(),
-                message: error.to_string().trim().to_owned(),
-            })?;
+            .map_err(|error| parser::describe_clap_error(full_name, &error))?;
         let handler = command.handler();
         handler(self, &matches)
     }

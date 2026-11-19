@@ -17,6 +17,10 @@ pub enum CommandError {
         suggestion: Option<String>,
     },
 
+    /// La ligne de commande est mal formée (guillemet non fermé…).
+    #[error("ligne de commande invalide : {0}")]
+    Syntax(String),
+
     /// Une commande porte déjà ce nom.
     #[error("la commande « {name} » est déjà enregistrée")]
     AlreadyRegistered {
