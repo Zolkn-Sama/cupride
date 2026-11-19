@@ -287,7 +287,13 @@ fn merge(left: Node, right: Node) -> Vec<Node> {
     }
 }
 
-/// Texte stocké dans un arbre équilibré de morceaux. Voir la [documentation du module](self).
+/// Texte stocké dans un arbre équilibré de morceaux.
+///
+/// L'arbre est un B-arbre : toutes les feuilles sont à la même profondeur, chaque feuille contient
+/// un morceau de texte de 1 à 4 Ko, et chaque nœud interne a de 8 à 16 enfants (la racine peut en
+/// avoir moins). Chaque nœud mémorise le nombre d'octets et de sauts de ligne de son sous-arbre :
+/// insérer, supprimer et convertir une position en ligne coûtent O(log n), quelle que soit la
+/// taille du texte. Les morceaux sont des `String` : une feuille ne coupe jamais un caractère.
 #[derive(Debug, Clone)]
 pub struct Rope {
     root: Node,

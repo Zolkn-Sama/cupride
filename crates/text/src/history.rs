@@ -4,19 +4,7 @@
 //! sélections avant et après. L'[`History`] empile les transactions : annuler applique l'inverse
 //! de la dernière et restaure les sélections d'avant ; rétablir la réapplique.
 //!
-//! # Regroupement
-//!
-//! Pour qu'annuler revienne par blocs logiques et non lettre par lettre, les transactions de
-//! frappe ([`EditKind::Insert`]) ou d'effacement ([`EditKind::Delete`]) consécutives sont
-//! fusionnées. Le bloc est coupé :
-//!
-//! - après une pause plus longue que le délai de regroupement ([`History::set_group_delay`]) ;
-//! - quand le curseur a bougé entre deux transactions (les sélections ne se suivent plus) ;
-//! - quand le type d'action change (frappe puis effacement) ;
-//! - explicitement, avec [`History::break_group`].
-//!
-//! Une transaction [`EditKind::Other`] (une commande, un remplacement global…) n'est jamais
-//! fusionnée : elle forme toujours un bloc à elle seule, quel que soit son nombre de modifications.
+//! Voir [`History`] pour le regroupement des frappes en blocs.
 //!
 //! ```
 //! use cupride_text::{Edit, History, Rope, Selections, TextBuffer, Transaction};
@@ -146,6 +134,20 @@ impl Transaction {
 }
 
 /// Piles d'annulation et de rétablissement d'un document.
+///
+/// # Regroupement
+///
+/// Pour qu'annuler revienne par blocs logiques et non lettre par lettre, les transactions de
+/// frappe ([`EditKind::Insert`]) ou d'effacement ([`EditKind::Delete`]) consécutives sont
+/// fusionnées. Le bloc est coupé :
+///
+/// - après une pause plus longue que le délai de regroupement ([`History::set_group_delay`]) ;
+/// - quand le curseur a bougé entre deux transactions (les sélections ne se suivent plus) ;
+/// - quand le type d'action change (frappe puis effacement) ;
+/// - explicitement, avec [`History::break_group`].
+///
+/// Une transaction [`EditKind::Other`] (une commande, un remplacement global…) n'est jamais
+/// fusionnée : elle forme toujours un bloc à elle seule, quel que soit son nombre de modifications.
 #[derive(Debug, Clone)]
 pub struct History {
     undo: Vec<Transaction>,
@@ -196,7 +198,7 @@ impl History {
     ///
     /// Une nouvelle modification vide la pile de rétablissement ; une transaction vide est
     /// ignorée. La transaction est fusionnée avec la précédente si elles forment un même bloc
-    /// (voir le [regroupement](self#regroupement)).
+    /// (voir le [regroupement](History#regroupement)).
     pub fn commit_at(&mut self, transaction: Transaction, now: Instant) {
         if transaction.is_empty() {
             return;
