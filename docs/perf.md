@@ -12,8 +12,8 @@ vérifient en natif, en mode release.
 |---|---|---|
 | Insertion au milieu d'un fichier de 100 Mo | < 1 ms | ✅ 0,72 µs (2026-11-19) |
 | Démarrage | < 100 ms | à mesurer (phase 3) |
-| Mémoire au repos | < 50 Mo | à mesurer (phase 3) |
-| CPU au repos | 0 % | à mesurer (phase 3) |
+| Mémoire au repos | < 50 Mo | ❌ 85 Mo, fenêtre vide sans GPU (2026-11-19) |
+| CPU au repos | 0 % | ✅ 0,00 s de CPU en 20 s, fenêtre vide (2026-11-19) |
 | Latence de frappe | imperceptible | à mesurer (phase 3) |
 
 ## Buffer de texte (`cupride-text`)
@@ -47,3 +47,23 @@ Lecture :
   descente dans l'arbre pour chacune. C'est largement suffisant pour l'affichage (60 lignes en
   moins de 0,05 ms) ; un itérateur de lignes à partir d'une position pourra l'améliorer si le rendu
   le demande.
+
+## Application (`cupride`)
+
+Mesures sur le binaire de release (`cargo build --release`), lancé sans interaction : temps CPU
+cumulé (`ps -o time`) et mémoire résidente (`ps -o rss`), relevés après le démarrage.
+
+### 2026-11-19 — RENDER-01, fenêtre vide
+
+- Machine : Apple M3 Pro, 18 Go, macOS ; Rust 1.95.0
+- Fenêtre `winit` vide, boucle en attente d'événements (`ControlFlow::Wait`), sans GPU
+
+| Mesure | Valeur |
+|---|---|
+| Temps CPU consommé en 20 s au repos | 0,00 s (résolution 0,01 s) |
+| Mémoire résidente | 85 Mo |
+
+Lecture : la boucle dort réellement au repos. La mémoire dépasse déjà l'objectif de 50 Mo avant
+tout rendu : l'essentiel vient des bibliothèques système chargées par une application macOS
+fenêtrée (AppKit). L'objectif sera réévalué une fois le rendu en place, en distinguant la mémoire
+propre à CuprIDE (`footprint`, `heaptrack`) de celle des bibliothèques partagées.
