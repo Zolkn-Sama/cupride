@@ -1,7 +1,54 @@
-[package]
-name = "cupride"
+[workspace]
+resolver = "3"
+members = [
+    "app",
+    "crates/text",
+    "crates/layout",
+    "crates/core",
+    "tools/repl",
+]
+default-members = ["app"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.95"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/Zolkn-Sama/cupride"
+publish = false
 
-[dependencies]
+# Versions centralisées : les crates déclarent `<dep>.workspace = true`.
+[workspace.dependencies]
+# Crates internes
+cupride-text = { path = "crates/text" }
+cupride-layout = { path = "crates/layout" }
+cupride-core = { path = "crates/core" }
+
+# Erreurs : thiserror dans les bibliothèques, anyhow dans les binaires.
+anyhow = "1.0.100"
+thiserror = "2.0.17"
+
+# Journalisation
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+tracing-appender = "0.2.3"
+
+# Dossiers standards de chaque OS (configuration, données, cache)
+directories = "6.0.0"
+
+# Règles communes, activées dans chaque crate par `[lints] workspace = true`.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
+# Profil de release : binaire le plus petit et le plus rapide possible.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

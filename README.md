@@ -74,20 +74,31 @@ Docker et Docker Compose suffisent pour compiler et tester sans rien installer d
 ## Démarrage rapide
 
 ```sh
-git clone <url-du-dépôt> cupride
+git clone https://github.com/Zolkn-Sama/cupride.git
 cd cupride
-cargo run
+cargo run                    # lance l'IDE (binaire `cupride`)
+cargo run -p cupride-repl    # lance le REPL console du noyau
 ```
 
-### Commandes utiles
+Au premier appel, `rustup` installe automatiquement la version de Rust figée dans `rust-toolchain.toml`.
+
+### Compilation
 
 ```sh
-cargo build                                          # compilation
-cargo test --workspace                               # tests
-cargo fmt --all -- --check                           # formatage
-cargo clippy --workspace --all-targets -- -D warnings  # analyse statique
-cargo deny check                                     # licences et vulnérabilités des dépendances
+cargo build --workspace              # toutes les crates, en debug
+cargo build --release --bin cupride  # binaire optimisé dans target/release/cupride
 ```
+
+### Vérifications
+
+```sh
+cargo fmt --all -- --check                             # formatage
+cargo clippy --workspace --all-targets -- -D warnings  # analyse statique
+cargo test --workspace                                 # tests
+cargo deny check                                       # licences, failles RustSec, doublons (voir deny.toml)
+```
+
+La CI GitHub Actions exécute les mêmes vérifications sur Linux, Windows et macOS à chaque push.
 
 ## Docker
 
@@ -115,12 +126,20 @@ Les mesures de performance faites en conteneur servent à comparer entre elles ;
 
 | Variable | Rôle |
 |---|---|
-| `CUPRIDE_LOG` | Niveau de journalisation (`error`, `warn`, `info`, `debug`, `trace`) |
+| `CUPRIDE_LOG` | Niveau de journalisation (`error`, `warn`, `info`, `debug`, `trace`, ou filtre par crate comme `cupride_core=trace,warn`). Par défaut : `warn` |
 | `CUPRIDE_PROJECT` | Dossier du projet à ouvrir dans le service Docker `gui` |
+
+Les logs sont écrits dans le dossier de cache de l'OS, avec un fichier par jour (7 conservés) :
+
+| OS | Emplacement |
+|---|---|
+| Linux | `~/.cache/cupride/logs/` |
+| macOS | `~/Library/Caches/cupride/logs/` |
+| Windows | `%LOCALAPPDATA%\cupride\cache\logs\` |
 
 ## Architecture
 
-Le noyau fonctionne **sans interface** : l'état de l'éditeur (documents, layout, commandes, configuration) est testable avec `cargo test` et pilotable depuis un REPL console. Le code sera organisé en workspace Cargo, une crate par responsabilité, avec des dépendances uniquement vers le bas :
+Le noyau fonctionne **sans interface** : l'état de l'éditeur (documents, layout, commandes, configuration) est testable avec `cargo test` et pilotable depuis un REPL console. Le code est organisé en workspace Cargo, une crate par responsabilité, avec des dépendances uniquement vers le bas :
 
 ```
                          app
@@ -131,6 +150,19 @@ Le noyau fonctionne **sans interface** : l'état de l'éditeur (documents, layou
  ┌─┴──┐
 text layout
 ```
+
+### Arborescence
+
+| Chemin | Crate | Rôle |
+|---|---|---|
+| `app/` | `cupride-app` | Binaire `cupride` : boucle d'événements, fenêtres, assemblage |
+| `crates/text/` | `cupride-text` | Buffer (rope), positions, Unicode, sélections, historique |
+| `crates/layout/` | `cupride-layout` | Arbre de layout, panneaux, fenêtres et écrans |
+| `crates/core/` | `cupride-core` | État de l'éditeur, documents, commandes, keymap, configuration |
+| `tools/repl/` | `cupride-repl` | Éditeur en console pour tester le noyau |
+| `docs/commands.md` | | Référence des commandes |
+
+Les autres crates (`render`, `ui`, `syntax`, `lsp`, `terminal`, `ipc`, `plugin-api`, `plugin-host`, `pkg`) sont ajoutées à leur phase.
 
 ## Feuille de route
 
@@ -152,8 +184,7 @@ text layout
 
 ## Contribuer
 
-- Une fonctionnalité par branche, messages de commit clairs.
-- Avant de pousser : `docker compose run --rm ci` (ou les commandes équivalentes en natif).
+Les conventions (outillage, gestion des erreurs, journalisation, branches) sont décrites dans [`CONTRIBUTING.md`](CONTRIBUTING.md). Avant de pousser : `docker compose run --rm ci`, ou les commandes de [vérification](#vérifications) en natif.
 
 ## Nom
 
