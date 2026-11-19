@@ -14,3 +14,10 @@ unicode-segmentation.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "buffer"
+harness = false
