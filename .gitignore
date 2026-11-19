@@ -1,9 +1,10 @@
 /target
 /dist
 
-# Documentation et scripts personnels (seule la référence des commandes est publiée)
+# Documentation et scripts personnels (seules les références techniques sont publiées)
 /docs/*
 !/docs/commands.md
+!/docs/perf.md
 /gh_seed_issues.sh
 
 # Fichiers système et IDE
