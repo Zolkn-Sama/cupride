@@ -302,6 +302,7 @@ dependencies = [
 name = "cupride-core"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "cupride-layout",
  "cupride-text",
  "slotmap",

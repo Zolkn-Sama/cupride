@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+clap.workspace = true
 cupride-layout.workspace = true
 cupride-text.workspace = true
 slotmap.workspace = true

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use cupride_layout::Workspace;
 use slotmap::SlotMap;
 
+use crate::command::{CommandError, CommandRegistry, CommandResult};
 use crate::document::{Document, DocumentError};
 
 slotmap::new_key_type! {
@@ -17,13 +18,14 @@ slotmap::new_key_type! {
 /// État complet de l'éditeur, sans aucune dépendance graphique.
 ///
 /// Tout ce que l'interface affiche et tout ce que les commandes modifient vit ici : documents
-/// ouverts, document actif, workspace (fenêtres et layout). Un fichier ouvert plusieurs fois
-/// correspond toujours à un seul document en mémoire.
+/// ouverts, document actif, workspace (fenêtres et layout), registre des commandes. Un fichier
+/// ouvert plusieurs fois correspond toujours à un seul document en mémoire.
 #[derive(Debug, Default)]
 pub struct Editor {
     documents: SlotMap<DocumentId, Document>,
     active: Option<DocumentId>,
     workspace: Workspace,
+    commands: CommandRegistry,
 }
 
 impl Editor {
@@ -123,6 +125,35 @@ impl Editor {
         } else {
             false
         }
+    }
+
+    /// Registre des commandes.
+    pub fn commands(&self) -> &CommandRegistry {
+        &self.commands
+    }
+
+    /// Registre des commandes, modifiable (pour en enregistrer de nouvelles).
+    pub fn commands_mut(&mut self) -> &mut CommandRegistry {
+        &mut self.commands
+    }
+
+    /// Exécute la commande `full_name` (`file open`) avec les arguments `args`, déjà découpés.
+    pub fn run(&mut self, full_name: &str, args: &[String]) -> CommandResult {
+        let command = self
+            .commands
+            .get(full_name)
+            .ok_or_else(|| CommandError::Unknown {
+                name: full_name.to_owned(),
+                suggestion: None,
+            })?;
+        let matches = command
+            .parse(args)
+            .map_err(|error| CommandError::InvalidArguments {
+                command: full_name.to_owned(),
+                message: error.to_string().trim().to_owned(),
+            })?;
+        let handler = command.handler();
+        handler(self, &matches)
     }
 
     /// Fenêtres et layout.
