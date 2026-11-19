@@ -3,5 +3,31 @@
 version = 4
 
 [[package]]
-name = "cupride"
+name = "cupride-app"
+version = "0.1.0"
+dependencies = [
+ "cupride-core",
+]
+
+[[package]]
+name = "cupride-core"
+version = "0.1.0"
+dependencies = [
+ "cupride-layout",
+ "cupride-text",
+]
+
+[[package]]
+name = "cupride-layout"
+version = "0.1.0"
+
+[[package]]
+name = "cupride-repl"
+version = "0.1.0"
+dependencies = [
+ "cupride-core",
+]
+
+[[package]]
+name = "cupride-text"
 version = "0.1.0"

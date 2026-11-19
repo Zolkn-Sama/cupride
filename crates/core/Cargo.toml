@@ -1,0 +1,13 @@
+[package]
+name = "cupride-core"
+description = "Noyau sans interface de CuprIDE : documents, commandes, keymap, configuration"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cupride-text.workspace = true
+cupride-layout.workspace = true

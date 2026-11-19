@@ -1,0 +1,16 @@
+[package]
+name = "cupride-app"
+description = "CuprIDE, IDE léger, rapide et entièrement personnalisable"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cupride-core.workspace = true
+
+[[bin]]
+name = "cupride"
+path = "src/main.rs"
