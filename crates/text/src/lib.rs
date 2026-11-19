@@ -4,6 +4,7 @@
 //! - [`Rope`] : implémentation utilisée par l'éditeur, en O(log n) quelle que soit la taille.
 //! - [`StringBuffer`] : implémentation de référence, simple et évidente, utilisée pour tester
 //!   la rope.
+//! - [`movement`] : déplacements par graphème, mot, ligne, et plages de suppression.
 //! - [`position`] : conversions octets ↔ ligne et colonne (octets, graphèmes, UTF-16).
 //!
 //! Cette crate n'a aucune dépendance interne.
@@ -13,6 +14,7 @@ pub(crate) mod suite;
 
 mod buffer;
 mod error;
+pub mod movement;
 pub mod position;
 mod rope;
 mod string_buffer;
