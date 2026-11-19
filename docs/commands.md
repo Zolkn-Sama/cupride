@@ -25,13 +25,26 @@ Toute action de CuprIDE est une commande. Une même commande est accessible depu
 
 ## `file` — fichiers
 
-| Commande | Description | Issue |
-|---|---|---|
-| `file open <chemin>` | Ouvre un fichier | CMD-03 |
-| `file save` | Enregistre le document actif | CMD-03 |
-| `file save-as <chemin>` | Enregistre le document actif sous un autre chemin | CMD-03 |
-| `file close [--force]` | Ferme le document actif ; `--force` ignore les modifications non enregistrées | CMD-03 |
-| `file reload` | Recharge le document depuis le disque | CMD-03 |
+Les commandes agissent sur le **document actif**. L'enregistrement est atomique : un plantage
+pendant l'écriture laisse toujours l'ancien fichier intact.
+
+| Commande | Description |
+|---|---|
+| `file open <chemin>` | Ouvre un fichier et en fait le document actif. Un fichier déjà ouvert n'est pas dupliqué : son document redevient actif. Un fichier inexistant est créé au premier enregistrement. Fichier binaire ou non UTF-8 : refusé, jamais modifié. |
+| `file save` | Enregistre le document actif, en conservant ses fins de ligne. Un document sans fichier demande `file save-as`. |
+| `file save-as <chemin>` | Enregistre le document actif sous `<chemin>`, qui devient son fichier. |
+| `file close [--force]` | Ferme le document actif. S'il a des modifications non enregistrées, la commande échoue, sauf avec `--force`. |
+| `file reload [--force]` | Relit le document actif depuis le disque ; l'historique est vidé. Mêmes règles que `file close` pour les modifications non enregistrées. |
+| `file list` | Liste les documents ouverts : `>` marque le document actif, `*` un document modifié. |
+
+Exemples :
+
+```
+file open src/main.rs
+file open "notes de réunion.md"
+file save-as '/tmp/copie.rs'
+file close --force
+```
 
 ## `edit` — édition
 
