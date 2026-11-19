@@ -1,5 +1,6 @@
 //! Commandes intégrées au noyau. Leur référence est tenue dans `docs/commands.md`.
 
+mod config;
 mod edit;
 mod file;
 
@@ -11,6 +12,7 @@ use crate::editor::{DocumentId, Editor};
 pub(crate) fn register_all(registry: &mut CommandRegistry) -> Result<(), CommandError> {
     file::register(registry)?;
     edit::register(registry)?;
+    config::register(registry)?;
     Ok(())
 }
 
