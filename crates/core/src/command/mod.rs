@@ -5,6 +5,7 @@
 //! arguments sont décrits avec `clap` : la même définition sert partout.
 
 mod error;
+pub mod parser;
 mod registry;
 
 pub use error::CommandError;

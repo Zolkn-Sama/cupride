@@ -46,7 +46,9 @@ impl CommandDef {
         let args = clap::Command::new(name.clone())
             .bin_name(format!("{group} {name}"))
             .about(description.clone())
-            .no_binary_name(true);
+            .no_binary_name(true)
+            // L'aide est rendue par `help_text`, en français ; `--help` est traité avant clap.
+            .disable_help_flag(true);
         Self {
             group,
             name,
@@ -90,6 +92,65 @@ impl CommandDef {
     /// Analyse les arguments (sans le nom de la commande).
     pub fn parse(&self, args: &[String]) -> Result<ArgMatches, clap::Error> {
         self.args.clone().try_get_matches_from(args)
+    }
+
+    /// Ligne d'utilisation : `file open <chemin> [--force]`.
+    pub fn usage(&self) -> String {
+        let mut usage = self.full_name();
+        for arg in self.args.get_arguments() {
+            let value = arg
+                .get_value_names()
+                .and_then(|names| names.first())
+                .map_or_else(|| arg.get_id().to_string(), ToString::to_string);
+            let part = match arg.get_long() {
+                Some(long) if arg.get_action().takes_values() => format!("--{long} <{value}>"),
+                Some(long) => format!("--{long}"),
+                None => format!("<{value}>"),
+            };
+            if arg.is_required_set() {
+                usage.push_str(&format!(" {part}"));
+            } else {
+                usage.push_str(&format!(" [{part}]"));
+            }
+        }
+        usage
+    }
+
+    /// Aide complète de la commande, affichée par `<commande> --help`.
+    pub fn help_text(&self) -> String {
+        let mut help = format!(
+            "{}
+
+Utilisation : {}",
+            self.description,
+            self.usage()
+        );
+        let describe =
+            |arg: &clap::Arg| arg.get_help().map(ToString::to_string).unwrap_or_default();
+        let positionals: Vec<_> = self.args.get_positionals().collect();
+        if !positionals.is_empty() {
+            help.push_str("\n\nArguments :");
+            for arg in positionals {
+                help.push_str(&format!("\n  <{}>  {}", arg.get_id(), describe(arg)));
+            }
+        }
+        let options: Vec<_> = self
+            .args
+            .get_arguments()
+            .filter(|a| !a.is_positional())
+            .collect();
+        if !options.is_empty() {
+            help.push_str("\n\nOptions :");
+            for arg in options {
+                let long = arg.get_long().unwrap_or_default();
+                let short = arg
+                    .get_short()
+                    .map(|c| format!("-{c}, "))
+                    .unwrap_or_default();
+                help.push_str(&format!("\n  {short}--{long}  {}", describe(arg)));
+            }
+        }
+        help
     }
 
     pub(crate) fn handler(&self) -> Handler {
