@@ -2,6 +2,7 @@
 //!
 //! - [`Editor`] : état global de l'éditeur (documents ouverts, document actif, workspace).
 //! - [`command`] : registre unique des commandes, utilisé par toutes les sources d'actions.
+//! - [`config`] : configuration TOML de l'utilisateur.
 //! - [`keymap`] : raccourcis clavier, simples ou en séquence, sans aucune logique.
 //! - [`Document`] : un texte, son fichier, son historique et ses sélections.
 //!
@@ -9,6 +10,7 @@
 //! pilote depuis le REPL console.
 
 pub mod command;
+pub mod config;
 mod document;
 mod editor;
 pub mod keymap;

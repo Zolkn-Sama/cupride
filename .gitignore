@@ -5,6 +5,7 @@
 /docs/*
 !/docs/commands.md
 !/docs/perf.md
+!/docs/configuration.md
 /gh_seed_issues.sh
 
 # Fichiers système et IDE

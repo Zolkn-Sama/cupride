@@ -86,9 +86,12 @@ edit add-cursor down
 
 ## `config` — configuration
 
-| Commande | Description | Issue |
-|---|---|---|
-| `config open` | Ouvre le fichier de configuration dans l'IDE | CORE-04 |
+Voir [`configuration.md`](configuration.md) pour les options.
+
+| Commande | Description |
+|---|---|
+| `config open` | Ouvre le fichier de configuration dans l'IDE ; s'il n'existe pas, il est prérempli avec les options par défaut. |
+| `config reload` | Relit le fichier de configuration et l'applique ; affiche les erreurs (avec ligne et colonne) et les avertissements. |
 
 ## `window` — fenêtres
 
