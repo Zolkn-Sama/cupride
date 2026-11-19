@@ -2,6 +2,7 @@
 //!
 //! - [`Editor`] : état global de l'éditeur (documents ouverts, document actif, workspace).
 //! - [`command`] : registre unique des commandes, utilisé par toutes les sources d'actions.
+//! - [`keymap`] : raccourcis clavier, simples ou en séquence, sans aucune logique.
 //! - [`Document`] : un texte, son fichier, son historique et ses sélections.
 //!
 //! Ne dépend jamais de `render`, `ui` ou `app` : tout le noyau se teste avec `cargo test` et se
@@ -10,6 +11,7 @@
 pub mod command;
 mod document;
 mod editor;
+pub mod keymap;
 
 pub use cupride_layout as layout;
 pub use cupride_text as text;
