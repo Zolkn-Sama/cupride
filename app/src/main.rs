@@ -25,6 +25,9 @@ fn main() -> anyhow::Result<()> {
         .run_app(&mut app)
         .context("exécution de la boucle d'événements")?;
 
+    if let Some(message) = app.fatal_error() {
+        anyhow::bail!("CuprIDE ne peut pas démarrer : {message}");
+    }
     tracing::info!("arrêt de CuprIDE");
     Ok(())
 }

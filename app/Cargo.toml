@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 cupride-core.workspace = true
+cupride-render.workspace = true
 directories.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true
