@@ -95,7 +95,7 @@ cargo build --release --bin cupride  # binaire optimisé dans target/release/cup
 cargo fmt --all -- --check                             # formatage
 cargo clippy --workspace --all-targets -- -D warnings  # analyse statique
 cargo test --workspace                                 # tests
-cargo deny check                                       # licences et vulnérabilités des dépendances
+cargo deny check                                       # licences, failles RustSec, doublons (voir deny.toml)
 ```
 
 La CI GitHub Actions exécute les mêmes vérifications sur Linux, Windows et macOS à chaque push.
