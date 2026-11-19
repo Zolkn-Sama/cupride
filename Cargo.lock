@@ -73,6 +73,9 @@ dependencies = [
 [[package]]
 name = "cupride-text"
 version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
 
 [[package]]
 name = "deranged"

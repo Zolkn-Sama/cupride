@@ -28,6 +28,13 @@ cupride-core = { path = "crates/core" }
 anyhow = "1.0.100"
 thiserror = "2.0.17"
 
+# Texte
+unicode-segmentation = "1.13.3"
+
+# Tests et mesures
+criterion = "0.8.2"
+proptest = "1.12.0"
+
 # Journalisation
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
