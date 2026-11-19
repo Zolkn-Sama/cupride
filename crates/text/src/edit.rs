@@ -73,11 +73,15 @@ impl Edit {
 
     /// Applique la modification à `buffer`.
     pub fn apply<B: TextBuffer + ?Sized>(&self, buffer: &mut B) -> Result<()> {
-        debug_assert_eq!(
-            buffer.slice(self.removed_range()).as_deref(),
-            Ok(self.removed.as_str()),
-            "le texte retiré ne correspond pas au buffer"
-        );
+        // Une plage invalide est signalée par l'erreur de `remove` ou `insert` ci-dessous.
+        if cfg!(debug_assertions)
+            && let Ok(actual) = buffer.slice(self.removed_range())
+        {
+            debug_assert_eq!(
+                actual, self.removed,
+                "le texte retiré ne correspond pas au buffer"
+            );
+        }
         if !self.removed.is_empty() {
             buffer.remove(self.removed_range())?;
         }
@@ -148,6 +152,13 @@ mod tests {
         del.apply(&mut b).unwrap();
         assert_eq!(b.as_str(), "bc");
         assert!(Edit::insert(0, "").is_noop());
+    }
+
+    #[test]
+    fn plage_invalide_renvoie_une_erreur() {
+        let mut b = Rope::from_text("abc");
+        assert!(Edit::insert(9, "x").apply(&mut b).is_err());
+        assert_eq!(b.to_text(), "abc");
     }
 
     #[test]

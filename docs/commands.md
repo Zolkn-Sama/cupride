@@ -25,24 +25,73 @@ Toute action de CuprIDE est une commande. Une même commande est accessible depu
 
 ## `file` — fichiers
 
-| Commande | Description | Issue |
-|---|---|---|
-| `file open <chemin>` | Ouvre un fichier | CMD-03 |
-| `file save` | Enregistre le document actif | CMD-03 |
-| `file save-as <chemin>` | Enregistre le document actif sous un autre chemin | CMD-03 |
-| `file close [--force]` | Ferme le document actif ; `--force` ignore les modifications non enregistrées | CMD-03 |
-| `file reload` | Recharge le document depuis le disque | CMD-03 |
+Les commandes agissent sur le **document actif**. L'enregistrement est atomique : un plantage
+pendant l'écriture laisse toujours l'ancien fichier intact.
+
+| Commande | Description |
+|---|---|
+| `file open <chemin>` | Ouvre un fichier et en fait le document actif. Un fichier déjà ouvert n'est pas dupliqué : son document redevient actif. Un fichier inexistant est créé au premier enregistrement. Fichier binaire ou non UTF-8 : refusé, jamais modifié. |
+| `file save` | Enregistre le document actif, en conservant ses fins de ligne. Un document sans fichier demande `file save-as`. |
+| `file save-as <chemin>` | Enregistre le document actif sous `<chemin>`, qui devient son fichier. |
+| `file close [--force]` | Ferme le document actif. S'il a des modifications non enregistrées, la commande échoue, sauf avec `--force`. |
+| `file reload [--force]` | Relit le document actif depuis le disque ; l'historique est vidé. Mêmes règles que `file close` pour les modifications non enregistrées. |
+| `file list` | Liste les documents ouverts : `>` marque le document actif, `*` un document modifié. |
+
+Exemples :
+
+```
+file open src/main.rs
+file open "notes de réunion.md"
+file save-as '/tmp/copie.rs'
+file close --force
+```
 
 ## `edit` — édition
 
-Insertion, suppression, annuler, rétablir, déplacements du curseur et sélection (CMD-04).
-Toute action clavier de l'éditeur correspond à l'une de ces commandes.
+Toute action clavier de l'éditeur correspond à l'une de ces commandes. Elles agissent sur
+**toutes les sélections** du document actif (multi-curseur) ; une sélection vide est un curseur.
+Les frappes et effacements consécutifs sont annulés par blocs (voir `edit undo`).
+
+| Commande | Description |
+|---|---|
+| `edit insert <texte>` | Insère `<texte>` à chaque curseur ; une sélection non vide est remplacée. |
+| `edit newline` | Insère un saut de ligne, avec la fin de ligne du document (`\n` ou `\r\n`). |
+| `edit delete-backward` | Supprime chaque sélection, ou le caractère (graphème) avant chaque curseur. |
+| `edit delete-forward` | Supprime chaque sélection, ou le caractère (graphème) après chaque curseur. |
+| `edit undo` | Annule la dernière modification et restaure les sélections. |
+| `edit redo` | Rétablit la dernière modification annulée. |
+| `edit move <direction> [--extend]` | Déplace les curseurs ; avec `--extend`, étend les sélections. |
+| `edit select-all` | Sélectionne tout le texte. |
+| `edit collapse` | Réduit chaque sélection à un curseur sur sa tête. |
+| `edit keep-primary` | Ne garde que la sélection principale. |
+| `edit add-cursor <up\|down>` | Ajoute un curseur sur la ligne au-dessus ou en dessous du curseur principal. |
+
+Directions de `edit move` :
+
+| Direction | Déplacement |
+|---|---|
+| `left`, `right` | Caractère (graphème) précédent ou suivant ; sans `--extend`, une sélection est d'abord réduite à son bord. |
+| `up`, `down` | Ligne précédente ou suivante, à la même colonne si possible, sinon en fin de ligne. |
+| `word-left`, `word-right` | Début du mot précédent, fin du mot suivant. |
+| `line-start`, `line-end` | Début ou fin de la ligne (avant la fin de ligne). |
+| `doc-start`, `doc-end` | Début ou fin du texte. |
+
+Exemples :
+
+```
+edit insert "fn main() {}"
+edit move word-right --extend
+edit add-cursor down
+```
 
 ## `config` — configuration
 
-| Commande | Description | Issue |
-|---|---|---|
-| `config open` | Ouvre le fichier de configuration dans l'IDE | CORE-04 |
+Voir [`configuration.md`](configuration.md) pour les options.
+
+| Commande | Description |
+|---|---|
+| `config open` | Ouvre le fichier de configuration dans l'IDE ; s'il n'existe pas, il est prérempli avec les options par défaut. |
+| `config reload` | Relit le fichier de configuration et l'applique ; affiche les erreurs (avec ligne et colonne) et les avertissements. |
 
 ## `window` — fenêtres
 
