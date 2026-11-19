@@ -1,0 +1,12 @@
+[package]
+name = "cupride-repl"
+description = "REPL console pour piloter le noyau de CuprIDE sans interface"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cupride-core.workspace = true
