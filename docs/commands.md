@@ -48,8 +48,41 @@ file close --force
 
 ## `edit` — édition
 
-Insertion, suppression, annuler, rétablir, déplacements du curseur et sélection (CMD-04).
-Toute action clavier de l'éditeur correspond à l'une de ces commandes.
+Toute action clavier de l'éditeur correspond à l'une de ces commandes. Elles agissent sur
+**toutes les sélections** du document actif (multi-curseur) ; une sélection vide est un curseur.
+Les frappes et effacements consécutifs sont annulés par blocs (voir `edit undo`).
+
+| Commande | Description |
+|---|---|
+| `edit insert <texte>` | Insère `<texte>` à chaque curseur ; une sélection non vide est remplacée. |
+| `edit newline` | Insère un saut de ligne, avec la fin de ligne du document (`\n` ou `\r\n`). |
+| `edit delete-backward` | Supprime chaque sélection, ou le caractère (graphème) avant chaque curseur. |
+| `edit delete-forward` | Supprime chaque sélection, ou le caractère (graphème) après chaque curseur. |
+| `edit undo` | Annule la dernière modification et restaure les sélections. |
+| `edit redo` | Rétablit la dernière modification annulée. |
+| `edit move <direction> [--extend]` | Déplace les curseurs ; avec `--extend`, étend les sélections. |
+| `edit select-all` | Sélectionne tout le texte. |
+| `edit collapse` | Réduit chaque sélection à un curseur sur sa tête. |
+| `edit keep-primary` | Ne garde que la sélection principale. |
+| `edit add-cursor <up\|down>` | Ajoute un curseur sur la ligne au-dessus ou en dessous du curseur principal. |
+
+Directions de `edit move` :
+
+| Direction | Déplacement |
+|---|---|
+| `left`, `right` | Caractère (graphème) précédent ou suivant ; sans `--extend`, une sélection est d'abord réduite à son bord. |
+| `up`, `down` | Ligne précédente ou suivante, à la même colonne si possible, sinon en fin de ligne. |
+| `word-left`, `word-right` | Début du mot précédent, fin du mot suivant. |
+| `line-start`, `line-end` | Début ou fin de la ligne (avant la fin de ligne). |
+| `doc-start`, `doc-end` | Début ou fin du texte. |
+
+Exemples :
+
+```
+edit insert "fn main() {}"
+edit move word-right --extend
+edit add-cursor down
+```
 
 ## `config` — configuration
 
