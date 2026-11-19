@@ -11,8 +11,12 @@ publish.workspace = true
 [dependencies]
 cupride-layout.workspace = true
 cupride-text.workspace = true
+slotmap.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true
