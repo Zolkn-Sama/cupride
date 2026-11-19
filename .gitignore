@@ -1,0 +1,9 @@
+/target
+
+# Documentation et scripts personnels
+/docs/
+/gh_seed_issues.sh
+
+# Fichiers système et IDE
+.DS_Store
+/.idea/

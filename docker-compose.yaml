@@ -1,0 +1,118 @@
+name: cupride
+
+# -----------------------------------------------------------------------------
+# Configuration commune aux services qui travaillent sur le code monté.
+# -----------------------------------------------------------------------------
+x-dev: &dev
+  build:
+    context: .
+    target: dev
+    args:
+      # Linux : exporte USER_UID=$(id -u) et USER_GID=$(id -g) (ou mets-les dans .env)
+      # pour que les fichiers créés t'appartiennent. Inutile sur macOS.
+      USER_UID: ${USER_UID:-1000}
+      USER_GID: ${USER_GID:-1000}
+  image: cupride-dev
+  working_dir: /workspace
+  volumes:
+    - .:/workspace
+    # Caches persistants : dépendances téléchargées et compilations.
+    - cargo-registry:/usr/local/cargo/registry
+    - cargo-git:/usr/local/cargo/git
+    # Dossier target hors du dépôt : évite les conflits avec le target de l'hôte
+    # et la lenteur des montages sur macOS.
+    - cargo-target:/cargo-target
+  environment:
+    CARGO_TARGET_DIR: /cargo-target
+    RUST_BACKTRACE: "1"
+    CUPRIDE_LOG: debug
+
+services:
+  # ---------------------------------------------------------------------------
+  # Shell de développement :
+  #   docker compose run --rm dev
+  #   docker compose run --rm dev cargo test -p cupride-text
+  #   docker compose run --rm dev cargo run -p cupride-repl
+  # ---------------------------------------------------------------------------
+  dev:
+    <<: *dev
+    stdin_open: true
+    tty: true
+    command: [ "bash" ]
+
+  # ---------------------------------------------------------------------------
+  # Mêmes vérifications que la CI GitHub Actions, avant de pousser :
+  #   docker compose run --rm ci
+  # ---------------------------------------------------------------------------
+  ci:
+    <<: *dev
+    command:
+      - bash
+      - -euo
+      - pipefail
+      - -c
+      - |
+        echo "== fmt ==";    cargo fmt --all -- --check
+        echo "== clippy =="; cargo clippy --workspace --all-targets -- -D warnings
+        echo "== tests ==";  cargo test --workspace
+        echo "== deny ==";   cargo deny check
+        echo "== OK =="
+
+  # ---------------------------------------------------------------------------
+  # Benchmarks du buffer (criterion). Rapports HTML dans le volume cargo-target.
+  #   docker compose run --rm bench
+  # Les mesures en conteneur servent à comparer entre elles, pas de référence
+  # absolue : les objectifs de performance se mesurent en natif.
+  # ---------------------------------------------------------------------------
+  bench:
+    <<: *dev
+    profiles: [ "bench" ]
+    command: [ "cargo", "bench", "-p", "cupride-text" ]
+
+  # ---------------------------------------------------------------------------
+  # Lancer l'IDE dans un Linux vierge (test d'installation, dépendances système).
+  # Linux + X11 uniquement (fonctionne aussi via XWayland). Autoriser l'accès
+  # à l'affichage avant, puis le révoquer après :
+  #   xhost +local:
+  #   CUPRIDE_PROJECT=~/code/mon-projet docker compose --profile gui up --build gui
+  #   xhost -local:
+  # ---------------------------------------------------------------------------
+  gui:
+    build:
+      context: .
+      target: gui
+      args:
+        USER_UID: ${USER_UID:-1000}
+        USER_GID: ${USER_GID:-1000}
+    image: cupride-gui
+    profiles: [ "gui" ]
+    environment:
+      DISPLAY: ${DISPLAY:-:0}
+      CUPRIDE_LOG: debug
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      # Projet à ouvrir (dossier courant par défaut).
+      - ${CUPRIDE_PROJECT:-.}:/projects
+      # Configuration et données de l'IDE, conservées entre les lancements.
+      - cupride-config:/home/app/.config/cupride
+      - cupride-data:/home/app/.local/share/cupride
+    devices:
+      # Accès au GPU (Intel / AMD via Mesa). GPU NVIDIA : voir le bloc ci-dessous.
+      - /dev/dri:/dev/dri
+    # Mémoire partagée X11 (MIT-SHM) : évite des erreurs d'affichage.
+    ipc: host
+    # GPU NVIDIA (nécessite nvidia-container-toolkit) : décommente ce bloc.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu, graphics]
+
+volumes:
+  cargo-registry:
+  cargo-git:
+  cargo-target:
+  cupride-config:
+  cupride-data:
