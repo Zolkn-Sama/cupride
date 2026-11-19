@@ -6,6 +6,7 @@
 //!   la rope.
 //! - [`Edit`] : une modification inversible ; [`Selection`] et [`Selections`] : sélections
 //!   multiples, décalées après chaque modification.
+//! - [`History`] et [`Transaction`] : annuler et rétablir, sélections comprises.
 //! - [`movement`] : déplacements par graphème, mot, ligne, et plages de suppression.
 //! - [`position`] : conversions octets ↔ ligne et colonne (octets, graphèmes, UTF-16).
 //!
@@ -17,6 +18,7 @@ pub(crate) mod suite;
 mod buffer;
 mod edit;
 mod error;
+mod history;
 pub mod movement;
 pub mod position;
 mod rope;
@@ -26,6 +28,7 @@ mod string_buffer;
 pub use buffer::{Lines, TextBuffer};
 pub use edit::{Assoc, Edit};
 pub use error::{Result, TextError};
+pub use history::{History, Transaction};
 pub use position::Point;
 pub use rope::Rope;
 pub use selection::{Selection, Selections};
