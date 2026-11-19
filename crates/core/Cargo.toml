@@ -11,3 +11,6 @@ publish.workspace = true
 [dependencies]
 cupride-text.workspace = true
 cupride-layout.workspace = true
+
+[lints]
+workspace = true

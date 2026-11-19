@@ -1,0 +1,6 @@
+# Version de Rust figée pour tout le projet (CI, Docker, postes de dev).
+# À aligner avec ARG RUST_VERSION du Dockerfile et rust-version du Cargo.toml.
+[toolchain]
+channel = "1.95"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

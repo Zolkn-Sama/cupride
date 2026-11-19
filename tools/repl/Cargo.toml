@@ -9,4 +9,8 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+anyhow.workspace = true
 cupride-core.workspace = true
+
+[lints]
+workspace = true
