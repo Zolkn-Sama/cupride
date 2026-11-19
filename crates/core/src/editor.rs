@@ -10,6 +10,7 @@ use crate::command::{
     CommandError, CommandOutput, CommandRegistry, CommandResult, builtin, parser,
 };
 use crate::document::{Document, DocumentError};
+use crate::keymap::{Keymap, Platform};
 
 slotmap::new_key_type! {
     /// Identifiant stable d'un document ouvert. Il reste valide tant que le document est ouvert,
@@ -28,6 +29,7 @@ pub struct Editor {
     active: Option<DocumentId>,
     workspace: Workspace,
     commands: CommandRegistry,
+    keymap: Keymap,
 }
 
 impl Default for Editor {
@@ -42,17 +44,19 @@ impl Editor {
         let mut editor = Self::without_builtins();
         builtin::register_all(&mut editor.commands)
             .expect("les commandes intégrées ont des noms uniques");
+        editor.keymap = Keymap::with_defaults(Platform::current());
         editor
     }
 
-    /// Éditeur sans document ni commande : pour les tests, ou pour composer son propre jeu de
-    /// commandes.
+    /// Éditeur sans document, sans commande et sans raccourci : pour les tests, ou pour composer
+    /// son propre jeu de commandes.
     pub fn without_builtins() -> Self {
         Self {
             documents: SlotMap::with_key(),
             active: None,
             workspace: Workspace::new(),
             commands: CommandRegistry::new(),
+            keymap: Keymap::new(),
         }
     }
 
@@ -186,6 +190,16 @@ impl Editor {
             .map_err(|error| parser::describe_clap_error(full_name, &error))?;
         let handler = command.handler();
         handler(self, &matches)
+    }
+
+    /// Raccourcis clavier.
+    pub fn keymap(&self) -> &Keymap {
+        &self.keymap
+    }
+
+    /// Raccourcis clavier, modifiables.
+    pub fn keymap_mut(&mut self) -> &mut Keymap {
+        &mut self.keymap
     }
 
     /// Fenêtres et layout.
