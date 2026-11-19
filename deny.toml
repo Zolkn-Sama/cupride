@@ -1,0 +1,69 @@
+# Contrôle des dépendances avec cargo-deny : `cargo deny check`.
+# Exécuté en CI (.github/workflows/ci.yml) et par `docker compose run --rm ci`.
+
+[graph]
+all-features = true
+
+# -----------------------------------------------------------------------------
+# Avis de sécurité RustSec : toute faille connue ou crate retirée bloque la CI.
+# -----------------------------------------------------------------------------
+[advisories]
+version = 2
+yanked = "deny"
+# Exceptions justifiées, une par ligne : { id = "RUSTSEC-AAAA-NNNN", reason = "..." }
+ignore = []
+
+# -----------------------------------------------------------------------------
+# Licences : uniquement des licences permissives compatibles avec
+# MIT OR Apache-2.0, la licence de CuprIDE.
+# -----------------------------------------------------------------------------
+[licenses]
+version = 2
+confidence-threshold = 0.93
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "BSL-1.0",
+    "CC0-1.0",
+]
+# Licences autorisées pas encore rencontrées : pas d'avertissement, la liste anticipe.
+unused-allowed-license = "allow"
+
+# Exceptions limitées à une crate, avec leur justification.
+exceptions = [
+    # MPL-2.0 (copyleft au niveau du fichier, compatible avec la distribution de binaires) :
+    # dépendance de `directories`, via dirs-sys. Le code de la crate n'est pas modifié.
+    { crate = "option-ext", allow = ["MPL-2.0"] },
+]
+
+# Les crates du workspace ne sont pas publiées : leur licence est vérifiée à part.
+[licenses.private]
+ignore = true
+
+# -----------------------------------------------------------------------------
+# Doublons et crates interdites.
+# -----------------------------------------------------------------------------
+[bans]
+# Plusieurs versions d'une même crate : signalé, sans bloquer.
+multiple-versions = "warn"
+wildcards = "deny"
+# Les dépendances internes par chemin n'ont pas de version : autorisé.
+allow-wildcard-paths = true
+deny = []
+skip = []
+
+# -----------------------------------------------------------------------------
+# Provenance : uniquement crates.io.
+# -----------------------------------------------------------------------------
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
