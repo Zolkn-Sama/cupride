@@ -8,9 +8,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use cupride_core::Editor;
+use cupride_render::{Acquire, Color, Gpu, Renderer, WindowSurface};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::WindowEvent;
+use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::{Window, WindowId};
 
@@ -19,23 +20,44 @@ use crate::close::{CloseDecision, CloseGuard};
 /// Taille initiale de la fenêtre, en pixels logiques.
 const INITIAL_SIZE: LogicalSize<f64> = LogicalSize::new(1_100.0, 720.0);
 
+/// Couleur de fond en attendant les thèmes.
+const BACKGROUND: Color = Color::rgb(0x1e, 0x1a, 0x1d);
+
+/// Fenêtre ouverte et ses ressources de rendu.
+struct WindowState {
+    // Ordre des champs : la surface doit être libérée avant la fenêtre.
+    surface: WindowSurface,
+    renderer: Renderer,
+    window: Arc<Window>,
+}
+
 /// État de l'application.
 pub(crate) struct App {
     editor: Editor,
-    window: Option<Arc<Window>>,
+    gpu: Option<Gpu>,
+    window: Option<WindowState>,
     close_guard: CloseGuard,
     /// Message affiché dans le titre (avertissement de fermeture), s'il y en a un.
     notice: Option<String>,
+    /// Erreur qui a empêché de démarrer.
+    fatal: Option<String>,
 }
 
 impl App {
     pub(crate) fn new(editor: Editor) -> Self {
         Self {
             editor,
+            gpu: None,
             window: None,
             close_guard: CloseGuard::default(),
             notice: None,
+            fatal: None,
         }
+    }
+
+    /// Erreur qui a empêché de démarrer, à signaler par le code de sortie.
+    pub(crate) fn fatal_error(&self) -> Option<&str> {
+        self.fatal.as_deref()
     }
 
     /// Titre de la fenêtre : document actif, état modifié, et avertissement éventuel.
@@ -54,8 +76,8 @@ impl App {
     }
 
     fn refresh_title(&self) {
-        if let Some(window) = &self.window {
-            window.set_title(&self.title());
+        if let Some(state) = &self.window {
+            state.window.set_title(&self.title());
         }
     }
 
@@ -87,6 +109,59 @@ impl App {
             }
         }
     }
+
+    /// Erreur qui empêche de démarrer : message clair dans les journaux, et fin de la boucle ;
+    /// `main` l'affiche et sort avec un code d'erreur.
+    fn fail(&mut self, event_loop: &ActiveEventLoop, message: String) {
+        tracing::error!("{message}");
+        self.fatal = Some(message);
+        event_loop.exit();
+    }
+
+    /// Ouvre la fenêtre et initialise le GPU.
+    fn open_window(&mut self, event_loop: &ActiveEventLoop) -> Result<(), String> {
+        let attributes = Window::default_attributes()
+            .with_title(self.title())
+            .with_inner_size(INITIAL_SIZE);
+        let window = event_loop
+            .create_window(attributes)
+            .map(Arc::new)
+            .map_err(|error| format!("impossible d'ouvrir une fenêtre : {error}"))?;
+        tracing::info!(id = ?window.id(), "fenêtre ouverte");
+        let (gpu, surface) = Gpu::for_window(Arc::clone(&window)).map_err(|e| e.to_string())?;
+        let size = window.inner_size();
+        let surface =
+            WindowSurface::new(&gpu, surface, Arc::clone(&window), size.width, size.height)
+                .map_err(|e| e.to_string())?;
+        tracing::info!(gpu = %gpu.describe(), format = ?surface.format(), "rendu prêt");
+        let renderer = Renderer::new(&gpu, surface.format());
+        self.gpu = Some(gpu);
+        self.window = Some(WindowState {
+            surface,
+            renderer,
+            window,
+        });
+        Ok(())
+    }
+
+    /// Dessine la fenêtre.
+    fn redraw(&mut self) {
+        let (Some(gpu), Some(state)) = (&self.gpu, &mut self.window) else {
+            return;
+        };
+        let frame = match state.surface.acquire(gpu) {
+            Acquire::Frame(frame) => frame,
+            Acquire::Retry => {
+                state.window.request_redraw();
+                return;
+            }
+            // Fenêtre masquée : le prochain dessin viendra quand elle redeviendra visible.
+            Acquire::Hidden => return,
+        };
+        state.renderer.clear(gpu, &frame.view, BACKGROUND);
+        state.window.pre_present_notify();
+        state.surface.present(gpu, frame);
+    }
 }
 
 impl ApplicationHandler for App {
@@ -94,19 +169,8 @@ impl ApplicationHandler for App {
         if self.window.is_some() {
             return;
         }
-        let attributes = Window::default_attributes()
-            .with_title(self.title())
-            .with_inner_size(INITIAL_SIZE);
-        match event_loop.create_window(attributes) {
-            Ok(window) => {
-                tracing::info!(id = ?window.id(), "fenêtre ouverte");
-                self.window = Some(Arc::new(window));
-            }
-            Err(error) => {
-                tracing::error!("impossible d'ouvrir une fenêtre : {error}");
-                eprintln!("CuprIDE : impossible d'ouvrir une fenêtre : {error}");
-                event_loop.exit();
-            }
+        if let Err(message) = self.open_window(event_loop) {
+            self.fail(event_loop, message);
         }
     }
 
@@ -114,12 +178,21 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => self.request_close(event_loop),
             WindowEvent::Destroyed => event_loop.exit(),
+            WindowEvent::Resized(size) => {
+                if let (Some(gpu), Some(state)) = (&self.gpu, &mut self.window) {
+                    state.surface.resize(gpu, size.width, size.height);
+                }
+                // Dessin immédiat : pendant un redimensionnement à la souris, l'image suit la
+                // fenêtre au lieu d'être étirée.
+                self.redraw();
+            }
+            WindowEvent::RedrawRequested | WindowEvent::Occluded(false) => self.redraw(),
             _ => {}
         }
     }
 
-    fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: winit::event::StartCause) {
-        if let winit::event::StartCause::ResumeTimeReached { .. } = cause
+    fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
+        if let StartCause::ResumeTimeReached { .. } = cause
             && self.close_guard.expired(Instant::now())
         {
             self.notice = None;
@@ -131,7 +204,8 @@ impl ApplicationHandler for App {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
-        // La fenêtre est libérée avant la sortie de la boucle.
+        // Les ressources de la fenêtre sont libérées avant le GPU et la sortie de la boucle.
         self.window = None;
+        self.gpu = None;
     }
 }

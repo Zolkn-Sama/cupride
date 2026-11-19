@@ -5,6 +5,7 @@ members = [
     "crates/text",
     "crates/layout",
     "crates/core",
+    "crates/render",
     "tools/repl",
 ]
 default-members = ["app"]
@@ -23,6 +24,7 @@ publish = false
 cupride-text = { path = "crates/text" }
 cupride-layout = { path = "crates/layout" }
 cupride-core = { path = "crates/core" }
+cupride-render = { path = "crates/render" }
 
 # Erreurs : thiserror dans les bibliothèques, anyhow dans les binaires.
 anyhow = "1.0.100"
