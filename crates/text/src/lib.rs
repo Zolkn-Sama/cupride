@@ -13,6 +13,8 @@
 //! Cette crate n'a aucune dépendance interne.
 
 #[cfg(test)]
+mod proptests;
+#[cfg(test)]
 pub(crate) mod suite;
 
 mod buffer;
