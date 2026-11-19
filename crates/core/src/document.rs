@@ -1,0 +1,555 @@
+//! Documents : un texte, son fichier sur disque et son historique.
+
+use std::fs;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+
+use cupride_text::{EditKind, History, Rope, Selections, TextBuffer, TextError, Transaction};
+use thiserror::Error;
+
+/// Marque d'ordre des octets UTF-8, conservée si le fichier la contenait.
+const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
+
+/// Nombre d'octets examinés pour reconnaître un fichier binaire (même heuristique que Git).
+const BINARY_SNIFF_LEN: usize = 8_000;
+
+/// Fin de ligne d'un document.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum LineEnding {
+    /// `\n` : Linux, macOS, et la plupart des projets.
+    #[default]
+    Lf,
+    /// `\r\n` : Windows.
+    Crlf,
+}
+
+impl LineEnding {
+    /// Texte de la fin de ligne.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Lf => "\n",
+            Self::Crlf => "\r\n",
+        }
+    }
+
+    /// Fin de ligne de la première ligne du texte, ou `None` s'il n'a qu'une ligne.
+    pub fn detect(text: &str) -> Option<Self> {
+        let pos = text.find('\n')?;
+        Some(if text[..pos].ends_with('\r') {
+            Self::Crlf
+        } else {
+            Self::Lf
+        })
+    }
+}
+
+/// Erreur d'ouverture ou d'enregistrement d'un document.
+#[derive(Debug, Error)]
+pub enum DocumentError {
+    /// Erreur du système de fichiers.
+    #[error("{}: {source}", path.display())]
+    Io {
+        /// Fichier concerné.
+        path: PathBuf,
+        /// Erreur d'origine.
+        #[source]
+        source: io::Error,
+    },
+
+    /// Le fichier contient des octets nuls : c'est un fichier binaire.
+    #[error("{} est un fichier binaire : il n'est pas ouvert, pour ne pas le corrompre", path.display())]
+    Binary {
+        /// Fichier concerné.
+        path: PathBuf,
+    },
+
+    /// Le fichier n'est pas encodé en UTF-8.
+    #[error(
+        "{} n'est pas en UTF-8 (octet invalide à la position {offset}) : il n'est pas ouvert, pour ne pas le corrompre",
+        path.display()
+    )]
+    NotUtf8 {
+        /// Fichier concerné.
+        path: PathBuf,
+        /// Position du premier octet invalide.
+        offset: usize,
+    },
+
+    /// Le document n'a pas encore de fichier : il faut l'enregistrer sous un chemin.
+    #[error("le document n'a pas de fichier : utiliser « enregistrer sous »")]
+    NoPath,
+}
+
+impl DocumentError {
+    fn io(path: &Path, source: io::Error) -> Self {
+        Self::Io {
+            path: path.to_owned(),
+            source,
+        }
+    }
+}
+
+/// Texte décodé d'un fichier.
+struct Decoded {
+    text: String,
+    bom: bool,
+}
+
+/// Décode le contenu d'un fichier : refuse les fichiers binaires et ceux qui ne sont pas en UTF-8.
+fn decode(path: &Path, mut bytes: Vec<u8>) -> Result<Decoded, DocumentError> {
+    let bom = bytes.starts_with(UTF8_BOM);
+    if bom {
+        bytes.drain(..UTF8_BOM.len());
+    }
+    if bytes[..bytes.len().min(BINARY_SNIFF_LEN)].contains(&0) {
+        return Err(DocumentError::Binary {
+            path: path.to_owned(),
+        });
+    }
+    match String::from_utf8(bytes) {
+        Ok(text) => Ok(Decoded { text, bom }),
+        Err(error) => Err(DocumentError::NotUtf8 {
+            path: path.to_owned(),
+            offset: error.utf8_error().valid_up_to() + if bom { UTF8_BOM.len() } else { 0 },
+        }),
+    }
+}
+
+/// Un document ouvert : texte, fichier, état modifié, fin de ligne, historique et sélections.
+///
+/// Le texte est conservé tel quel, fins de ligne comprises : un fichier enregistré sans
+/// modification est identique à l'octet près. Les nouvelles lignes insérées utilisent la fin de
+/// ligne détectée à l'ouverture.
+#[derive(Debug)]
+pub struct Document {
+    buffer: Rope,
+    path: Option<PathBuf>,
+    modified: bool,
+    line_ending: LineEnding,
+    bom: bool,
+    history: History,
+    selections: Selections,
+}
+
+impl Default for Document {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Document {
+    /// Document vide, sans fichier.
+    pub fn new() -> Self {
+        Self::from_text("")
+    }
+
+    /// Document sans fichier contenant `text`.
+    pub fn from_text(text: &str) -> Self {
+        Self {
+            buffer: Rope::from_text(text),
+            path: None,
+            modified: false,
+            line_ending: LineEnding::detect(text).unwrap_or_default(),
+            bom: false,
+            history: History::new(),
+            selections: Selections::cursor(0),
+        }
+    }
+
+    /// Ouvre le fichier `path`. Un fichier inexistant donne un document vide associé à ce chemin,
+    /// créé au premier enregistrement.
+    pub fn open(path: impl Into<PathBuf>) -> Result<Self, DocumentError> {
+        let path = path.into();
+        let decoded = match fs::read(&path) {
+            Ok(bytes) => decode(&path, bytes)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Decoded {
+                text: String::new(),
+                bom: false,
+            },
+            Err(error) => return Err(DocumentError::io(&path, error)),
+        };
+        let mut document = Self::from_text(&decoded.text);
+        document.bom = decoded.bom;
+        document.path = Some(path);
+        Ok(document)
+    }
+
+    /// Relit le fichier depuis le disque ; les modifications non enregistrées et l'historique
+    /// sont perdus.
+    pub fn reload(&mut self) -> Result<(), DocumentError> {
+        let path = self.path.clone().ok_or(DocumentError::NoPath)?;
+        let reloaded = Self::open(path)?;
+        let cursor = self
+            .selections
+            .primary()
+            .head
+            .min(reloaded.buffer.len_bytes());
+        *self = reloaded;
+        // Le curseur reste à peu près au même endroit, sur une frontière de caractère.
+        let mut cursor = cursor;
+        while !self.buffer.is_char_boundary(cursor) {
+            cursor -= 1;
+        }
+        self.selections = Selections::cursor(cursor);
+        Ok(())
+    }
+
+    /// Enregistre le document dans son fichier.
+    ///
+    /// L'enregistrement est atomique : le texte est écrit dans un fichier temporaire du même
+    /// dossier, synchronisé sur le disque, puis renommé à la place de l'original. Un plantage
+    /// pendant l'écriture laisse toujours l'ancien fichier intact. Les permissions du fichier
+    /// existant sont conservées.
+    pub fn save(&mut self) -> Result<(), DocumentError> {
+        let path = self.path.clone().ok_or(DocumentError::NoPath)?;
+        self.write_atomic(&path)?;
+        self.modified = false;
+        Ok(())
+    }
+
+    /// Enregistre le document sous `path`, qui devient son fichier.
+    pub fn save_as(&mut self, path: impl Into<PathBuf>) -> Result<(), DocumentError> {
+        let path = path.into();
+        self.write_atomic(&path)?;
+        self.path = Some(path);
+        self.modified = false;
+        Ok(())
+    }
+
+    fn write_atomic(&self, path: &Path) -> Result<(), DocumentError> {
+        let dir = match path.parent() {
+            Some(dir) if !dir.as_os_str().is_empty() => dir,
+            _ => Path::new("."),
+        };
+        let mut temp = tempfile::Builder::new()
+            .prefix(".cupride-")
+            .suffix(".tmp")
+            .tempfile_in(dir)
+            .map_err(|e| DocumentError::io(path, e))?;
+        let write = |file: &mut fs::File| -> io::Result<()> {
+            let mut writer = io::BufWriter::new(file);
+            if self.bom {
+                writer.write_all(UTF8_BOM)?;
+            }
+            for chunk in self.buffer.chunks() {
+                writer.write_all(chunk.as_bytes())?;
+            }
+            writer.flush()?;
+            writer.get_ref().sync_all()
+        };
+        write(temp.as_file_mut()).map_err(|e| DocumentError::io(path, e))?;
+        if let Ok(metadata) = fs::metadata(path) {
+            fs::set_permissions(temp.path(), metadata.permissions())
+                .map_err(|e| DocumentError::io(path, e))?;
+        }
+        temp.persist(path)
+            .map_err(|e| DocumentError::io(path, e.error))?;
+        Ok(())
+    }
+
+    /// Texte du document.
+    pub fn buffer(&self) -> &Rope {
+        &self.buffer
+    }
+
+    /// Fichier du document, s'il en a un.
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    /// Nom affiché : nom du fichier, ou « sans titre ».
+    pub fn display_name(&self) -> String {
+        self.path.as_deref().and_then(Path::file_name).map_or_else(
+            || "sans titre".to_owned(),
+            |n| n.to_string_lossy().into_owned(),
+        )
+    }
+
+    /// Indique si le document a des modifications non enregistrées.
+    pub fn is_modified(&self) -> bool {
+        self.modified
+    }
+
+    /// Fin de ligne utilisée pour les nouvelles lignes.
+    pub fn line_ending(&self) -> LineEnding {
+        self.line_ending
+    }
+
+    /// Change la fin de ligne utilisée pour les nouvelles lignes (le texte existant est inchangé).
+    pub fn set_line_ending(&mut self, line_ending: LineEnding) {
+        self.line_ending = line_ending;
+    }
+
+    /// Indique si le fichier commence par une marque d'ordre des octets, conservée à
+    /// l'enregistrement.
+    pub fn has_bom(&self) -> bool {
+        self.bom
+    }
+
+    /// Sélections du document.
+    pub fn selections(&self) -> &Selections {
+        &self.selections
+    }
+
+    /// Remplace les sélections. Elles sont ramenées dans le texte et sur des frontières de
+    /// caractère.
+    pub fn set_selections(&mut self, mut selections: Selections) {
+        let len = self.buffer.len_bytes();
+        let buffer = &self.buffer;
+        let clamp = |offset: usize| {
+            let mut offset = offset.min(len);
+            while !buffer.is_char_boundary(offset) {
+                offset -= 1;
+            }
+            offset
+        };
+        selections.transform(|s| cupride_text::Selection::new(clamp(s.anchor), clamp(s.head)));
+        self.selections = selections;
+    }
+
+    /// Historique du document.
+    pub fn history(&self) -> &History {
+        &self.history
+    }
+
+    /// Historique du document, modifiable (par exemple pour régler le délai de regroupement).
+    pub fn history_mut(&mut self) -> &mut History {
+        &mut self.history
+    }
+
+    /// Modifie le document dans une transaction : `f` applique ses modifications au texte en
+    /// partant des sélections actuelles, puis la transaction est enregistrée dans l'historique et
+    /// les sélections sont mises à jour. Renvoie `true` si le texte a changé.
+    ///
+    /// En cas d'erreur, les modifications déjà appliquées sont annulées.
+    pub fn transact(
+        &mut self,
+        kind: EditKind,
+        f: impl FnOnce(&mut Rope, &mut Transaction) -> Result<(), TextError>,
+    ) -> Result<bool, TextError> {
+        let mut transaction = Transaction::with_kind(kind, self.selections.clone());
+        if let Err(error) = f(&mut self.buffer, &mut transaction) {
+            for edit in transaction.edits().iter().rev() {
+                edit.inverse().apply(&mut self.buffer)?;
+            }
+            return Err(error);
+        }
+        let changed = !transaction.is_empty();
+        self.selections = transaction.selections_after().clone();
+        if changed {
+            self.modified = true;
+            self.history.commit(transaction);
+        }
+        Ok(changed)
+    }
+
+    /// Annule la dernière transaction et restaure ses sélections. Renvoie `false` s'il n'y avait
+    /// rien à annuler.
+    pub fn undo(&mut self) -> Result<bool, TextError> {
+        let Some(selections) = self.history.undo(&mut self.buffer)? else {
+            return Ok(false);
+        };
+        self.selections = selections;
+        self.modified = true;
+        Ok(true)
+    }
+
+    /// Rétablit la dernière transaction annulée. Renvoie `false` s'il n'y avait rien à rétablir.
+    pub fn redo(&mut self) -> Result<bool, TextError> {
+        let Some(selections) = self.history.redo(&mut self.buffer)? else {
+            return Ok(false);
+        };
+        self.selections = selections;
+        self.modified = true;
+        Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cupride_text::Edit;
+
+    fn type_at_cursor(doc: &mut Document, text: &str) {
+        doc.transact(EditKind::Insert, |buffer, tx| {
+            let at = tx.selections_after().primary().head;
+            tx.apply(buffer, Edit::insert(at, text))
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn ouvrir_modifier_enregistrer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.rs");
+        fs::write(&path, "fn main() {}\n").unwrap();
+
+        let mut doc = Document::open(&path).unwrap();
+        assert_eq!(doc.buffer().to_text(), "fn main() {}\n");
+        assert!(!doc.is_modified());
+        assert_eq!(doc.display_name(), "main.rs");
+
+        type_at_cursor(&mut doc, "// début\n");
+        assert!(doc.is_modified());
+        doc.save().unwrap();
+        assert!(!doc.is_modified());
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "// début\nfn main() {}\n"
+        );
+    }
+
+    #[test]
+    fn fins_de_ligne_conservees() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("windows.txt");
+        fs::write(&path, "un\r\ndeux\r\n").unwrap();
+        let mut doc = Document::open(&path).unwrap();
+        assert_eq!(doc.line_ending(), LineEnding::Crlf);
+        doc.save().unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"un\r\ndeux\r\n");
+
+        assert_eq!(LineEnding::detect("a\nb\r\n"), Some(LineEnding::Lf));
+        assert_eq!(LineEnding::detect("sans fin de ligne"), None);
+    }
+
+    #[test]
+    fn marque_d_ordre_des_octets_conservee() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bom.txt");
+        fs::write(&path, b"\xEF\xBB\xBFtexte").unwrap();
+        let mut doc = Document::open(&path).unwrap();
+        assert!(doc.has_bom());
+        assert_eq!(doc.buffer().to_text(), "texte");
+        doc.save().unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"\xEF\xBB\xBFtexte");
+    }
+
+    #[test]
+    fn fichier_binaire_refuse() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("image.png");
+        fs::write(&path, b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR").unwrap();
+        let error = Document::open(&path).unwrap_err();
+        assert!(matches!(error, DocumentError::Binary { .. }), "{error}");
+    }
+
+    #[test]
+    fn fichier_non_utf8_refuse_sans_corruption() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("latin1.txt");
+        let latin1 = b"caf\xe9 cr\xe8me";
+        fs::write(&path, latin1).unwrap();
+        match Document::open(&path).unwrap_err() {
+            DocumentError::NotUtf8 { offset, .. } => assert_eq!(offset, 3),
+            other => panic!("{other}"),
+        }
+        assert_eq!(fs::read(&path).unwrap(), latin1);
+    }
+
+    #[test]
+    fn fichier_inexistant_cree_a_l_enregistrement() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nouveau.md");
+        let mut doc = Document::open(&path).unwrap();
+        assert!(doc.buffer().is_empty());
+        type_at_cursor(&mut doc, "# Titre");
+        doc.save().unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "# Titre");
+    }
+
+    #[test]
+    fn enregistrer_sous() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut doc = Document::from_text("brouillon");
+        assert_eq!(doc.display_name(), "sans titre");
+        assert!(matches!(doc.save(), Err(DocumentError::NoPath)));
+        let path = dir.path().join("note.txt");
+        doc.save_as(&path).unwrap();
+        assert_eq!(doc.path(), Some(path.as_path()));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "brouillon");
+    }
+
+    #[test]
+    fn enregistrement_atomique_sans_fichier_temporaire_restant() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        fs::write(&path, "ancien").unwrap();
+        let mut doc = Document::open(&path).unwrap();
+        type_at_cursor(&mut doc, "nouveau ");
+        doc.save().unwrap();
+        let entries: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(entries, vec![std::ffi::OsString::from("a.txt")]);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "nouveau ancien");
+    }
+
+    #[test]
+    fn echec_d_ecriture_laisse_l_original_intact() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("absent").join("a.txt");
+        let mut doc = Document::from_text("texte");
+        // Le dossier n'existe pas : l'écriture échoue sans rien créer.
+        assert!(matches!(doc.save_as(&path), Err(DocumentError::Io { .. })));
+        assert!(doc.path().is_none());
+        assert!(!path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn permissions_conservees() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("script.sh");
+        fs::write(&path, "#!/bin/sh\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut doc = Document::open(&path).unwrap();
+        type_at_cursor(&mut doc, "# x\n");
+        doc.save().unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o755);
+    }
+
+    #[test]
+    fn rechargement() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        fs::write(&path, "version 1").unwrap();
+        let mut doc = Document::open(&path).unwrap();
+        type_at_cursor(&mut doc, "modif ");
+        fs::write(&path, "version 2 sur le disque").unwrap();
+        doc.reload().unwrap();
+        assert_eq!(doc.buffer().to_text(), "version 2 sur le disque");
+        assert!(!doc.is_modified());
+        assert!(!doc.history().can_undo());
+    }
+
+    #[test]
+    fn annuler_restaure_texte_et_selections() {
+        let mut doc = Document::from_text("abc");
+        doc.set_selections(Selections::cursor(3));
+        type_at_cursor(&mut doc, "d");
+        assert_eq!(doc.selections(), &Selections::cursor(4));
+        assert!(doc.undo().unwrap());
+        assert_eq!(doc.buffer().to_text(), "abc");
+        assert_eq!(doc.selections(), &Selections::cursor(3));
+        assert!(doc.redo().unwrap());
+        assert_eq!(doc.buffer().to_text(), "abcd");
+        assert!(!doc.redo().unwrap());
+    }
+
+    #[test]
+    fn transaction_en_erreur_annulee() {
+        let mut doc = Document::from_text("abc");
+        let result = doc.transact(EditKind::Other, |buffer, tx| {
+            tx.apply(buffer, Edit::insert(0, "x"))?;
+            tx.apply(buffer, Edit::insert(99, "y"))
+        });
+        assert!(result.is_err());
+        assert_eq!(doc.buffer().to_text(), "abc");
+        assert!(!doc.is_modified());
+        assert!(!doc.history().can_undo());
+    }
+}
