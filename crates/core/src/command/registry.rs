@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn enregistrer_et_executer() {
-        let mut editor = Editor::new();
+        let mut editor = Editor::without_builtins();
         editor
             .commands_mut()
             .register(
@@ -296,7 +296,7 @@ mod tests {
 
     #[test]
     fn commande_inconnue_et_arguments_invalides() {
-        let mut editor = Editor::new();
+        let mut editor = Editor::without_builtins();
         assert!(matches!(
             editor.run("file nope", &[]),
             Err(CommandError::Unknown { .. })

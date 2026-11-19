@@ -129,7 +129,7 @@ mod tests {
     use clap::{Arg, ArgAction};
 
     fn editor() -> Editor {
-        let mut editor = Editor::new();
+        let mut editor = Editor::without_builtins();
         let registry = editor.commands_mut();
         registry
             .register(

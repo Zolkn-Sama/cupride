@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use cupride_layout::Workspace;
 use slotmap::SlotMap;
 
-use crate::command::{CommandError, CommandOutput, CommandRegistry, CommandResult, parser};
+use crate::command::{
+    CommandError, CommandOutput, CommandRegistry, CommandResult, builtin, parser,
+};
 use crate::document::{Document, DocumentError};
 
 slotmap::new_key_type! {
@@ -20,7 +22,7 @@ slotmap::new_key_type! {
 /// Tout ce que l'interface affiche et tout ce que les commandes modifient vit ici : documents
 /// ouverts, document actif, workspace (fenêtres et layout), registre des commandes. Un fichier
 /// ouvert plusieurs fois correspond toujours à un seul document en mémoire.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Editor {
     documents: SlotMap<DocumentId, Document>,
     active: Option<DocumentId>,
@@ -28,10 +30,30 @@ pub struct Editor {
     commands: CommandRegistry,
 }
 
+impl Default for Editor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Editor {
-    /// Éditeur sans document.
+    /// Éditeur sans document, avec les commandes intégrées.
     pub fn new() -> Self {
-        Self::default()
+        let mut editor = Self::without_builtins();
+        builtin::register_all(&mut editor.commands)
+            .expect("les commandes intégrées ont des noms uniques");
+        editor
+    }
+
+    /// Éditeur sans document ni commande : pour les tests, ou pour composer son propre jeu de
+    /// commandes.
+    pub fn without_builtins() -> Self {
+        Self {
+            documents: SlotMap::with_key(),
+            active: None,
+            workspace: Workspace::new(),
+            commands: CommandRegistry::new(),
+        }
     }
 
     /// Ouvre le fichier `path` et en fait le document actif. Si ce fichier est déjà ouvert (même

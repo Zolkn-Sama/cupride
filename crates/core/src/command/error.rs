@@ -41,6 +41,15 @@ pub enum CommandError {
     #[error("aucun document ouvert")]
     NoActiveDocument,
 
+    /// L'action ferait perdre des modifications non enregistrées.
+    #[error(
+        "« {name} » a des modifications non enregistrées : enregistrer d'abord, ou ajouter --force"
+    )]
+    UnsavedChanges {
+        /// Nom du document.
+        name: String,
+    },
+
     /// Erreur sur un document (ouverture, enregistrement…).
     #[error(transparent)]
     Document(#[from] DocumentError),

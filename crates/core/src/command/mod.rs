@@ -4,6 +4,7 @@
 //! [`CommandRegistry`]. Une commande est identifiée par son groupe et son nom (`file open`), et ses
 //! arguments sont décrits avec `clap` : la même définition sert partout.
 
+pub(crate) mod builtin;
 mod error;
 pub mod parser;
 mod registry;
