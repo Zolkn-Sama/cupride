@@ -304,6 +304,8 @@ version = "0.1.0"
 dependencies = [
  "cupride-layout",
  "cupride-text",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

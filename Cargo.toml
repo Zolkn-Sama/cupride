@@ -31,6 +31,15 @@ thiserror = "2.0.17"
 # Texte
 unicode-segmentation = "1.13.3"
 
+# Noyau : identifiants, commandes, configuration
+clap = { version = "4.6.8", default-features = false, features = ["std", "help", "usage", "error-context", "string"] }
+serde = { version = "1.0.229", features = ["derive"] }
+shlex = "2.0.1"
+slotmap = "1.1.1"
+strsim = "0.11.1"
+tempfile = "3.27.0"
+toml = "1.2.1"
+
 # Tests et mesures
 criterion = "0.8.2"
 proptest = "1.12.0"
