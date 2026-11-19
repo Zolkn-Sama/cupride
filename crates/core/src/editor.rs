@@ -1,0 +1,235 @@
+//! État global de l'éditeur.
+
+use std::io;
+use std::path::{Path, PathBuf};
+
+use cupride_layout::Workspace;
+use slotmap::SlotMap;
+
+use crate::document::{Document, DocumentError};
+
+slotmap::new_key_type! {
+    /// Identifiant stable d'un document ouvert. Il reste valide tant que le document est ouvert,
+    /// et n'est jamais réutilisé pour un autre document.
+    pub struct DocumentId;
+}
+
+/// État complet de l'éditeur, sans aucune dépendance graphique.
+///
+/// Tout ce que l'interface affiche et tout ce que les commandes modifient vit ici : documents
+/// ouverts, document actif, workspace (fenêtres et layout). Un fichier ouvert plusieurs fois
+/// correspond toujours à un seul document en mémoire.
+#[derive(Debug, Default)]
+pub struct Editor {
+    documents: SlotMap<DocumentId, Document>,
+    active: Option<DocumentId>,
+    workspace: Workspace,
+}
+
+impl Editor {
+    /// Éditeur sans document.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Ouvre le fichier `path` et en fait le document actif. Si ce fichier est déjà ouvert (même
+    /// sous un autre chemin menant au même fichier), le document existant est réutilisé.
+    pub fn open(&mut self, path: impl AsRef<Path>) -> Result<DocumentId, DocumentError> {
+        let path = normalize(path.as_ref()).map_err(|source| DocumentError::Io {
+            path: path.as_ref().to_owned(),
+            source,
+        })?;
+        let id = match self.find_by_path(&path) {
+            Some(id) => id,
+            None => self.documents.insert(Document::open(path)?),
+        };
+        self.active = Some(id);
+        Ok(id)
+    }
+
+    /// Crée un document vide sans fichier et en fait le document actif.
+    pub fn new_document(&mut self) -> DocumentId {
+        let id = self.documents.insert(Document::new());
+        self.active = Some(id);
+        id
+    }
+
+    /// Ajoute un document déjà construit et en fait le document actif.
+    pub fn insert_document(&mut self, document: Document) -> DocumentId {
+        let id = self.documents.insert(document);
+        self.active = Some(id);
+        id
+    }
+
+    /// Document ouvert sur le fichier `path`, s'il y en a un.
+    pub fn find_by_path(&self, path: &Path) -> Option<DocumentId> {
+        let path = normalize(path).ok()?;
+        self.documents
+            .iter()
+            .find(|(_, doc)| doc.path() == Some(path.as_path()))
+            .map(|(id, _)| id)
+    }
+
+    /// Ferme le document `id` et le renvoie. Si c'était le document actif, le dernier document
+    /// ouvert devient actif.
+    pub fn close(&mut self, id: DocumentId) -> Option<Document> {
+        let document = self.documents.remove(id)?;
+        if self.active == Some(id) {
+            self.active = self.documents.keys().last();
+        }
+        Some(document)
+    }
+
+    /// Document `id`.
+    pub fn document(&self, id: DocumentId) -> Option<&Document> {
+        self.documents.get(id)
+    }
+
+    /// Document `id`, modifiable.
+    pub fn document_mut(&mut self, id: DocumentId) -> Option<&mut Document> {
+        self.documents.get_mut(id)
+    }
+
+    /// Documents ouverts.
+    pub fn documents(&self) -> impl Iterator<Item = (DocumentId, &Document)> {
+        self.documents.iter()
+    }
+
+    /// Nombre de documents ouverts.
+    pub fn document_count(&self) -> usize {
+        self.documents.len()
+    }
+
+    /// Identifiant du document actif.
+    pub fn active_id(&self) -> Option<DocumentId> {
+        self.active
+    }
+
+    /// Document actif.
+    pub fn active_document(&self) -> Option<&Document> {
+        self.documents.get(self.active?)
+    }
+
+    /// Document actif, modifiable.
+    pub fn active_document_mut(&mut self) -> Option<&mut Document> {
+        self.documents.get_mut(self.active?)
+    }
+
+    /// Fait de `id` le document actif. Renvoie `false` si ce document n'existe pas.
+    pub fn set_active(&mut self, id: DocumentId) -> bool {
+        if self.documents.contains_key(id) {
+            self.active = Some(id);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Fenêtres et layout.
+    pub fn workspace(&self) -> &Workspace {
+        &self.workspace
+    }
+
+    /// Fenêtres et layout, modifiables.
+    pub fn workspace_mut(&mut self) -> &mut Workspace {
+        &mut self.workspace
+    }
+}
+
+/// Chemin absolu et canonique : deux chemins menant au même fichier donnent le même résultat.
+/// Un fichier qui n'existe pas encore est résolu à partir de son dossier.
+pub(crate) fn normalize(path: &Path) -> io::Result<PathBuf> {
+    if let Ok(canonical) = path.canonicalize() {
+        return Ok(canonical);
+    }
+    let absolute = std::path::absolute(path)?;
+    match (absolute.parent(), absolute.file_name()) {
+        (Some(parent), Some(name)) => match parent.canonicalize() {
+            Ok(parent) => Ok(parent.join(name)),
+            Err(_) => Ok(absolute),
+        },
+        _ => Ok(absolute),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn meme_fichier_un_seul_document() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("src")).unwrap();
+        let path = dir.path().join("src").join("lib.rs");
+        fs::write(&path, "// lib").unwrap();
+
+        let mut editor = Editor::new();
+        let a = editor.open(&path).unwrap();
+        let b = editor
+            .open(
+                dir.path()
+                    .join("src")
+                    .join(".")
+                    .join("..")
+                    .join("src/lib.rs"),
+            )
+            .unwrap();
+        assert_eq!(a, b);
+        assert_eq!(editor.document_count(), 1);
+    }
+
+    #[test]
+    fn nouveau_fichier_ouvert_deux_fois() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut editor = Editor::new();
+        let a = editor.open(dir.path().join("nouveau.txt")).unwrap();
+        let b = editor
+            .open(dir.path().join(".").join("nouveau.txt"))
+            .unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lien_symbolique_meme_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("vrai.txt");
+        let link = dir.path().join("lien.txt");
+        fs::write(&real, "x").unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let mut editor = Editor::new();
+        assert_eq!(editor.open(&real).unwrap(), editor.open(&link).unwrap());
+    }
+
+    #[test]
+    fn document_actif_et_fermeture() {
+        let mut editor = Editor::new();
+        assert!(editor.active_document().is_none());
+        let a = editor.new_document();
+        let b = editor.new_document();
+        assert_eq!(editor.active_id(), Some(b));
+        assert!(editor.set_active(a));
+        assert_eq!(editor.active_id(), Some(a));
+        assert!(editor.close(a).is_some());
+        assert_eq!(editor.active_id(), Some(b));
+        assert!(!editor.set_active(a), "identifiant fermé");
+        assert!(editor.document(a).is_none());
+        editor.close(b);
+        assert_eq!(editor.active_id(), None);
+        // Les identifiants ne sont jamais réutilisés.
+        let c = editor.new_document();
+        assert_ne!(c, a);
+        assert_ne!(c, b);
+    }
+
+    #[test]
+    fn erreur_d_ouverture_ne_cree_pas_de_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("binaire.bin");
+        fs::write(&path, b"\0\0\0").unwrap();
+        let mut editor = Editor::new();
+        assert!(editor.open(&path).is_err());
+        assert_eq!(editor.document_count(), 0);
+    }
+}
