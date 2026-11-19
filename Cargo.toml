@@ -24,6 +24,21 @@ cupride-text = { path = "crates/text" }
 cupride-layout = { path = "crates/layout" }
 cupride-core = { path = "crates/core" }
 
+# Erreurs : thiserror dans les bibliothèques, anyhow dans les binaires.
+anyhow = "1.0.100"
+thiserror = "2.0.17"
+
+# Règles communes, activées dans chaque crate par `[lints] workspace = true`.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
 # Profil de release : binaire le plus petit et le plus rapide possible.
 [profile.release]
 lto = true
