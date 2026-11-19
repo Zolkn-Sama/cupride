@@ -126,8 +126,16 @@ Les mesures de performance faites en conteneur servent à comparer entre elles ;
 
 | Variable | Rôle |
 |---|---|
-| `CUPRIDE_LOG` | Niveau de journalisation (`error`, `warn`, `info`, `debug`, `trace`) |
+| `CUPRIDE_LOG` | Niveau de journalisation (`error`, `warn`, `info`, `debug`, `trace`, ou filtre par crate comme `cupride_core=trace,warn`). Par défaut : `warn` |
 | `CUPRIDE_PROJECT` | Dossier du projet à ouvrir dans le service Docker `gui` |
+
+Les logs sont écrits dans le dossier de cache de l'OS, avec un fichier par jour (7 conservés) :
+
+| OS | Emplacement |
+|---|---|
+| Linux | `~/.cache/cupride/logs/` |
+| macOS | `~/Library/Caches/cupride/logs/` |
+| Windows | `%LOCALAPPDATA%\cupride\cache\logs\` |
 
 ## Architecture
 
