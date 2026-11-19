@@ -129,6 +129,8 @@ pub struct Document {
     bom: bool,
     history: History,
     selections: Selections,
+    revision: u64,
+    saves: u64,
 }
 
 impl Default for Document {
@@ -153,6 +155,8 @@ impl Document {
             bom: false,
             history: History::new(),
             selections: Selections::cursor(0),
+            revision: 0,
+            saves: 0,
         }
     }
 
@@ -184,7 +188,12 @@ impl Document {
             .primary()
             .head
             .min(reloaded.buffer.len_bytes());
+        let (revision, saves) = (self.revision + 1, self.saves);
+        let delay = self.history.group_delay();
         *self = reloaded;
+        self.revision = revision;
+        self.saves = saves;
+        self.history.set_group_delay(delay);
         // Le curseur reste à peu près au même endroit, sur une frontière de caractère.
         let mut cursor = cursor;
         while !self.buffer.is_char_boundary(cursor) {
@@ -204,6 +213,7 @@ impl Document {
         let path = self.path.clone().ok_or(DocumentError::NoPath)?;
         self.write_atomic(&path)?;
         self.modified = false;
+        self.saves += 1;
         Ok(())
     }
 
@@ -213,6 +223,7 @@ impl Document {
         self.write_atomic(&path)?;
         self.path = Some(path);
         self.modified = false;
+        self.saves += 1;
         Ok(())
     }
 
@@ -307,6 +318,17 @@ impl Document {
         self.selections = selections;
     }
 
+    /// Numéro de révision du texte : augmente à chaque changement du texte (modification,
+    /// annulation, rétablissement, rechargement).
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Nombre d'enregistrements depuis l'ouverture.
+    pub fn save_count(&self) -> u64 {
+        self.saves
+    }
+
     /// Historique du document.
     pub fn history(&self) -> &History {
         &self.history
@@ -338,6 +360,7 @@ impl Document {
         self.selections = transaction.selections_after().clone();
         if changed {
             self.modified = true;
+            self.revision += 1;
             self.history.commit(transaction);
         }
         Ok(changed)
@@ -351,6 +374,7 @@ impl Document {
         };
         self.selections = selections;
         self.modified = true;
+        self.revision += 1;
         Ok(true)
     }
 
@@ -361,6 +385,7 @@ impl Document {
         };
         self.selections = selections;
         self.modified = true;
+        self.revision += 1;
         Ok(true)
     }
 }

@@ -4,13 +4,14 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use cupride_layout::Workspace;
-use slotmap::SlotMap;
+use slotmap::{SecondaryMap, SlotMap};
 
 use crate::command::{
     CommandError, CommandOutput, CommandRegistry, CommandResult, builtin, parser,
 };
 use crate::config::{self, Config};
 use crate::document::{Document, DocumentError};
+use crate::events::{Event, EventBus};
 use crate::keymap::{Keymap, KeymapIssue, Platform, default_bindings};
 
 slotmap::new_key_type! {
@@ -33,6 +34,10 @@ pub struct Editor {
     keymap: Keymap,
     config: Config,
     config_path: Option<PathBuf>,
+    events: EventBus,
+    /// État déjà publié : (révision, enregistrements) de chaque document, et document actif.
+    published: SecondaryMap<DocumentId, (u64, u64)>,
+    published_active: Option<DocumentId>,
 }
 
 impl Default for Editor {
@@ -63,6 +68,9 @@ impl Editor {
             keymap: Keymap::new(),
             config: Config::default(),
             config_path: None,
+            events: EventBus::new(),
+            published: SecondaryMap::new(),
+            published_active: None,
         }
     }
 
@@ -82,6 +90,7 @@ impl Editor {
             }
         };
         self.active = Some(id);
+        self.flush_events();
         Ok(id)
     }
 
@@ -92,6 +101,7 @@ impl Editor {
         self.configure(&mut document);
         let id = self.documents.insert(document);
         self.active = Some(id);
+        self.flush_events();
         id
     }
 
@@ -99,6 +109,7 @@ impl Editor {
     pub fn insert_document(&mut self, document: Document) -> DocumentId {
         let id = self.documents.insert(document);
         self.active = Some(id);
+        self.flush_events();
         id
     }
 
@@ -118,6 +129,7 @@ impl Editor {
         if self.active == Some(id) {
             self.active = self.documents.keys().last();
         }
+        self.flush_events();
         Some(document)
     }
 
@@ -160,6 +172,7 @@ impl Editor {
     pub fn set_active(&mut self, id: DocumentId) -> bool {
         if self.documents.contains_key(id) {
             self.active = Some(id);
+            self.flush_events();
             true
         } else {
             false
@@ -202,7 +215,59 @@ impl Editor {
             .parse(args)
             .map_err(|error| parser::describe_clap_error(full_name, &error))?;
         let handler = command.handler();
-        handler(self, &matches)
+        let result = handler(self, &matches);
+        self.flush_events();
+        result
+    }
+
+    /// Abonnements aux événements du noyau.
+    pub fn events(&self) -> &EventBus {
+        &self.events
+    }
+
+    /// Abonnements aux événements du noyau, modifiables (pour s'abonner).
+    pub fn events_mut(&mut self) -> &mut EventBus {
+        &mut self.events
+    }
+
+    /// Publie les événements survenus depuis la dernière publication : documents ouverts,
+    /// modifiés, enregistrés, fermés, puis changement de document actif. Appelé automatiquement
+    /// après chaque commande et chaque ouverture, fermeture ou activation.
+    pub fn flush_events(&mut self) {
+        let mut events = Vec::new();
+        for (id, document) in &self.documents {
+            let now = (document.revision(), document.save_count());
+            match self.published.insert(id, now) {
+                None => events.push(Event::DocumentOpened(id)),
+                Some((revision, saves)) => {
+                    if revision != now.0 {
+                        events.push(Event::DocumentModified(id));
+                    }
+                    if saves != now.1 {
+                        events.push(Event::DocumentSaved(id));
+                    }
+                }
+            }
+        }
+        let closed: Vec<DocumentId> = self
+            .published
+            .keys()
+            .filter(|id| !self.documents.contains_key(*id))
+            .collect();
+        for id in closed {
+            self.published.remove(id);
+            events.push(Event::DocumentClosed(id));
+        }
+        if self.published_active != self.active {
+            events.push(Event::FocusChanged {
+                from: self.published_active,
+                to: self.active,
+            });
+            self.published_active = self.active;
+        }
+        for event in events {
+            self.events.publish(event);
+        }
     }
 
     /// Raccourcis clavier.

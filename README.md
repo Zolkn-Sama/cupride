@@ -4,7 +4,7 @@
 
 Il suit la philosophie d'Arch Linux : un noyau minimal, puis chacun installe uniquement les outils dont il a besoin, via un gestionnaire de paquets intégré. L'IDE est **piloté par des commandes** : chaque action est une commande, accessible depuis la ligne de commande interne, un raccourci, la palette ou le terminal du système.
 
-> **État du projet : phase 1 terminée (buffer de texte).** Le socle (workspace, CI, journalisation) et le buffer de texte (`cupride-text` : rope, positions Unicode, sélections multiples, historique) sont en place ; il n'y a pas encore d'éditeur utilisable. Voir la [feuille de route](#feuille-de-route) et les [mesures de performance](docs/perf.md).
+> **État du projet : phase 2 terminée (noyau et commandes).** Le socle, le buffer de texte (`cupride-text`) et le noyau sans interface (`cupride-core` : documents, commandes, keymap, configuration, événements) sont en place. L'éditeur se pilote entièrement par commandes dans le REPL console (`cargo run -p cupride-repl`) ; il n'y a pas encore de fenêtre. Voir la [feuille de route](#feuille-de-route), les [commandes](docs/commands.md) et la [configuration](docs/configuration.md).
 
 ## Objectifs
 
