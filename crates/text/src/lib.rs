@@ -28,7 +28,7 @@ mod string_buffer;
 pub use buffer::{Lines, TextBuffer};
 pub use edit::{Assoc, Edit};
 pub use error::{Result, TextError};
-pub use history::{History, Transaction};
+pub use history::{DEFAULT_GROUP_DELAY, EditKind, History, Transaction};
 pub use position::Point;
 pub use rope::Rope;
 pub use selection::{Selection, Selections};

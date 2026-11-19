@@ -4,6 +4,20 @@
 //! sélections avant et après. L'[`History`] empile les transactions : annuler applique l'inverse
 //! de la dernière et restaure les sélections d'avant ; rétablir la réapplique.
 //!
+//! # Regroupement
+//!
+//! Pour qu'annuler revienne par blocs logiques et non lettre par lettre, les transactions de
+//! frappe ([`EditKind::Insert`]) ou d'effacement ([`EditKind::Delete`]) consécutives sont
+//! fusionnées. Le bloc est coupé :
+//!
+//! - après une pause plus longue que le délai de regroupement ([`History::set_group_delay`]) ;
+//! - quand le curseur a bougé entre deux transactions (les sélections ne se suivent plus) ;
+//! - quand le type d'action change (frappe puis effacement) ;
+//! - explicitement, avec [`History::break_group`].
+//!
+//! Une transaction [`EditKind::Other`] (une commande, un remplacement global…) n'est jamais
+//! fusionnée : elle forme toujours un bloc à elle seule, quel que soit son nombre de modifications.
+//!
 //! ```
 //! use cupride_text::{Edit, History, Rope, Selections, TextBuffer, Transaction};
 //!
@@ -24,23 +38,54 @@
 //! # Ok::<(), cupride_text::TextError>(())
 //! ```
 
+use std::time::{Duration, Instant};
+
 use crate::buffer::TextBuffer;
 use crate::edit::Edit;
 use crate::error::Result;
 use crate::selection::Selections;
 
+/// Délai de regroupement par défaut : au-delà, une nouvelle frappe commence un nouveau bloc.
+pub const DEFAULT_GROUP_DELAY: Duration = Duration::from_millis(1_000);
+
+/// Type d'action d'une transaction, qui décide si elle peut être fusionnée avec la précédente.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum EditKind {
+    /// Frappe de texte : fusionnée avec les frappes consécutives.
+    Insert,
+    /// Effacement (retour arrière, suppr) : fusionné avec les effacements consécutifs.
+    Delete,
+    /// Toute autre action (commande, collage, remplacement global) : jamais fusionnée.
+    #[default]
+    Other,
+}
+
+impl EditKind {
+    fn is_groupable(self) -> bool {
+        matches!(self, Self::Insert | Self::Delete)
+    }
+}
+
 /// Modifications d'une même action, annulées et rétablies ensemble.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Transaction {
+    kind: EditKind,
     edits: Vec<Edit>,
     selections_before: Selections,
     selections_after: Selections,
 }
 
 impl Transaction {
-    /// Commence une transaction ; `selections` sont les sélections avant la première modification.
+    /// Commence une transaction de type [`EditKind::Other`] ; `selections` sont les sélections
+    /// avant la première modification.
     pub fn new(selections: Selections) -> Self {
+        Self::with_kind(EditKind::Other, selections)
+    }
+
+    /// Commence une transaction du type donné.
+    pub fn with_kind(kind: EditKind, selections: Selections) -> Self {
         Self {
+            kind,
             edits: Vec::new(),
             selections_after: selections.clone(),
             selections_before: selections,
@@ -59,6 +104,11 @@ impl Transaction {
     /// curseur.
     pub fn set_selections_after(&mut self, selections: Selections) {
         self.selections_after = selections;
+    }
+
+    /// Type d'action.
+    pub fn kind(&self) -> EditKind {
+        self.kind
     }
 
     /// Modifications, dans l'ordre où elles ont été appliquées.
@@ -96,31 +146,88 @@ impl Transaction {
 }
 
 /// Piles d'annulation et de rétablissement d'un document.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct History {
     undo: Vec<Transaction>,
     redo: Vec<Transaction>,
+    group_delay: Duration,
+    /// Instant de la dernière transaction enregistrée, si son bloc est encore ouvert.
+    open_group: Option<Instant>,
+}
+
+impl Default for History {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl History {
-    /// Historique vide.
+    /// Historique vide, avec le délai de regroupement par défaut.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            undo: Vec::new(),
+            redo: Vec::new(),
+            group_delay: DEFAULT_GROUP_DELAY,
+            open_group: None,
+        }
     }
 
-    /// Enregistre une transaction déjà appliquée. Une nouvelle modification vide la pile de
-    /// rétablissement ; une transaction vide est ignorée.
+    /// Délai de regroupement : une pause plus longue entre deux frappes coupe le bloc.
+    pub fn group_delay(&self) -> Duration {
+        self.group_delay
+    }
+
+    /// Change le délai de regroupement. `Duration::ZERO` désactive le regroupement par le temps.
+    pub fn set_group_delay(&mut self, delay: Duration) {
+        self.group_delay = delay;
+    }
+
+    /// Coupe le bloc en cours : la prochaine transaction ne sera pas fusionnée avec la précédente.
+    pub fn break_group(&mut self) {
+        self.open_group = None;
+    }
+
+    /// Enregistre une transaction déjà appliquée, à l'instant présent. Voir [`History::commit_at`].
     pub fn commit(&mut self, transaction: Transaction) {
+        self.commit_at(transaction, Instant::now());
+    }
+
+    /// Enregistre une transaction déjà appliquée, à l'instant `now`.
+    ///
+    /// Une nouvelle modification vide la pile de rétablissement ; une transaction vide est
+    /// ignorée. La transaction est fusionnée avec la précédente si elles forment un même bloc
+    /// (voir le [regroupement](self#regroupement)).
+    pub fn commit_at(&mut self, transaction: Transaction, now: Instant) {
         if transaction.is_empty() {
             return;
         }
         self.redo.clear();
-        self.undo.push(transaction);
+        let groupable = transaction.kind.is_groupable();
+        let merge_into = match (self.open_group, self.undo.last_mut()) {
+            (Some(last_time), Some(last))
+                if groupable
+                    && last.kind == transaction.kind
+                    && now.saturating_duration_since(last_time) <= self.group_delay
+                    && last.selections_after == transaction.selections_before =>
+            {
+                Some(last)
+            }
+            _ => None,
+        };
+        match merge_into {
+            Some(last) => {
+                last.edits.extend(transaction.edits);
+                last.selections_after = transaction.selections_after;
+            }
+            None => self.undo.push(transaction),
+        }
+        self.open_group = groupable.then_some(now);
     }
 
     /// Annule la dernière transaction. Renvoie les sélections à restaurer, ou `None` s'il n'y a
     /// rien à annuler.
     pub fn undo<B: TextBuffer + ?Sized>(&mut self, buffer: &mut B) -> Result<Option<Selections>> {
+        self.break_group();
         let Some(transaction) = self.undo.pop() else {
             return Ok(None);
         };
@@ -136,6 +243,7 @@ impl History {
     /// Rétablit la dernière transaction annulée. Renvoie les sélections à restaurer, ou `None`
     /// s'il n'y a rien à rétablir.
     pub fn redo<B: TextBuffer + ?Sized>(&mut self, buffer: &mut B) -> Result<Option<Selections>> {
+        self.break_group();
         let Some(transaction) = self.redo.pop() else {
             return Ok(None);
         };
@@ -167,6 +275,7 @@ impl History {
     pub fn clear(&mut self) {
         self.undo.clear();
         self.redo.clear();
+        self.break_group();
     }
 }
 
@@ -251,6 +360,132 @@ mod tests {
         let mut h = History::new();
         h.commit(Transaction::new(Selections::cursor(0)));
         assert!(!h.can_undo());
+    }
+
+    /// Tape un caractère au curseur, comme une frappe clavier, à l'instant `at`.
+    fn key(b: &mut Rope, s: &mut Selections, h: &mut History, text: &str, at: Instant) {
+        let mut tx = Transaction::with_kind(EditKind::Insert, s.clone());
+        let at_cursor = s.primary().head;
+        tx.apply(b, Edit::insert(at_cursor, text)).unwrap();
+        *s = tx.selections_after().clone();
+        h.commit_at(tx, at);
+    }
+
+    /// Retour arrière d'un caractère ASCII au curseur, à l'instant `at`.
+    fn backspace(b: &mut Rope, s: &mut Selections, h: &mut History, at: Instant) {
+        let mut tx = Transaction::with_kind(EditKind::Delete, s.clone());
+        let head = s.primary().head;
+        let edit = Edit::delete(b, head - 1..head).unwrap();
+        tx.apply(b, edit).unwrap();
+        *s = tx.selections_after().clone();
+        h.commit_at(tx, at);
+    }
+
+    #[test]
+    fn frappes_consecutives_regroupees() {
+        let t0 = Instant::now();
+        let ms = Duration::from_millis;
+        let mut b = Rope::from_text("");
+        let mut s = Selections::cursor(0);
+        let mut h = History::new();
+        for (i, c) in ["b", "o", "n", "j", "o", "u", "r"].iter().enumerate() {
+            key(&mut b, &mut s, &mut h, c, t0 + ms(100 * i as u64));
+        }
+        assert_eq!(h.undo_len(), 1);
+        h.undo(&mut b).unwrap();
+        assert_eq!(b.to_text(), "");
+    }
+
+    #[test]
+    fn coupure_apres_une_pause() {
+        let t0 = Instant::now();
+        let mut b = Rope::from_text("");
+        let mut s = Selections::cursor(0);
+        let mut h = History::new();
+        h.set_group_delay(Duration::from_millis(300));
+        key(&mut b, &mut s, &mut h, "a", t0);
+        key(&mut b, &mut s, &mut h, "b", t0 + Duration::from_millis(200));
+        key(&mut b, &mut s, &mut h, "c", t0 + Duration::from_millis(900));
+        assert_eq!(h.undo_len(), 2);
+        h.undo(&mut b).unwrap();
+        assert_eq!(b.to_text(), "ab");
+    }
+
+    #[test]
+    fn coupure_apres_un_deplacement() {
+        let t0 = Instant::now();
+        let mut b = Rope::from_text("");
+        let mut s = Selections::cursor(0);
+        let mut h = History::new();
+        key(&mut b, &mut s, &mut h, "a", t0);
+        key(&mut b, &mut s, &mut h, "b", t0);
+        // Le curseur revient au début : la frappe suivante ne prolonge pas le bloc.
+        s = Selections::cursor(0);
+        key(&mut b, &mut s, &mut h, "c", t0);
+        assert_eq!(b.to_text(), "cab");
+        assert_eq!(h.undo_len(), 2);
+        h.undo(&mut b).unwrap();
+        assert_eq!(b.to_text(), "ab");
+    }
+
+    #[test]
+    fn coupure_au_changement_de_type() {
+        let t0 = Instant::now();
+        let mut b = Rope::from_text("");
+        let mut s = Selections::cursor(0);
+        let mut h = History::new();
+        key(&mut b, &mut s, &mut h, "a", t0);
+        key(&mut b, &mut s, &mut h, "b", t0);
+        backspace(&mut b, &mut s, &mut h, t0);
+        backspace(&mut b, &mut s, &mut h, t0);
+        key(&mut b, &mut s, &mut h, "c", t0);
+        assert_eq!(h.undo_len(), 3);
+        h.undo(&mut b).unwrap();
+        assert_eq!(b.to_text(), "");
+        h.undo(&mut b).unwrap();
+        assert_eq!(b.to_text(), "ab");
+        h.undo(&mut b).unwrap();
+        assert_eq!(b.to_text(), "");
+    }
+
+    #[test]
+    fn coupure_explicite_et_apres_annulation() {
+        let t0 = Instant::now();
+        let mut b = Rope::from_text("");
+        let mut s = Selections::cursor(0);
+        let mut h = History::new();
+        key(&mut b, &mut s, &mut h, "a", t0);
+        h.break_group();
+        key(&mut b, &mut s, &mut h, "b", t0);
+        assert_eq!(h.undo_len(), 2);
+        s = h.undo(&mut b).unwrap().unwrap();
+        key(&mut b, &mut s, &mut h, "c", t0);
+        assert_eq!(h.undo_len(), 2);
+    }
+
+    #[test]
+    fn commande_a_plusieurs_modifications_en_une_transaction() {
+        let t0 = Instant::now();
+        let mut b = Rope::from_text("un chat, un chien, un chat");
+        let mut s = Selections::cursor(0);
+        let mut h = History::new();
+        key(&mut b, &mut s, &mut h, ">", t0);
+        // Remplacement global : toutes les occurrences dans une seule transaction.
+        let mut tx = Transaction::new(s.clone());
+        while let Some(pos) = b.to_text().find("chat") {
+            let edit = Edit::replace(&b, pos..pos + 4, "loup").unwrap();
+            tx.apply(&mut b, edit).unwrap();
+        }
+        assert_eq!(tx.edits().len(), 2);
+        h.commit_at(tx, t0);
+        // Une frappe juste après n'est pas fusionnée avec la commande.
+        let mut s2 = s.clone();
+        key(&mut b, &mut s2, &mut h, "!", t0);
+        assert_eq!(b.to_text(), ">!un loup, un chien, un loup");
+        assert_eq!(h.undo_len(), 3);
+        h.undo(&mut b).unwrap();
+        h.undo(&mut b).unwrap();
+        assert_eq!(b.to_text(), ">un chat, un chien, un chat");
     }
 
     #[test]
