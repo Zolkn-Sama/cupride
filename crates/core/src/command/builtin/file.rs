@@ -12,6 +12,7 @@ fn path_arg(help: &'static str) -> Arg {
     Arg::new("chemin")
         .required(true)
         .value_parser(clap::value_parser!(PathBuf))
+        .value_hint(clap::ValueHint::AnyPath)
         .help(help)
 }
 

@@ -707,6 +707,7 @@ dependencies = [
  "cupride-core",
  "cupride-render",
  "png",
+ "tempfile",
  "tracing",
 ]
 

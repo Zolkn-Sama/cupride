@@ -149,6 +149,15 @@ mot par mot (Alt sous macOS, Ctrl ailleurs), Début et Fin, retour arrière et s
 mot avec le même modificateur), sélection avec Maj, `mod+a`, `mod+c`, `mod+x`, `mod+v`. Les
 autres raccourcis restent actifs pendant la saisie.
 
+- **Historique** : flèches haut et bas ; la saisie en cours est retrouvée en redescendant. Les 500
+  dernières commandes sont gardées entre les sessions, dans le dossier de données de l'OS
+  (`command-history`).
+- **Complétion** : Tab complète le mot sous le curseur : groupes, commandes, options, valeurs
+  possibles d'un argument, chemins (relatifs au dossier courant). Plusieurs propositions : leur
+  début commun est complété et elles sont listées sous la ligne ; Tab de nouveau les parcourt.
+- **Aide** : dès que la commande est reconnue, son utilisation et sa description s'affichent sous
+  la ligne.
+
 ## `window` — fenêtres
 
 | Commande | Description | Issue |

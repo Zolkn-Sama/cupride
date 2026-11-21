@@ -78,6 +78,15 @@ impl TextInput {
         self.anchor = self.cursor;
     }
 
+    /// Remplace la plage `range` par `text` ; le curseur se place après.
+    pub fn replace(&mut self, range: std::ops::Range<usize>, text: &str) {
+        let end = range.end.min(self.text.len());
+        let start = range.start.min(end);
+        self.text.replace_range(start..end, text);
+        self.cursor = start + text.len();
+        self.anchor = self.cursor;
+    }
+
     fn buffer(&self) -> StringBuffer {
         StringBuffer::from_text(&self.text)
     }

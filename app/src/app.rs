@@ -16,8 +16,8 @@ use cupride_core::{DocumentId, Editor};
 use cupride_render::Frame;
 use cupride_render::{Acquire, Gpu, Rect, Renderer, TextSystem, WindowSurface};
 use cupride_ui::{
-    ClickCounter, ClickModifiers, CommandLine, CursorBlink, EditorView, Focus, MouseSelection,
-    Pointer, Preedit, Theme, ViewSettings, WHEEL_LINES,
+    ClickCounter, ClickModifiers, CommandHistory, CommandLine, CursorBlink, EditorView, Focus,
+    MouseSelection, Pointer, Preedit, Theme, ViewSettings, WHEEL_LINES,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
@@ -31,7 +31,7 @@ use winit::window::{CursorIcon, Window, WindowId};
 
 mod overlays;
 
-use overlays::Element;
+use overlays::{CompletionCycle, Element};
 
 use crate::close::{CloseDecision, CloseGuard};
 use crate::input;
@@ -85,6 +85,11 @@ pub(crate) struct App {
     focus: Focus<Element>,
     /// Ligne de commande, quand elle est ouverte.
     command_line: Option<CommandLine>,
+    /// Historique des commandes tapées, et fichier où il est gardé entre les sessions.
+    history: CommandHistory,
+    history_path: Option<std::path::PathBuf>,
+    /// Complétion en cours dans la ligne de commande.
+    completion: Option<CompletionCycle>,
     /// Message affiché dans le titre (avertissement de fermeture), s'il y en a un.
     notice: Option<String>,
     /// Erreur qui a empêché de démarrer.
@@ -106,6 +111,17 @@ impl App {
             view.cursor_blink_interval(),
             Instant::now(),
         );
+        let history_path = directories::ProjectDirs::from("", "", "cupride")
+            .map(|dirs| dirs.data_dir().join("command-history"));
+        let history = history_path
+            .as_deref()
+            .map(|path| {
+                CommandHistory::load(path).unwrap_or_else(|error| {
+                    tracing::warn!("historique des commandes illisible : {error}");
+                    CommandHistory::default()
+                })
+            })
+            .unwrap_or_default();
         Self {
             editor,
             blink,
@@ -123,6 +139,9 @@ impl App {
             last_primary: None,
             focus: Focus::new(Element::Editor),
             command_line: None,
+            history,
+            history_path,
+            completion: None,
             text,
             theme: Theme::default(),
             gpu: None,

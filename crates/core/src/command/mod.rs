@@ -5,6 +5,7 @@
 //! arguments sont décrits avec `clap` : la même définition sert partout.
 
 pub(crate) mod builtin;
+pub mod complete;
 mod error;
 pub mod parser;
 mod registry;
