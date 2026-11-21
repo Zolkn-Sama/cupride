@@ -82,6 +82,10 @@ par une touche morte, AltGr sous Windows et le texte validé par une méthode de
 japonaise ou coréenne) est inséré avec `edit insert`. Toutes les autres touches passent par le
 keymap ([`configuration.md`](configuration.md), section `[keys]`).
 
+Souris : clic pour placer le curseur, glisser pour sélectionner, double clic pour un mot (glisser
+ensuite étend mot par mot), triple clic pour une ligne (puis ligne par ligne), Maj+clic pour
+étendre la sélection, Alt+clic pour ajouter un curseur.
+
 Exemples :
 
 ```

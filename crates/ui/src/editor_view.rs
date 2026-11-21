@@ -89,6 +89,19 @@ impl CachedLine {
     }
 }
 
+/// Forme du pointeur de la souris.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pointer {
+    /// Flèche.
+    Default,
+    /// Barre de texte : au-dessus d'une zone de texte.
+    Text,
+    /// Redimensionnement horizontal : au-dessus d'une séparation verticale.
+    ResizeHorizontal,
+    /// Redimensionnement vertical : au-dessus d'une séparation horizontale.
+    ResizeVertical,
+}
+
 /// Texte en cours de composition par une méthode de saisie (IME), pas encore inséré.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Preedit {
@@ -518,12 +531,62 @@ impl EditorView {
         ))
     }
 
+    /// Position dans le document sous le point (`x`, `y`) de la fenêtre, en pixels physiques :
+    /// la limite de caractère la plus proche. Au-dessus du texte : début du document ; en
+    /// dessous : fin. Sur une ligne non préparée (hors de la vue, pendant un glisser), le début
+    /// ou la fin de la ligne selon qu'elle est au-dessus ou en dessous.
+    pub fn offset_at(&self, x: f32, y: f32, buffer: &impl TextBuffer) -> usize {
+        let line_height = self.line_height().max(1.0);
+        let row = ((y - self.bounds.y - self.padding() + self.scroll_y()) / line_height).floor();
+        if row < 0.0 {
+            return 0;
+        }
+        let line = row as usize;
+        if line >= buffer.len_lines() {
+            return buffer.len_bytes();
+        }
+        let Some(cached) = self.lines.get(&line) else {
+            let range = buffer.line_content_range(line).unwrap_or(0..0);
+            return if line < self.visible.start {
+                range.start
+            } else {
+                range.end
+            };
+        };
+        let index = index_at(&cached.buffer, x - self.text_left()).min(cached.len);
+        cached.start + index
+    }
+
+    /// Forme du pointeur au point (`x`, `y`) de la fenêtre.
+    pub fn pointer_at(&self, x: f32, y: f32) -> Pointer {
+        if self.bounds.contains(x, y) {
+            Pointer::Text
+        } else {
+            Pointer::Default
+        }
+    }
+
     /// Position du curseur principal dans la fenêtre (pour placer la fenêtre de l'IME), si sa
     /// ligne est préparée.
     pub fn primary_cursor_rect(&self, document: &Document) -> Option<Rect> {
         let head = document.selections().primary().head;
         self.cursor_rect(document.buffer(), head, 1.0)
     }
+}
+
+/// Position (en octets) de la limite de glyphe la plus proche de l'abscisse `x`, mesurée depuis
+/// le bord gauche du texte.
+fn index_at(buffer: &Buffer, x: f32) -> usize {
+    let mut end = 0;
+    for run in buffer.layout_runs() {
+        for glyph in run.glyphs {
+            if x < glyph.x + glyph.w / 2.0 {
+                return glyph.start;
+            }
+            end = end.max(glyph.end);
+        }
+    }
+    end
 }
 
 /// Abscisse, depuis le bord gauche du texte, de la position `index` (en octets) d'une ligne mise
@@ -788,5 +851,45 @@ mod tests {
         view.prepare(&mut text, &document);
         assert_eq!(view.lines[&0].buffer.lines[0].text(), "ab");
         assert_eq!(view.primary_cursor_rect(&document).unwrap().x, before);
+    }
+
+    #[test]
+    fn position_sous_la_souris() {
+        let mut text = TextSystem::new();
+        let document = Document::from_text("abcd\nef\n");
+        let mut view = view(600.0);
+        view.prepare(&mut text, &document);
+        let buffer = document.buffer();
+        let left = view.text_left();
+        let top = view.line_top(0);
+        let char_width = view.lines[&0].x(1);
+        let lh = view.line_height();
+        let at = |x: f32, y: f32| view.offset_at(x, y, buffer);
+        assert_eq!(
+            at(left - 5.0, top + 1.0),
+            0,
+            "à gauche du texte : début de ligne"
+        );
+        assert_eq!(at(left + 0.4 * char_width, top + 1.0), 0);
+        assert_eq!(
+            at(left + 0.6 * char_width, top + 1.0),
+            1,
+            "limite la plus proche"
+        );
+        assert_eq!(at(left + 2.6 * char_width, top + lh - 1.0), 3);
+        assert_eq!(
+            at(left + 50.0 * char_width, top + 1.0),
+            4,
+            "après la fin : fin de ligne"
+        );
+        assert_eq!(
+            at(left + 1.2 * char_width, top + lh + 1.0),
+            6,
+            "deuxième ligne"
+        );
+        assert_eq!(at(left, -100.0), 0, "au-dessus : début");
+        assert_eq!(at(left, 10_000.0), 8, "en dessous : fin");
+        assert_eq!(view.pointer_at(10.0, 10.0), Pointer::Text);
+        assert_eq!(view.pointer_at(10.0, 900.0), Pointer::Default);
     }
 }

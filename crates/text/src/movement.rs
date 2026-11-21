@@ -116,6 +116,36 @@ pub fn prev_word<B: TextBuffer + ?Sized>(buffer: &B, offset: usize) -> Result<us
     }
 }
 
+/// Plage du mot sous `offset`, pour le double clic : le segment de mot (UAX #29) qui contient
+/// la position, en préférant le mot qui se termine juste avant quand elle tombe entre un mot et
+/// autre chose. Sur des espaces ou de la ponctuation, la plage est ce segment-là. La fin de ligne
+/// n'est jamais incluse ; en fin de ligne, la plage est vide.
+pub fn word_range<B: TextBuffer + ?Sized>(buffer: &B, offset: usize) -> Result<Range<usize>> {
+    let line = buffer.byte_to_line(offset)?;
+    let content = buffer.line_content_range(line)?;
+    let text = buffer.slice(content.clone())?;
+    let local = offset - content.start;
+    let segments: Vec<(usize, &str)> = text.split_word_bound_indices().collect();
+    let containing = segments
+        .iter()
+        .position(|&(i, seg)| i <= local && local < i + seg.len());
+    let chosen = match containing {
+        Some(index) if is_word(segments[index].1) => Some(index),
+        // Juste après un mot (ou en fin de ligne) : ce mot.
+        _ => segments
+            .iter()
+            .position(|&(i, seg)| i + seg.len() == local && is_word(seg))
+            .or(containing),
+    };
+    Ok(match chosen {
+        Some(index) => {
+            let (i, seg) = segments[index];
+            content.start + i..content.start + i + seg.len()
+        }
+        None => offset..offset,
+    })
+}
+
 /// Début de la ligne contenant `offset`.
 pub fn line_start<B: TextBuffer + ?Sized>(buffer: &B, offset: usize) -> Result<usize> {
     buffer.line_to_byte(buffer.byte_to_line(offset)?)
@@ -238,6 +268,28 @@ mod tests {
     }
     fn prev_w(b: &dyn TextBuffer, o: usize) -> Result<usize> {
         prev_word(b, o)
+    }
+
+    #[test]
+    fn mot_sous_la_position() {
+        both("let nom_long = f(x);\nz", |b| {
+            let word = |o| word_range(b, o).unwrap();
+            assert_eq!(word(5), 4..12, "au milieu");
+            assert_eq!(word(4), 4..12, "au début");
+            assert_eq!(word(12), 4..12, "juste après : le mot qui précède");
+            assert_eq!(word(13), 13..14, "« = » seul");
+            assert_eq!(word(3), 0..3, "entre « let » et l'espace : le mot");
+            assert_eq!(
+                word(20),
+                20..20,
+                "fin de ligne après de la ponctuation : vide"
+            );
+            assert_eq!(word(21), 21..22);
+        });
+        both("été 😀", |b| {
+            assert_eq!(word_range(b, 2).unwrap(), 0..5, "accents : un seul mot");
+        });
+        both("", |b| assert_eq!(word_range(b, 0).unwrap(), 0..0));
     }
 
     #[test]
