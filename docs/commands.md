@@ -8,6 +8,23 @@ Toute action de CuprIDE est une commande. Une même commande est accessible depu
 - la **CLI externe**, depuis un terminal système : `cupride <groupe> <commande> [arguments]` ;
 - les **plugins**.
 
+## Lancement
+
+```
+cupride [chemin…]
+```
+
+| Appel | Effet |
+|---|---|
+| `cupride` | Document vide. |
+| `cupride src/main.rs` | Ouvre le fichier. Un fichier inexistant ouvre un nouveau document avec ce chemin, créé au premier enregistrement. |
+| `cupride .` | Ouvre le dossier comme projet (son nom s'affiche dans le titre). |
+| `cupride . a.rs b.rs` | Dossier du projet et fichiers ; le premier fichier est actif. |
+| `cupride --help`, `cupride --version` | Aide, version. |
+
+Un fichier illisible (binaire, non UTF-8) n'empêche pas de démarrer : il est signalé dans le
+titre de la fenêtre et dans le journal. Une option inconnue arrête le lancement avec le code 2.
+
 ## Syntaxe
 
 ```

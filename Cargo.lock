@@ -634,10 +634,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arboard",
+ "clap",
  "cupride-core",
  "cupride-render",
  "cupride-ui",
  "directories",
+ "tempfile",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

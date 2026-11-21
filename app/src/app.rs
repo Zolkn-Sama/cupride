@@ -128,15 +128,26 @@ impl App {
         self.fatal.as_deref()
     }
 
-    /// Titre de la fenêtre : document actif, état modifié, et avertissement éventuel.
+    /// Message affiché dans le titre jusqu'à la prochaine commande.
+    pub(crate) fn set_notice(&mut self, notice: String) {
+        self.notice = Some(notice);
+        self.refresh_title();
+    }
+
+    /// Titre de la fenêtre : document actif, état modifié, projet, et avertissement éventuel.
     fn title(&self) -> String {
         let mut title = match self.editor.active_document() {
             Some(doc) => {
                 let modified = if doc.is_modified() { " •" } else { "" };
-                format!("{}{modified} — CuprIDE", doc.display_name())
+                format!("{}{modified} — ", doc.display_name())
             }
-            None => "CuprIDE".to_owned(),
+            None => String::new(),
         };
+        if let Some(project) = self.editor.project() {
+            title.push_str(&crate::cli::project_name(project));
+            title.push_str(" — ");
+        }
+        title.push_str("CuprIDE");
         if let Some(notice) = &self.notice {
             title = format!("{title} — {notice}");
         }
