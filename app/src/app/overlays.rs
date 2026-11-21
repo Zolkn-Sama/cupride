@@ -41,6 +41,10 @@ impl App {
                     self.close_overlays();
                     self.open_palette();
                 }
+                UiRequest::QuickOpen => {
+                    self.close_overlays();
+                    self.open_quick_open();
+                }
             }
         }
     }

@@ -10,4 +10,6 @@ pub enum UiRequest {
     CommandLine(String),
     /// Ouvrir la palette de commandes.
     Palette,
+    /// Ouvrir l'ouverture rapide de fichiers.
+    QuickOpen,
 }
