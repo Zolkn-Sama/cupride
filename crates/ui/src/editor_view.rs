@@ -71,7 +71,31 @@ struct CachedLine {
     start: usize,
     /// Longueur du contenu, sans la fin de ligne.
     len: usize,
+    /// Texte en cours de composition (IME) affiché dans cette ligne : position dans la ligne et
+    /// longueur, en octets.
+    preedit: Option<(usize, usize)>,
     buffer: Buffer,
+}
+
+impl CachedLine {
+    /// Abscisse de la position `index` du contenu de la ligne (en octets, sans le texte en
+    /// composition), depuis le bord gauche du texte.
+    fn x(&self, index: usize) -> f32 {
+        let index = match self.preedit {
+            Some((at, len)) if index >= at => index + len,
+            _ => index,
+        };
+        x_at(&self.buffer, index)
+    }
+}
+
+/// Texte en cours de composition par une méthode de saisie (IME), pas encore inséré.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Preedit {
+    /// Texte composé.
+    pub text: String,
+    /// Curseur dans ce texte (en octets), ou `None` pour le masquer.
+    pub cursor: Option<usize>,
 }
 
 /// Vue d'un document dans un rectangle de la fenêtre.
@@ -92,6 +116,8 @@ pub struct EditorView {
     content_width: f32,
     /// Le curseur principal doit être rendu visible à la prochaine préparation.
     reveal: bool,
+    /// Texte en cours de composition, affiché au curseur principal.
+    preedit: Option<Preedit>,
     lines: HashMap<usize, CachedLine>,
     visible: Range<usize>,
 }
@@ -118,6 +144,7 @@ impl EditorView {
             line_count: 1,
             content_width: 0.0,
             reveal: false,
+            preedit: None,
             lines: HashMap::new(),
             visible: 0..0,
         }
@@ -160,6 +187,11 @@ impl EditorView {
         PADDING * self.scale
     }
 
+    /// Nombre de lignes entièrement visibles : la taille d'une page.
+    pub fn page_lines(&self) -> usize {
+        ((self.bounds.height - 2.0 * self.padding()) / self.line_height().max(1.0)).floor() as usize
+    }
+
     /// Lignes actuellement visibles.
     pub fn visible_lines(&self) -> Range<usize> {
         self.visible.clone()
@@ -197,14 +229,29 @@ impl EditorView {
 
         let metrics = self.metrics();
         let family = self.settings.font_family.clone();
+        let head_line = buffer.byte_to_line(head).unwrap_or_default();
         for line in self.visible.clone() {
             let start = buffer.line_to_byte(line).unwrap_or_default();
-            let content = buffer.line(line).unwrap_or_default();
+            let mut content = buffer.line(line).unwrap_or_default();
+            let len = content.len();
+            // Le texte en composition est affiché dans la ligne du curseur, sans être inséré.
+            let mut preedit = None;
+            if line == head_line
+                && let Some(composing) = self.preedit.as_ref().filter(|p| !p.text.is_empty())
+            {
+                let at = head.saturating_sub(start).min(len);
+                if content.is_char_boundary(at) {
+                    content.insert_str(at, &composing.text);
+                    preedit = Some((at, composing.text.len()));
+                }
+            }
             let hash = hash_text(&content);
             if let Some(cached) = self.lines.get_mut(&line)
                 && cached.hash == hash
             {
                 cached.start = start;
+                cached.len = len;
+                cached.preedit = preedit;
                 continue;
             }
             let mut shaped = Buffer::new(text.font_system(), metrics);
@@ -219,7 +266,8 @@ impl EditorView {
                 CachedLine {
                     hash,
                     start,
-                    len: content.len(),
+                    len,
+                    preedit,
                     buffer: shaped,
                 },
             );
@@ -280,6 +328,15 @@ impl EditorView {
         self.scroll.is_animating()
     }
 
+    /// Texte en cours de composition par l'IME, affiché au curseur principal ; `None` quand la
+    /// composition est finie ou abandonnée.
+    pub fn set_preedit(&mut self, preedit: Option<Preedit>) {
+        if preedit != self.preedit {
+            self.preedit = preedit;
+            self.reveal = true;
+        }
+    }
+
     /// Demande que le curseur principal soit rendu visible à la prochaine préparation : la vue
     /// suit le curseur.
     pub fn follow_cursor(&mut self) {
@@ -310,7 +367,7 @@ impl EditorView {
         let Some(cached) = self.lines.get(&line) else {
             return;
         };
-        let cursor = self.padding() + x_at(&cached.buffer, offset.saturating_sub(cached.start));
+        let cursor = self.padding() + cached.x(offset.saturating_sub(cached.start));
         let margin = self.reveal_margin();
         let [x, y] = self.scroll.position();
         let x = if cursor - margin < x {
@@ -375,12 +432,12 @@ impl EditorView {
                     .saturating_sub(cached.start)
                     .min(cached.len);
                 let to = selection.end().saturating_sub(cached.start).min(cached.len);
-                let mut right = x_at(&cached.buffer, to);
+                let mut right = cached.x(to);
                 // La sélection continue après la fin de la ligne : le saut de ligne est inclus.
                 if selection.end() > cached.start + cached.len {
                     right += self.newline_width();
                 }
-                let left = x_at(&cached.buffer, from);
+                let left = cached.x(from);
                 let rect = Rect::new(
                     self.text_left() + left,
                     self.line_top(line),
@@ -406,6 +463,27 @@ impl EditorView {
             });
         }
 
+        // Texte en composition : souligné.
+        let head_line = line_of(selections.primary().head);
+        if let Some((cached, (at, len))) = self
+            .lines
+            .get(&head_line)
+            .and_then(|c| c.preedit.map(|p| (c, p)))
+        {
+            let thickness = self.scale.round().max(1.0);
+            let left = x_at(&cached.buffer, at);
+            let right = x_at(&cached.buffer, at + len);
+            let rect = Rect::new(
+                self.text_left() + left,
+                self.line_top(head_line) + line_height - 2.0 * thickness,
+                right - left,
+                thickness,
+            );
+            frame
+                .overlays
+                .push(Quad::new(rect.intersect(&self.bounds), theme.foreground));
+        }
+
         if cursors_visible {
             let width = (CURSOR_WIDTH * self.scale).round().max(1.0);
             for selection in selections.iter() {
@@ -423,7 +501,15 @@ impl EditorView {
     fn cursor_rect(&self, buffer: &impl TextBuffer, offset: usize, width: f32) -> Option<Rect> {
         let line = buffer.byte_to_line(offset).ok()?;
         let cached = self.lines.get(&line)?;
-        let x = x_at(&cached.buffer, offset.saturating_sub(cached.start));
+        let index = offset.saturating_sub(cached.start);
+        let x = match (cached.preedit, &self.preedit) {
+            // Curseur principal pendant une composition : à la position indiquée par l'IME.
+            (Some((at, len)), Some(composing)) if index == at => x_at(
+                &cached.buffer,
+                at + composing.cursor.unwrap_or(len).min(len),
+            ),
+            _ => cached.x(index),
+        };
         Some(Rect::new(
             (self.text_left() + x - width / 2.0).round(),
             self.line_top(line),
@@ -668,5 +754,39 @@ mod tests {
         view.scroll_by(0.0, 39.0 * 200.0, false, Instant::now());
         view.prepare(&mut text, &document);
         assert_eq!(view.visible_lines().start, 199);
+    }
+
+    #[test]
+    fn texte_en_composition_affiche_au_curseur() {
+        let mut text = TextSystem::new();
+        let mut document = Document::from_text("ab");
+        document.set_selections(Selections::cursor(1));
+        let mut view = view(600.0);
+        let theme = Theme::default();
+        view.prepare(&mut text, &document);
+        let before = view.primary_cursor_rect(&document).unwrap().x;
+
+        view.set_preedit(Some(Preedit {
+            text: "日本".to_owned(),
+            cursor: Some(3),
+        }));
+        view.prepare(&mut text, &document);
+        assert_eq!(
+            view.lines[&0].buffer.lines[0].text(),
+            "a日本b",
+            "affiché, pas inséré"
+        );
+        assert_eq!(document.buffer().to_string(), "ab");
+        let during = view.primary_cursor_rect(&document).unwrap().x;
+        assert!(during > before, "curseur après « 日 »");
+        let frame = view.frame(&theme, &document, false);
+        assert_eq!(frame.overlays.len(), 1, "soulignement de la composition");
+        let underline = frame.overlays[0].rect;
+        assert!(underline.x <= before + 1.0 && underline.right() > during);
+
+        view.set_preedit(None);
+        view.prepare(&mut text, &document);
+        assert_eq!(view.lines[&0].buffer.lines[0].text(), "ab");
+        assert_eq!(view.primary_cursor_rect(&document).unwrap().x, before);
     }
 }

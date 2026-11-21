@@ -20,6 +20,9 @@ slotmap::new_key_type! {
     pub struct DocumentId;
 }
 
+/// Lignes d'une page tant que l'interface n'en a pas fourni le nombre.
+const DEFAULT_PAGE_LINES: usize = 30;
+
 /// État complet de l'éditeur, sans aucune dépendance graphique.
 ///
 /// Tout ce que l'interface affiche et tout ce que les commandes modifient vit ici : documents
@@ -38,6 +41,8 @@ pub struct Editor {
     /// État déjà publié : (révision, enregistrements) de chaque document, et document actif.
     published: SecondaryMap<DocumentId, (u64, u64)>,
     published_active: Option<DocumentId>,
+    /// Nombre de lignes d'une page, pour `edit move page-up` : fourni par la vue.
+    page_lines: usize,
 }
 
 impl Default for Editor {
@@ -71,6 +76,7 @@ impl Editor {
             events: EventBus::new(),
             published: SecondaryMap::new(),
             published_active: None,
+            page_lines: DEFAULT_PAGE_LINES,
         }
     }
 
@@ -357,6 +363,16 @@ impl Editor {
         document
             .history_mut()
             .set_group_delay(self.config.editor.undo_group_delay());
+    }
+
+    /// Nombre de lignes parcourues par `edit move page-up` et `page-down`.
+    pub fn page_lines(&self) -> usize {
+        self.page_lines
+    }
+
+    /// Change le nombre de lignes d'une page : l'interface y met le nombre de lignes visibles.
+    pub fn set_page_lines(&mut self, lines: usize) {
+        self.page_lines = lines.max(1);
     }
 
     /// Fenêtres et layout.

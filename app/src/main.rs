@@ -2,6 +2,8 @@
 
 mod app;
 mod close;
+mod input;
+mod latency;
 mod logging;
 
 use anyhow::Context;

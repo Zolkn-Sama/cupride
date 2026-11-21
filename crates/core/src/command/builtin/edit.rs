@@ -16,7 +16,7 @@ use super::active;
 use crate::command::{CommandDef, CommandError, CommandOutput, CommandRegistry};
 
 /// Directions acceptées par `edit move`.
-const DIRECTIONS: [&str; 10] = [
+const DIRECTIONS: [&str; 12] = [
     "left",
     "right",
     "up",
@@ -27,6 +27,8 @@ const DIRECTIONS: [&str; 10] = [
     "line-end",
     "doc-start",
     "doc-end",
+    "page-up",
+    "page-down",
 ];
 
 pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandError> {
@@ -119,8 +121,9 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
         CommandDef::new("edit", "move", "Déplace les curseurs", |editor, args| {
             let direction: &String = args.get_one("direction").expect("argument requis");
             let extend = args.get_flag("extend");
+            let page = editor.page_lines();
             let (_, document) = active(editor)?;
-            let selections = move_selections(document.buffer(), document.selections(), direction, extend)?;
+            let selections = move_selections(document.buffer(), document.selections(), direction, extend, page)?;
             document.set_selections(selections);
             Ok(CommandOutput::None)
         })
@@ -128,7 +131,7 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
             Arg::new("direction")
                 .required(true)
                 .value_parser(PossibleValuesParser::new(DIRECTIONS))
-                .help("left, right, up, down, word-left, word-right, line-start, line-end, doc-start ou doc-end"),
+                .help("left, right, up, down, word-left, word-right, line-start, line-end, doc-start, doc-end, page-up ou page-down"),
         )
         .arg(
             Arg::new("extend")
@@ -185,7 +188,7 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
                 let direction: &String = args.get_one("direction").expect("argument requis");
                 let (_, document) = active(editor)?;
                 let head = document.selections().primary().head;
-                let target = vertical(document.buffer(), head, direction == "up")?;
+                let target = vertical(document.buffer(), head, direction == "up", 1)?;
                 if target != head {
                     let mut selections = document.selections().clone();
                     selections.push(Selection::cursor(target));
@@ -254,18 +257,18 @@ fn collapse_to_end(tx: &mut Transaction) {
     tx.set_selections_after(selections);
 }
 
-/// Position atteinte en montant ou en descendant d'une ligne depuis `offset`, à la même colonne
-/// (en graphèmes) si la ligne est assez longue, sinon à sa fin. Au-delà de la première ou de la
-/// dernière ligne : début ou fin du texte.
-fn vertical(buffer: &Rope, offset: usize, up: bool) -> Result<usize, TextError> {
+/// Position atteinte en montant ou en descendant de `lines` lignes depuis `offset`, à la même
+/// colonne (en graphèmes) si la ligne est assez longue, sinon à sa fin. Au-delà de la première ou
+/// de la dernière ligne : début ou fin du texte.
+fn vertical(buffer: &Rope, offset: usize, up: bool, lines: usize) -> Result<usize, TextError> {
     let point = offset_to_grapheme_point(buffer, offset)?;
     let line = if up {
-        match point.line.checked_sub(1) {
+        match point.line.checked_sub(lines) {
             Some(line) => line,
             None => return Ok(0),
         }
-    } else if point.line + 1 < buffer.len_lines() {
-        point.line + 1
+    } else if point.line + lines < buffer.len_lines() {
+        point.line + lines
     } else {
         return Ok(buffer.len_bytes());
     };
@@ -279,6 +282,7 @@ fn moved_head(
     selection: Selection,
     direction: &str,
     extend: bool,
+    page: usize,
 ) -> Result<usize, TextError> {
     let head = selection.head;
     // Sans extension, gauche et droite réduisent d'abord une sélection à son bord.
@@ -292,8 +296,10 @@ fn moved_head(
     match direction {
         "left" => movement::prev_grapheme(buffer, head),
         "right" => movement::next_grapheme(buffer, head),
-        "up" => vertical(buffer, head, true),
-        "down" => vertical(buffer, head, false),
+        "up" => vertical(buffer, head, true, 1),
+        "down" => vertical(buffer, head, false, 1),
+        "page-up" => vertical(buffer, head, true, page.max(1)),
+        "page-down" => vertical(buffer, head, false, page.max(1)),
         "word-left" => movement::prev_word(buffer, head),
         "word-right" => movement::next_word(buffer, head),
         "line-start" => movement::line_start(buffer, head),
@@ -310,11 +316,12 @@ fn move_selections(
     selections: &Selections,
     direction: &str,
     extend: bool,
+    page: usize,
 ) -> Result<Selections, TextError> {
     let moved = selections
         .iter()
         .map(|&selection| {
-            let head = moved_head(buffer, selection, direction, extend)?;
+            let head = moved_head(buffer, selection, direction, extend, page)?;
             Ok(if extend {
                 Selection::new(selection.anchor, head)
             } else {
@@ -435,6 +442,37 @@ mod tests {
         assert_eq!(heads(&e), [0]);
         run(&mut e, &["edit move line-end", "edit move line-start"]);
         assert_eq!(heads(&e), [0]);
+    }
+
+    #[test]
+    fn tabulation_du_raccourci_par_defaut() {
+        let keymap = crate::keymap::Keymap::with_defaults(crate::keymap::Platform::Other);
+        let tab = crate::keymap::KeySequence::parse("tab", crate::keymap::Platform::Other).unwrap();
+        let command = keymap.command_for(&tab).unwrap().to_owned();
+        let mut e = editor_with("x", 0);
+        run(&mut e, &[&command]);
+        assert_eq!(text(&e), "\tx");
+    }
+
+    #[test]
+    fn page_suivante_et_precedente() {
+        let text: String = (0..100).map(|i| format!("{i:03}\n")).collect();
+        let mut e = editor_with(&text, 1);
+        e.set_page_lines(30);
+        run(&mut e, &["edit move page-down"]);
+        assert_eq!(heads(&e), [30 * 4 + 1], "30 lignes plus bas, même colonne");
+        run(&mut e, &["edit move page-down --extend"]);
+        let sel = e.active_document().unwrap().selections().primary();
+        assert_eq!((sel.anchor, sel.head), (121, 60 * 4 + 1));
+        run(
+            &mut e,
+            &[
+                "edit move page-up",
+                "edit move page-up",
+                "edit move page-up",
+            ],
+        );
+        assert_eq!(heads(&e), [0], "au-delà du début : début du texte");
     }
 
     #[test]
