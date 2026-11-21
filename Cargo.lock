@@ -633,6 +633,7 @@ version = "0.1.0"
 name = "cupride-render"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "glyphon",
  "png",
  "pollster",
@@ -666,6 +667,7 @@ version = "0.1.0"
 dependencies = [
  "cupride-core",
  "cupride-render",
+ "png",
  "tracing",
 ]
 

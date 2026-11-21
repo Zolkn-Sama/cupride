@@ -2,14 +2,16 @@
 //!
 //! La boucle attend les événements (`ControlFlow::Wait`) : sans saisie, sans redimensionnement et
 //! sans minuterie, le processus dort et ne consomme pas de CPU. Rien n'est redessiné tant que rien
-//! n'a changé.
+//! n'a changé. Les seules minuteries sont le clignotement du curseur, qui s'arrête de lui-même
+//! quelques secondes après la dernière saisie, et l'expiration d'un avertissement.
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use cupride_core::Editor;
+use cupride_render::Frame;
 use cupride_render::{Acquire, Gpu, Rect, Renderer, TextSystem, WindowSurface};
-use cupride_ui::{EditorView, Theme, ViewSettings};
+use cupride_ui::{CursorBlink, EditorView, Theme, ViewSettings};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{StartCause, WindowEvent};
@@ -38,6 +40,10 @@ pub(crate) struct App {
     gpu: Option<Gpu>,
     window: Option<WindowState>,
     close_guard: CloseGuard,
+    blink: CursorBlink,
+    /// La fenêtre a-t-elle le focus clavier ? Sans focus, les curseurs sont masqués et ne
+    /// clignotent pas.
+    focused: bool,
     /// Message affiché dans le titre (avertissement de fermeture), s'il y en a un.
     notice: Option<String>,
     /// Erreur qui a empêché de démarrer.
@@ -53,8 +59,16 @@ impl App {
                 "police « {family} » introuvable : police à chasse fixe du système utilisée"
             );
         }
+        let view = &editor.config().view;
+        let blink = CursorBlink::new(
+            view.cursor_blink,
+            view.cursor_blink_interval(),
+            Instant::now(),
+        );
         Self {
             editor,
+            blink,
+            focused: true,
             text,
             theme: Theme::default(),
             gpu: None,
@@ -85,6 +99,12 @@ impl App {
         title
     }
 
+    fn request_redraw(&self) {
+        if let Some(state) = &self.window {
+            state.window.request_redraw();
+        }
+    }
+
     fn refresh_title(&self) {
         if let Some(state) = &self.window {
             state.window.set_title(&self.title());
@@ -112,10 +132,7 @@ impl App {
                 tracing::warn!("{message}");
                 self.notice = Some(message);
                 self.refresh_title();
-                // Réveil unique à l'expiration de l'avertissement, pour retirer le message.
-                if let Some(deadline) = self.close_guard.deadline() {
-                    event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-                }
+                // Le réveil à l'expiration de l'avertissement est programmé par `about_to_wait`.
             }
         }
     }
@@ -138,6 +155,8 @@ impl App {
             .map(Arc::new)
             .map_err(|error| format!("impossible d'ouvrir une fenêtre : {error}"))?;
         tracing::info!(id = ?window.id(), "fenêtre ouverte");
+        // Lancée depuis un terminal, l'application passe au premier plan avec le focus clavier.
+        window.focus_window();
         let (gpu, surface) = Gpu::for_window(Arc::clone(&window)).map_err(|e| e.to_string())?;
         let size = window.inner_size();
         let surface =
@@ -145,7 +164,7 @@ impl App {
                 .map_err(|e| e.to_string())?;
         tracing::info!(gpu = %gpu.describe(), format = ?surface.format(), "rendu prêt");
         let renderer = Renderer::new(&gpu, surface.format());
-        let settings = ViewSettings::from(&self.editor.config().font);
+        let settings = ViewSettings::from_config(self.editor.config());
         let view = EditorView::new(settings, window.scale_factor() as f32);
         self.gpu = Some(gpu);
         self.window = Some(WindowState {
@@ -175,13 +194,14 @@ impl App {
         state
             .view
             .set_bounds(Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32));
-        if let Some(document) = self.editor.active_document() {
-            state.view.prepare(&mut self.text, document);
-        }
-        let mut scene = state.view.frame(&self.theme);
-        if self.editor.active_document().is_none() {
-            scene.texts.clear();
-        }
+        let cursors_visible = self.focused && self.blink.visible(Instant::now());
+        let scene = match self.editor.active_document() {
+            Some(document) => {
+                state.view.prepare(&mut self.text, document);
+                state.view.frame(&self.theme, document, cursors_visible)
+            }
+            None => Frame::new(self.theme.background),
+        };
         if let Err(error) = state
             .renderer
             .render(gpu, &mut self.text, &frame.view, size, &scene)
@@ -224,21 +244,43 @@ impl ApplicationHandler for App {
                     state.window.request_redraw();
                 }
             }
+            WindowEvent::Focused(focused) => {
+                self.focused = focused;
+                self.blink.reset(Instant::now());
+                self.request_redraw();
+            }
             WindowEvent::RedrawRequested | WindowEvent::Occluded(false) => self.redraw(),
             _ => {}
         }
     }
 
-    fn new_events(&mut self, event_loop: &ActiveEventLoop, cause: StartCause) {
-        if let StartCause::ResumeTimeReached { .. } = cause
-            && self.close_guard.expired(Instant::now())
-        {
-            self.notice = None;
-            self.refresh_title();
+    fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {
+        if let StartCause::ResumeTimeReached { .. } = cause {
+            let now = Instant::now();
+            if self.close_guard.expired(now) {
+                self.notice = None;
+                self.refresh_title();
+            }
+            // Réveil du clignotement : le curseur change d'état.
+            if self.focused {
+                self.request_redraw();
+            }
         }
-        if self.close_guard.deadline().is_none() {
-            event_loop.set_control_flow(ControlFlow::Wait);
-        }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Prochain réveil : expiration de l'avertissement de fermeture, ou changement d'état du
+        // curseur. Sans l'un ni l'autre, la boucle dort jusqu'au prochain événement.
+        let now = Instant::now();
+        let blink = self.focused.then(|| self.blink.next_change(now)).flatten();
+        let wake = match (self.close_guard.deadline(), blink) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        event_loop.set_control_flow(match wake {
+            Some(deadline) => ControlFlow::WaitUntil(deadline),
+            None => ControlFlow::Wait,
+        });
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {

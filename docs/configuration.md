@@ -26,6 +26,22 @@ options, commentées, avec leur valeur par défaut. `config reload` l'applique s
 | `line_ending` | `"auto"`, `"lf"`, `"crlf"` | `"auto"` | Fin de ligne des **nouveaux** documents (`auto` : LF). Un fichier existant garde toujours ses fins de ligne. |
 | `undo_group_delay_ms` | entier ≥ 0 | `1000` | Pause, en millisecondes, au-delà de laquelle une nouvelle frappe commence un nouveau bloc d'annulation. `0` : chaque frappe s'annule séparément. |
 
+### `[font]`
+
+| Option | Valeurs | Défaut | Effet |
+|---|---|---|---|
+| `family` | `"monospace"` ou un nom de famille installée | `"monospace"` | Police de l'éditeur. `monospace` : police à chasse fixe du système. Une famille introuvable est signalée, et la police à chasse fixe du système est utilisée. Les ligatures de la police (Fira Code, JetBrains Mono…) sont appliquées. |
+| `size` | nombre, de 4 à 200 | `14.0` | Taille en pixels logiques, multipliée par l'échelle de l'écran. |
+| `line_height` | nombre, de 0,8 à 4 | `1.4` | Hauteur de ligne, en multiple de la taille. |
+
+### `[view]`
+
+| Option | Valeurs | Défaut | Effet |
+|---|---|---|---|
+| `cursor_blink` | `true`, `false` | `true` | Clignotement du curseur. Il s'arrête, curseur visible, 10 secondes après la dernière saisie : au repos, l'IDE ne consomme pas de CPU. |
+| `cursor_blink_ms` | entier, de 50 à 5000 | `530` | Demi-période du clignotement, en millisecondes. |
+| `highlight_current_line` | `true`, `false` | `true` | Surligne la ligne du curseur principal. |
+
 ### `[keys]`
 
 Raccourcis : `"touches" = "ligne de commande"`. Ils s'ajoutent aux raccourcis par défaut et les
@@ -55,6 +71,28 @@ Les commandes disponibles sont décrites dans [`commands.md`](commands.md).
 # Pause, en millisecondes, au-delà de laquelle une nouvelle frappe commence un nouveau bloc
 # d'annulation. 0 : chaque frappe est annulée séparément.
 # undo_group_delay_ms = 1000
+
+[font]
+# Famille de police : "monospace" (police à chasse fixe du système) ou un nom de famille
+# installée, par exemple "JetBrains Mono" ou "Fira Code" (ligatures).
+# family = "monospace"
+
+# Taille en points (pixels logiques, multipliés par l'échelle de l'écran).
+# size = 14.0
+
+# Hauteur de ligne, en multiple de la taille.
+# line_height = 1.4
+
+[view]
+# Clignotement du curseur. Il s'arrête de lui-même après quelques secondes sans saisie, pour que
+# l'IDE ne consomme aucun CPU au repos.
+# cursor_blink = true
+
+# Demi-période du clignotement, en millisecondes.
+# cursor_blink_ms = 530
+
+# Surligne la ligne du curseur principal.
+# highlight_current_line = true
 
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les

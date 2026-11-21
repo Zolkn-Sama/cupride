@@ -48,6 +48,17 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # Hauteur de ligne, en multiple de la taille.
 # line_height = 1.4
 
+[view]
+# Clignotement du curseur. Il s'arrête de lui-même après quelques secondes sans saisie, pour que
+# l'IDE ne consomme aucun CPU au repos.
+# cursor_blink = true
+
+# Demi-période du clignotement, en millisecondes.
+# cursor_blink_ms = 530
+
+# Surligne la ligne du curseur principal.
+# highlight_current_line = true
+
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les
 # remplacent pour les mêmes touches. Une chaîne vide retire un raccourci par défaut.
@@ -128,6 +139,35 @@ impl Default for FontConfig {
     }
 }
 
+/// Section `[view]` : affichage de l'éditeur.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct ViewConfig {
+    /// Clignotement du curseur.
+    pub cursor_blink: bool,
+    /// Demi-période du clignotement, en millisecondes.
+    pub cursor_blink_ms: u64,
+    /// Surlignage de la ligne du curseur principal.
+    pub highlight_current_line: bool,
+}
+
+impl Default for ViewConfig {
+    fn default() -> Self {
+        Self {
+            cursor_blink: true,
+            cursor_blink_ms: 530,
+            highlight_current_line: true,
+        }
+    }
+}
+
+impl ViewConfig {
+    /// Demi-période du clignotement, bornée à des valeurs raisonnables (50 ms à 5 s).
+    pub fn cursor_blink_interval(&self) -> Duration {
+        Duration::from_millis(self.cursor_blink_ms.clamp(50, 5_000))
+    }
+}
+
 /// Configuration complète.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
@@ -136,14 +176,20 @@ pub struct Config {
     pub editor: EditorConfig,
     /// Section `[font]`.
     pub font: FontConfig,
+    /// Section `[view]`.
+    pub view: ViewConfig,
     /// Section `[keys]` : touches → ligne de commande (vide pour retirer un raccourci).
     pub keys: BTreeMap<String, String>,
 }
 
 /// Clés connues, pour signaler les fautes de frappe.
-const KNOWN_KEYS: [(&str, &[&str]); 3] = [
+const KNOWN_KEYS: [(&str, &[&str]); 4] = [
     ("editor", &["line_ending", "undo_group_delay_ms"]),
     ("font", &["family", "size", "line_height"]),
+    (
+        "view",
+        &["cursor_blink", "cursor_blink_ms", "highlight_current_line"],
+    ),
     ("keys", &[]),
 ];
 
