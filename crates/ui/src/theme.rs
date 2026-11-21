@@ -17,6 +17,10 @@ pub struct Theme {
     pub selection: Color,
     /// Fond de la ligne du curseur principal.
     pub current_line: Color,
+    /// Numéros de ligne.
+    pub line_number: Color,
+    /// Numéro de la ligne du curseur principal.
+    pub line_number_active: Color,
 }
 
 impl Theme {
@@ -28,6 +32,8 @@ impl Theme {
         cursor: Color::rgb(0xf7, 0x9e, 0x86),
         selection: Color::rgba(0xe8, 0x7e, 0x6c, 0x48),
         current_line: Color::rgba(0xff, 0xff, 0xff, 0x0b),
+        line_number: Color::rgb(0x6e, 0x60, 0x66),
+        line_number_active: Color::rgb(0xf7, 0x9e, 0x86),
     };
 }
 

@@ -6,11 +6,12 @@ use std::ops::Range;
 use std::time::Instant;
 
 use cupride_core::Document;
-use cupride_core::config::Config;
+use cupride_core::config::{Config, LineNumbers};
 use cupride_core::text::TextBuffer;
 use cupride_render::text::{Attrs, Buffer, Family, Metrics, Shaping, Wrap};
 use cupride_render::{Frame, Quad, Rect, TextItem, TextSystem};
 
+use crate::gutter::{self, Gutter, GutterMarker, MARKER_LANE, NUMBER_GAP};
 use crate::scroll::Scroll;
 use crate::theme::Theme;
 
@@ -37,6 +38,8 @@ pub struct ViewSettings {
     pub line_height: f32,
     /// Surlignage de la ligne du curseur principal.
     pub highlight_current_line: bool,
+    /// Numéros de ligne dans la gouttière.
+    pub line_numbers: LineNumbers,
 }
 
 impl Default for ViewSettings {
@@ -53,6 +56,7 @@ impl ViewSettings {
             font_size: config.font.size.clamp(4.0, 200.0),
             line_height: config.font.line_height.clamp(0.8, 4.0),
             highlight_current_line: config.view.highlight_current_line,
+            line_numbers: config.view.line_numbers,
         }
     }
 
@@ -131,6 +135,12 @@ pub struct EditorView {
     reveal: bool,
     /// Texte en cours de composition, affiché au curseur principal.
     preedit: Option<Preedit>,
+    /// Numéros de ligne mis en forme.
+    gutter: Gutter,
+    /// Marqueurs de la gouttière.
+    markers: Vec<GutterMarker>,
+    /// Ligne du curseur principal, à la dernière préparation.
+    cursor_line: usize,
     lines: HashMap<usize, CachedLine>,
     visible: Range<usize>,
 }
@@ -158,6 +168,9 @@ impl EditorView {
             content_width: 0.0,
             reveal: false,
             preedit: None,
+            gutter: Gutter::default(),
+            markers: Vec::new(),
+            cursor_line: 0,
             lines: HashMap::new(),
             visible: 0..0,
         }
@@ -168,6 +181,7 @@ impl EditorView {
     pub fn set_settings(&mut self, settings: ViewSettings) {
         if !settings.same_shaping(&self.settings) {
             self.lines.clear();
+            self.gutter.clear();
             self.content_width = 0.0;
         }
         self.settings = settings;
@@ -178,6 +192,7 @@ impl EditorView {
         if (scale - self.scale).abs() > f32::EPSILON {
             self.scale = scale;
             self.lines.clear();
+            self.gutter.clear();
             self.content_width = 0.0;
         }
     }
@@ -285,9 +300,53 @@ impl EditorView {
                 },
             );
         }
+        self.cursor_line = head_line;
+        self.gutter.prepare(
+            text,
+            metrics,
+            &attrs(&family),
+            self.visible.clone(),
+            head_line,
+            self.settings.line_numbers,
+        );
         if reveal {
             self.reveal_column(buffer, head);
         }
+    }
+
+    /// Remplace les marqueurs de la gouttière.
+    pub fn set_markers(&mut self, markers: Vec<GutterMarker>) {
+        self.markers = markers;
+    }
+
+    /// Largeur de la colonne des marqueurs.
+    fn marker_lane(&self) -> f32 {
+        (MARKER_LANE * self.scale).round()
+    }
+
+    /// Largeur réservée aux numéros (chiffres et espace avant le texte), nulle sans numéros.
+    fn numbers_width(&self) -> f32 {
+        if self.settings.line_numbers == LineNumbers::Off {
+            return 0.0;
+        }
+        let digits = gutter::digits(self.line_count) as f32;
+        (digits * self.gutter.digit_width + NUMBER_GAP * self.scale).round()
+    }
+
+    /// Largeur de la gouttière.
+    pub fn gutter_width(&self) -> f32 {
+        self.marker_lane() + self.numbers_width()
+    }
+
+    /// Zone du texte : la vue sans la gouttière.
+    fn text_area(&self) -> Rect {
+        let gutter = self.gutter_width().min(self.bounds.width);
+        Rect::new(
+            self.bounds.x + gutter,
+            self.bounds.y,
+            self.bounds.width - gutter,
+            self.bounds.height,
+        )
     }
 
     /// Défilement vertical actuel.
@@ -304,8 +363,8 @@ impl EditorView {
     /// jusqu'à la fin de la plus longue ligne vue, plus une marge.
     fn max_scroll(&self) -> [f32; 2] {
         let max_y = self.line_count.saturating_sub(1) as f32 * self.line_height();
-        let max_x =
-            self.content_width + 2.0 * self.padding() + self.reveal_margin() - self.bounds.width;
+        let max_x = self.content_width + 2.0 * self.padding() + self.reveal_margin()
+            - self.text_area().width;
         [max_x.max(0.0), max_y]
     }
 
@@ -385,8 +444,8 @@ impl EditorView {
         let [x, y] = self.scroll.position();
         let x = if cursor - margin < x {
             cursor - margin
-        } else if cursor + margin > x + self.bounds.width {
-            cursor + margin - self.bounds.width
+        } else if cursor + margin > x + self.text_area().width {
+            cursor + margin - self.text_area().width
         } else {
             x
         };
@@ -396,7 +455,7 @@ impl EditorView {
 
     /// Bord gauche du texte, en pixels physiques.
     fn text_left(&self) -> f32 {
-        self.bounds.x + self.padding() - self.scroll_x()
+        self.text_area().x + self.padding() - self.scroll_x()
     }
 
     /// Haut de la ligne `line`, en pixels physiques.
@@ -417,6 +476,7 @@ impl EditorView {
         let selections = document.selections();
         let buffer = document.buffer();
         let line_of = |offset: usize| buffer.byte_to_line(offset).unwrap_or_default();
+        let text_area = self.text_area();
 
         if self.settings.highlight_current_line {
             let line = line_of(selections.primary().head);
@@ -459,7 +519,7 @@ impl EditorView {
                 );
                 frame
                     .quads
-                    .push(Quad::new(rect.intersect(&self.bounds), theme.selection));
+                    .push(Quad::new(rect.intersect(&text_area), theme.selection));
             }
         }
 
@@ -471,10 +531,11 @@ impl EditorView {
                 buffer: &cached.buffer,
                 left: self.text_left(),
                 top: self.line_top(line),
-                clip: self.bounds,
+                clip: text_area,
                 color: theme.foreground,
             });
         }
+        self.draw_gutter(&mut frame, theme);
 
         // Texte en composition : souligné.
         let head_line = line_of(selections.primary().head);
@@ -494,7 +555,7 @@ impl EditorView {
             );
             frame
                 .overlays
-                .push(Quad::new(rect.intersect(&self.bounds), theme.foreground));
+                .push(Quad::new(rect.intersect(&text_area), theme.foreground));
         }
 
         if cursors_visible {
@@ -503,11 +564,55 @@ impl EditorView {
                 if let Some(rect) = self.cursor_rect(buffer, selection.head, width) {
                     frame
                         .overlays
-                        .push(Quad::new(rect.intersect(&self.bounds), theme.cursor));
+                        .push(Quad::new(rect.intersect(&text_area), theme.cursor));
                 }
             }
         }
         frame
+    }
+
+    /// Numéros de ligne et marqueurs.
+    fn draw_gutter<'a>(&'a self, frame: &mut Frame<'a>, theme: &Theme) {
+        let gutter = Rect::new(
+            self.bounds.x,
+            self.bounds.y,
+            self.gutter_width().min(self.bounds.width),
+            self.bounds.height,
+        );
+        let right = gutter.right() - (NUMBER_GAP * self.scale).round();
+        for line in self.visible.clone() {
+            let Some(number) = self.gutter.numbers.get(&line) else {
+                continue;
+            };
+            frame.texts.push(TextItem {
+                buffer: &number.buffer,
+                left: (right - number.width).round(),
+                top: self.line_top(line),
+                clip: gutter,
+                color: if line == self.cursor_line {
+                    theme.line_number_active
+                } else {
+                    theme.line_number
+                },
+            });
+        }
+        let width = (3.0 * self.scale).round().max(1.0);
+        let lane = self.marker_lane();
+        for marker in self
+            .markers
+            .iter()
+            .filter(|m| self.visible.contains(&m.line))
+        {
+            let rect = Rect::new(
+                (gutter.x + (lane - width) / 2.0).round(),
+                self.line_top(marker.line),
+                width,
+                self.line_height(),
+            );
+            frame
+                .quads
+                .push(Quad::new(rect.intersect(&gutter), marker.color));
+        }
     }
 
     /// Rectangle du curseur à la position `offset`, s'il est sur une ligne préparée.
@@ -559,7 +664,7 @@ impl EditorView {
 
     /// Forme du pointeur au point (`x`, `y`) de la fenêtre.
     pub fn pointer_at(&self, x: f32, y: f32) -> Pointer {
-        if self.bounds.contains(x, y) {
+        if self.text_area().contains(x, y) {
             Pointer::Text
         } else {
             Pointer::Default
@@ -643,7 +748,7 @@ mod tests {
         assert_eq!(visible, 0..17);
         assert_eq!(view.cached_lines(), 17);
         let frame = view.frame(&Theme::default(), &document, true);
-        assert_eq!(frame.texts.len(), 17);
+        assert_eq!(frame.texts.len(), 2 * 17, "17 lignes et leurs 17 numéros");
     }
 
     #[test]
@@ -889,7 +994,87 @@ mod tests {
         );
         assert_eq!(at(left, -100.0), 0, "au-dessus : début");
         assert_eq!(at(left, 10_000.0), 8, "en dessous : fin");
-        assert_eq!(view.pointer_at(10.0, 10.0), Pointer::Text);
-        assert_eq!(view.pointer_at(10.0, 900.0), Pointer::Default);
+        assert_eq!(view.pointer_at(left + 10.0, 10.0), Pointer::Text);
+        assert_eq!(view.pointer_at(10.0, 10.0), Pointer::Default, "gouttière");
+        assert_eq!(view.pointer_at(left + 10.0, 900.0), Pointer::Default);
+        assert_eq!(
+            at(5.0, top + lh + 1.0),
+            5,
+            "clic dans la gouttière : début de ligne"
+        );
+    }
+
+    #[test]
+    fn gouttiere_numeros_et_marqueurs() {
+        let mut text = TextSystem::new();
+        let mut document = Document::from_text(&"x\n".repeat(1_500));
+        document.set_selections(Selections::cursor(2 * 2));
+        let theme = Theme::default();
+        let mut view = view(600.0);
+        view.set_markers(vec![GutterMarker {
+            line: 2,
+            color: cupride_render::Color::rgb(0xff, 0, 0),
+        }]);
+        view.prepare(&mut text, &document);
+        let label = |view: &EditorView, line: usize| view.gutter.numbers[&line].label.clone();
+        assert_eq!(label(&view, 0), "1");
+        assert_eq!(label(&view, 4), "5");
+        // 1 501 lignes : quatre chiffres réservés, le texte commence après la gouttière.
+        let digit = view.gutter.digit_width;
+        assert!(digit > 0.0);
+        assert!(view.gutter_width() >= 4.0 * digit);
+        assert!(view.text_left() > view.gutter_width());
+
+        let frame = view.frame(&theme, &document, false);
+        let numbers: Vec<_> = frame
+            .texts
+            .iter()
+            .filter(|t| t.color == theme.line_number || t.color == theme.line_number_active)
+            .collect();
+        assert_eq!(numbers.len(), view.visible_lines().len());
+        let active: Vec<_> = numbers
+            .iter()
+            .filter(|t| t.color == theme.line_number_active)
+            .collect();
+        assert_eq!(
+            active.len(),
+            1,
+            "numéro de la ligne du curseur mis en valeur"
+        );
+        // Alignés à droite : « 10 » commence plus à gauche que « 9 ».
+        let left_of = |line: usize| {
+            numbers
+                .iter()
+                .find(|t| t.top == view.line_top(line))
+                .unwrap()
+                .left
+        };
+        assert!(left_of(9) < left_of(8));
+        let marker = frame
+            .quads
+            .iter()
+            .find(|q| q.color.r == 0xff && q.color.g == 0)
+            .unwrap();
+        assert!(marker.rect.right() <= view.marker_lane());
+        assert_eq!(marker.rect.y, view.line_top(2));
+
+        // Relatifs : distance au curseur (ligne 2), numéro réel sur sa ligne.
+        view.set_settings(ViewSettings {
+            line_numbers: LineNumbers::Relative,
+            ..ViewSettings::default()
+        });
+        view.prepare(&mut text, &document);
+        assert_eq!(label(&view, 0), "2");
+        assert_eq!(label(&view, 2), "3");
+        assert_eq!(label(&view, 7), "5");
+
+        // Sans numéros : la colonne des marqueurs reste réservée.
+        view.set_settings(ViewSettings {
+            line_numbers: LineNumbers::Off,
+            ..ViewSettings::default()
+        });
+        view.prepare(&mut text, &document);
+        assert!(view.gutter.numbers.is_empty());
+        assert_eq!(view.gutter_width(), view.marker_lane());
     }
 }
