@@ -37,6 +37,17 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # d'annulation. 0 : chaque frappe est annulée séparément.
 # undo_group_delay_ms = 1000
 
+[font]
+# Famille de police : "monospace" (police à chasse fixe du système) ou un nom de famille
+# installée, par exemple "JetBrains Mono" ou "Fira Code" (ligatures).
+# family = "monospace"
+
+# Taille en points (pixels logiques, multipliés par l'échelle de l'écran).
+# size = 14.0
+
+# Hauteur de ligne, en multiple de la taille.
+# line_height = 1.4
+
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les
 # remplacent pour les mêmes touches. Une chaîne vide retire un raccourci par défaut.
@@ -95,19 +106,44 @@ impl EditorConfig {
     }
 }
 
+/// Section `[font]`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct FontConfig {
+    /// Famille de police : `monospace` ou le nom d'une famille installée.
+    pub family: String,
+    /// Taille en pixels logiques.
+    pub size: f32,
+    /// Hauteur de ligne, en multiple de la taille.
+    pub line_height: f32,
+}
+
+impl Default for FontConfig {
+    fn default() -> Self {
+        Self {
+            family: "monospace".to_owned(),
+            size: 14.0,
+            line_height: 1.4,
+        }
+    }
+}
+
 /// Configuration complète.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Config {
     /// Section `[editor]`.
     pub editor: EditorConfig,
+    /// Section `[font]`.
+    pub font: FontConfig,
     /// Section `[keys]` : touches → ligne de commande (vide pour retirer un raccourci).
     pub keys: BTreeMap<String, String>,
 }
 
 /// Clés connues, pour signaler les fautes de frappe.
-const KNOWN_KEYS: [(&str, &[&str]); 2] = [
+const KNOWN_KEYS: [(&str, &[&str]); 3] = [
     ("editor", &["line_ending", "undo_group_delay_ms"]),
+    ("font", &["family", "size", "line_height"]),
     ("keys", &[]),
 ];
 

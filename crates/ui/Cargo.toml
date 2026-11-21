@@ -1,0 +1,17 @@
+[package]
+name = "cupride-ui"
+description = "Interface de CuprIDE : vues des panneaux, construites à partir de l'état du noyau"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+cupride-core.workspace = true
+cupride-render.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
