@@ -24,6 +24,17 @@ fn save_png(name: &str, (width, height): (u32, u32), pixels: &[u8]) {
 
 #[test]
 fn editeur_avec_selections_et_curseurs() {
+    render_editor("editeur", 1.0);
+}
+
+/// Écran haute densité (Retina) : même vue, deux fois plus de pixels, texte mis en forme à cette
+/// échelle (pas d'image agrandie).
+#[test]
+fn editeur_haute_densite() {
+    render_editor("editeur_2x", 2.0);
+}
+
+fn render_editor(name: &str, scale: f32) {
     let gpu = match Gpu::headless() {
         Ok(gpu) => gpu,
         Err(error) => {
@@ -31,7 +42,7 @@ fn editeur_avec_selections_et_curseurs() {
             return;
         }
     };
-    let (width, height) = (640, 200);
+    let (width, height) = ((640.0 * scale) as u32, (200.0 * scale) as u32);
     let target = OffscreenTarget::new(&gpu, width, height);
     let mut renderer = Renderer::new(&gpu, OFFSCREEN_FORMAT);
     let mut text = TextSystem::new();
@@ -42,16 +53,16 @@ fn editeur_avec_selections_et_curseurs() {
     selections.push(Selection::cursor(54));
     document.set_selections(selections);
 
-    let mut view = EditorView::new(ViewSettings::default(), 1.0);
+    let mut view = EditorView::new(ViewSettings::default(), scale);
     view.set_bounds(Rect::new(0.0, 0.0, width as f32, height as f32));
     view.prepare(&mut text, &document);
     let theme = Theme::default();
     let frame = view.frame(&theme, &document, true);
     renderer
         .render(&gpu, &mut text, &target.view, target.size(), &frame)
-        .unwrap();
-    let pixels = target.read_rgba(&gpu).unwrap();
-    save_png("editeur", (width, height), &pixels);
+        .expect("rendu");
+    let pixels = target.read_rgba(&gpu).expect("relecture de l'image");
+    save_png(name, (width, height), &pixels);
 
     // Le curseur, opaque, apparaît avec sa couleur exacte.
     let cursor = [theme.cursor.r, theme.cursor.g, theme.cursor.b];

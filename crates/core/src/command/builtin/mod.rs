@@ -3,6 +3,7 @@
 mod config;
 mod edit;
 mod file;
+mod view;
 
 use super::{CommandError, CommandRegistry};
 use crate::document::Document;
@@ -13,6 +14,7 @@ pub(crate) fn register_all(registry: &mut CommandRegistry) -> Result<(), Command
     file::register(registry)?;
     edit::register(registry)?;
     config::register(registry)?;
+    view::register(registry)?;
     Ok(())
 }
 

@@ -106,6 +106,19 @@ Voir [`configuration.md`](configuration.md) pour les options.
 | `config open` | Ouvre le fichier de configuration dans l'IDE ; s'il n'existe pas, il est prérempli avec les options par défaut. |
 | `config reload` | Relit le fichier de configuration et l'applique ; affiche les erreurs (avec ligne et colonne) et les avertissements. |
 
+## `view` — affichage
+
+| Commande | Description |
+|---|---|
+| `view zoom-in` | Agrandit l'interface d'un cran (raccourcis `mod+=`, `mod+plus`). |
+| `view zoom-out` | Réduit l'interface d'un cran (`mod+-`). |
+| `view zoom-reset` | Revient à 100 % (`mod+0`). |
+
+Crans : 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250 et 300 %. Le zoom multiplie
+l'échelle de l'écran : le texte est remis en forme à la nouvelle taille, net, sans redémarrage ;
+le haut de la vue reste sur le même texte. Un changement d'écran (densité différente) est appliqué
+de la même façon, à chaud.
+
 ## `window` — fenêtres
 
 | Commande | Description | Issue |

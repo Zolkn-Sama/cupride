@@ -21,6 +21,11 @@ slotmap::new_key_type! {
     pub struct DocumentId;
 }
 
+/// Crans de zoom de l'interface, de 50 % à 300 %.
+pub(crate) const ZOOM_STEPS: [f32; 13] = [
+    0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0,
+];
+
 /// Lignes d'une page tant que l'interface n'en a pas fourni le nombre.
 const DEFAULT_PAGE_LINES: usize = 30;
 
@@ -47,6 +52,8 @@ pub struct Editor {
     clipboard: Box<dyn Clipboard>,
     /// Dernière copie faite dans l'IDE, pour redistribuer ses fragments entre les curseurs.
     last_copy: Option<LastCopy>,
+    /// Zoom de l'interface (1 : taille normale), multiplié par l'échelle de l'écran.
+    zoom: f32,
 }
 
 impl Default for Editor {
@@ -83,6 +90,7 @@ impl Editor {
             page_lines: DEFAULT_PAGE_LINES,
             clipboard: Box::new(MemoryClipboard::default()),
             last_copy: None,
+            zoom: 1.0,
         }
     }
 
@@ -369,6 +377,21 @@ impl Editor {
         document
             .history_mut()
             .set_group_delay(self.config.editor.undo_group_delay());
+    }
+
+    /// Zoom de l'interface : 1 pour la taille normale.
+    pub fn zoom(&self) -> f32 {
+        self.zoom
+    }
+
+    /// Change le zoom de l'interface, borné de 50 % à 300 %.
+    pub fn set_zoom(&mut self, zoom: f32) {
+        let (min, max) = (ZOOM_STEPS[0], ZOOM_STEPS[ZOOM_STEPS.len() - 1]);
+        self.zoom = if zoom.is_finite() {
+            zoom.clamp(min, max)
+        } else {
+            1.0
+        };
     }
 
     /// Presse-papiers utilisé par `edit copy`, `cut` et `paste`.
