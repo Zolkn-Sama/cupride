@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
+use std::time::Instant;
 
 use cupride_core::Document;
 use cupride_core::config::Config;
@@ -10,6 +11,7 @@ use cupride_core::text::TextBuffer;
 use cupride_render::text::{Attrs, Buffer, Family, Metrics, Shaping, Wrap};
 use cupride_render::{Frame, Quad, Rect, TextItem, TextSystem};
 
+use crate::scroll::Scroll;
 use crate::theme::Theme;
 
 /// Marge intérieure de la zone de texte, en pixels logiques.
@@ -20,6 +22,9 @@ const TAB_WIDTH: u16 = 4;
 
 /// Épaisseur du curseur, en pixels logiques.
 const CURSOR_WIDTH: f32 = 2.0;
+
+/// Lignes parcourues par cran de molette.
+pub const WHEEL_LINES: f32 = 3.0;
 
 /// Réglages d'affichage, en pixels logiques.
 #[derive(Debug, Clone, PartialEq)]
@@ -79,8 +84,14 @@ pub struct EditorView {
     scale: f32,
     /// Zone de la vue dans la fenêtre, en pixels physiques.
     bounds: Rect,
-    /// Défilement vertical, en pixels physiques.
-    scroll_y: f32,
+    /// Défilement horizontal et vertical, en pixels physiques.
+    scroll: Scroll,
+    /// Nombre de lignes du document, à la dernière préparation.
+    line_count: usize,
+    /// Plus grande largeur de ligne rencontrée, pour borner le défilement horizontal.
+    content_width: f32,
+    /// Le curseur principal doit être rendu visible à la prochaine préparation.
+    reveal: bool,
     lines: HashMap<usize, CachedLine>,
     visible: Range<usize>,
 }
@@ -103,7 +114,10 @@ impl EditorView {
             settings,
             scale,
             bounds: Rect::default(),
-            scroll_y: 0.0,
+            scroll: Scroll::default(),
+            line_count: 1,
+            content_width: 0.0,
+            reveal: false,
             lines: HashMap::new(),
             visible: 0..0,
         }
@@ -114,6 +128,7 @@ impl EditorView {
     pub fn set_settings(&mut self, settings: ViewSettings) {
         if !settings.same_shaping(&self.settings) {
             self.lines.clear();
+            self.content_width = 0.0;
         }
         self.settings = settings;
     }
@@ -123,6 +138,7 @@ impl EditorView {
         if (scale - self.scale).abs() > f32::EPSILON {
             self.scale = scale;
             self.lines.clear();
+            self.content_width = 0.0;
         }
     }
 
@@ -157,7 +173,7 @@ impl EditorView {
     /// Lignes visibles pour un document de `line_count` lignes.
     fn compute_visible(&self, line_count: usize) -> Range<usize> {
         let line_height = self.line_height().max(1.0);
-        let first = ((self.scroll_y - self.padding()) / line_height)
+        let first = ((self.scroll_y() - self.padding()) / line_height)
             .floor()
             .max(0.0) as usize;
         let count = (self.bounds.height / line_height).ceil() as usize + 1;
@@ -167,7 +183,14 @@ impl EditorView {
     /// Met en forme les lignes visibles de `document`. À appeler avant [`EditorView::frame`].
     pub fn prepare(&mut self, text: &mut TextSystem, document: &Document) {
         let buffer = document.buffer();
-        self.visible = self.compute_visible(buffer.len_lines());
+        self.line_count = buffer.len_lines();
+        self.scroll.clamp(self.max_scroll());
+        let head = document.selections().primary().head;
+        let reveal = std::mem::take(&mut self.reveal);
+        if reveal {
+            self.reveal_line(buffer.byte_to_line(head).unwrap_or_default());
+        }
+        self.visible = self.compute_visible(self.line_count);
         // Les lignes sorties de l'écran sont oubliées : la mémoire reste proportionnelle à l'écran.
         let visible = self.visible.clone();
         self.lines.retain(|line, _| visible.contains(line));
@@ -190,6 +213,7 @@ impl EditorView {
             shaped.set_size(None, Some(metrics.line_height));
             shaped.set_text(&content, &attrs(&family), Shaping::Advanced, None);
             shaped.shape_until_scroll(text.font_system(), false);
+            self.content_width = self.content_width.max(x_at(&shaped, content.len()));
             self.lines.insert(
                 line,
                 CachedLine {
@@ -200,16 +224,114 @@ impl EditorView {
                 },
             );
         }
+        if reveal {
+            self.reveal_column(buffer, head);
+        }
+    }
+
+    /// Défilement vertical actuel.
+    fn scroll_y(&self) -> f32 {
+        self.scroll.position()[1]
+    }
+
+    /// Défilement horizontal actuel.
+    fn scroll_x(&self) -> f32 {
+        self.scroll.position()[0]
+    }
+
+    /// Défilement maximal : la dernière ligne peut monter jusqu'en haut de la vue ; à droite,
+    /// jusqu'à la fin de la plus longue ligne vue, plus une marge.
+    fn max_scroll(&self) -> [f32; 2] {
+        let max_y = self.line_count.saturating_sub(1) as f32 * self.line_height();
+        let max_x =
+            self.content_width + 2.0 * self.padding() + self.reveal_margin() - self.bounds.width;
+        [max_x.max(0.0), max_y]
+    }
+
+    /// Marge horizontale gardée autour du curseur rendu visible.
+    fn reveal_margin(&self) -> f32 {
+        (self.settings.font_size * self.scale * 2.0).round()
+    }
+
+    /// Fait défiler de (`dx`, `dy`) pixels physiques ; avec `smooth`, le mouvement est animé
+    /// (molette), sinon immédiat (pavé tactile).
+    pub fn scroll_by(&mut self, dx: f32, dy: f32, smooth: bool, now: Instant) {
+        let [x, y] = if smooth {
+            self.scroll.target()
+        } else {
+            self.scroll.position()
+        };
+        let [max_x, max_y] = self.max_scroll();
+        let target = [(x + dx).clamp(0.0, max_x), (y + dy).clamp(0.0, max_y)];
+        if smooth {
+            self.scroll.animate_to(target, now);
+        } else {
+            self.scroll.jump_to(target);
+        }
+    }
+
+    /// Avance l'animation de défilement ; renvoie vrai s'il faut encore redessiner.
+    pub fn tick(&mut self, now: Instant) -> bool {
+        self.scroll.tick(now)
+    }
+
+    /// Une animation de défilement est-elle en cours ?
+    pub fn is_scrolling(&self) -> bool {
+        self.scroll.is_animating()
+    }
+
+    /// Demande que le curseur principal soit rendu visible à la prochaine préparation : la vue
+    /// suit le curseur.
+    pub fn follow_cursor(&mut self) {
+        self.reveal = true;
+    }
+
+    /// Fait défiler verticalement, au minimum, pour que la ligne `line` soit entièrement visible.
+    fn reveal_line(&mut self, line: usize) {
+        let line_height = self.line_height();
+        let top = self.padding() + line as f32 * line_height;
+        let [x, y] = self.scroll.position();
+        let y = if top - self.padding() < y {
+            top - self.padding()
+        } else if top + line_height + self.padding() > y + self.bounds.height {
+            top + line_height + self.padding() - self.bounds.height
+        } else {
+            y
+        };
+        self.scroll.jump_to([x, y]);
+        self.scroll.clamp(self.max_scroll());
+    }
+
+    /// Fait défiler horizontalement, au minimum, pour que la position `offset` soit visible.
+    fn reveal_column(&mut self, buffer: &impl TextBuffer, offset: usize) {
+        let Some(line) = buffer.byte_to_line(offset).ok() else {
+            return;
+        };
+        let Some(cached) = self.lines.get(&line) else {
+            return;
+        };
+        let cursor = self.padding() + x_at(&cached.buffer, offset.saturating_sub(cached.start));
+        let margin = self.reveal_margin();
+        let [x, y] = self.scroll.position();
+        let x = if cursor - margin < x {
+            cursor - margin
+        } else if cursor + margin > x + self.bounds.width {
+            cursor + margin - self.bounds.width
+        } else {
+            x
+        };
+        self.scroll.jump_to([x, y]);
+        self.scroll.clamp(self.max_scroll());
     }
 
     /// Bord gauche du texte, en pixels physiques.
     fn text_left(&self) -> f32 {
-        self.bounds.x + self.padding()
+        self.bounds.x + self.padding() - self.scroll_x()
     }
 
     /// Haut de la ligne `line`, en pixels physiques.
     fn line_top(&self, line: usize) -> f32 {
-        self.bounds.y + self.padding() + line as f32 * self.line_height() - self.scroll_y
+        self.bounds.y + self.padding() + line as f32 * self.line_height() - self.scroll_y()
     }
 
     /// Largeur réservée au saut de ligne d'une sélection qui continue sur la ligne suivante.
@@ -486,5 +608,65 @@ mod tests {
         // Police à chasse fixe : trois caractères font trois fois la largeur d'un.
         assert!((x3 - 3.0 * x1).abs() < 0.5, "{x1} {x3}");
         assert_eq!(x_at(buffer, 99), x3, "au-delà de la fin : fin de ligne");
+    }
+
+    #[test]
+    fn defilement_change_les_lignes_visibles() {
+        let mut text = TextSystem::new();
+        let document = Document::from_text(&"ligne\n".repeat(1_000));
+        let mut view = view(600.0);
+        view.prepare(&mut text, &document);
+        let now = Instant::now();
+        // Pavé tactile : immédiat.
+        view.scroll_by(0.0, 39.0 * 100.0, false, now);
+        view.prepare(&mut text, &document);
+        assert_eq!(view.visible_lines().start, 99);
+        assert_eq!(view.cached_lines(), view.visible_lines().len());
+        // Molette : animée, la position finale est atteinte après la durée de l'animation.
+        view.scroll_by(0.0, -39.0 * 50.0, true, now);
+        assert!(view.is_scrolling());
+        assert!(view.tick(now + crate::scroll::SCROLL_DURATION / 2));
+        assert!(!view.tick(now + crate::scroll::SCROLL_DURATION));
+        view.prepare(&mut text, &document);
+        assert_eq!(view.visible_lines().start, 49);
+        // Bornes : ni avant le début, ni après la dernière ligne en haut de la vue.
+        view.scroll_by(0.0, -1e9, false, now);
+        view.prepare(&mut text, &document);
+        assert_eq!(view.visible_lines().start, 0);
+        view.scroll_by(0.0, 1e9, false, now);
+        view.prepare(&mut text, &document);
+        assert_eq!(view.visible_lines().start, 999);
+    }
+
+    #[test]
+    fn la_vue_suit_le_curseur() {
+        let mut text = TextSystem::new();
+        let long = "x".repeat(400);
+        let mut document = Document::from_text(&format!("{}{long}\nfin", "ligne\n".repeat(500)));
+        let mut view = view(600.0);
+        view.prepare(&mut text, &document);
+
+        // Curseur en fin de la longue ligne 500 : la vue descend et défile vers la droite.
+        let head = 500 * 6 + 400;
+        document.set_selections(Selections::cursor(head));
+        view.follow_cursor();
+        view.prepare(&mut text, &document);
+        assert!(view.visible_lines().contains(&500));
+        let cursor = view.primary_cursor_rect(&document).unwrap();
+        assert!(cursor.y >= 0.0 && cursor.bottom() <= 600.0, "{cursor:?}");
+        assert!(cursor.x > 0.0 && cursor.right() <= 800.0, "{cursor:?}");
+        assert!(view.scroll_x() > 0.0);
+
+        // Retour au début du document : la vue remonte et revient à gauche.
+        document.set_selections(Selections::cursor(0));
+        view.follow_cursor();
+        view.prepare(&mut text, &document);
+        assert_eq!(view.visible_lines().start, 0);
+        assert_eq!(view.scroll_x(), 0.0);
+
+        // Sans demande de suivi, défiler ne ramène pas au curseur.
+        view.scroll_by(0.0, 39.0 * 200.0, false, Instant::now());
+        view.prepare(&mut text, &document);
+        assert_eq!(view.visible_lines().start, 199);
     }
 }

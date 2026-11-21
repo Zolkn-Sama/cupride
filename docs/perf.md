@@ -85,3 +85,24 @@ peu, mais pas nul. C'est pourquoi il s'arrête, curseur visible, 10 s après la 
 l'objectif de 0 % de CPU au repos est tenu. Désactivé (`cursor_blink = false`), aucun réveil
 n'est programmé. Le coût d'un redessin (préparation des glyphes, envoi au GPU, présentation)
 pourra être réduit en ne redessinant que la zone du curseur si le besoin s'en fait sentir.
+
+## Interface (`cupride-ui`)
+
+Commande : `cargo bench -p cupride-ui`. Vue de la taille de la fenêtre par défaut sur un écran
+Retina (2 200 × 1 440 pixels physiques, police 14 pt, ~37 lignes visibles), dans un fichier de
+code de 100 000 lignes (ASCII, accents et emojis). Budget d'une image à 60 Hz : 16,7 ms.
+
+### 2026-11-21 — RENDER-05, défilement
+
+- Machine : Apple M3 Pro, 18 Go, macOS ; Rust 1.95.0, profil `bench` (release)
+
+| Image | Temps (médiane) | Part du budget à 60 Hz |
+|---|---|---|
+| Défilement de 3 lignes : mise en forme des lignes nouvelles et liste de dessin | 0,34 ms | 2 % |
+| Saut d'une page : les ~37 lignes visibles mises en forme | 3,4 ms | 20 % |
+| Défilement de 3 lignes, image complète avec rendu GPU (attente de la fin du rendu) | 0,76 ms | 5 % |
+
+Lecture : seules les lignes visibles sont lues et mises en forme ; une ligne déjà mise en forme
+est réutilisée. Le coût d'une image ne dépend donc pas de la taille du fichier, mais du nombre
+de lignes nouvelles à l'écran (~90 µs par ligne mise en forme). Même le pire cas, une page
+entièrement nouvelle, laisse 80 % du budget d'une image.

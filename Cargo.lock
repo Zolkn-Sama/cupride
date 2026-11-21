@@ -665,6 +665,7 @@ dependencies = [
 name = "cupride-ui"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "cupride-core",
  "cupride-render",
  "png",
