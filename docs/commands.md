@@ -158,6 +158,16 @@ autres raccourcis restent actifs pendant la saisie.
 - **Aide** : dès que la commande est reconnue, son utilisation et sa description s'affichent sous
   la ligne.
 
+## `notifications` — notifications
+
+| Commande | Description |
+|---|---|
+| `notifications list` | Affiche l'historique (les 200 dernières), de la plus récente à la plus ancienne, avec leur gravité et leur âge. |
+| `notifications clear` | Vide l'historique. |
+
+Le résultat d'une commande lancée par un raccourci s'affiche en notification (information), une
+erreur aussi (erreur), comme les avertissements de configuration et de fermeture.
+
 ## `window` — fenêtres
 
 | Commande | Description | Issue |

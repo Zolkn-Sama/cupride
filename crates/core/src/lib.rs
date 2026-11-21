@@ -6,6 +6,7 @@
 //! - [`config`] : configuration TOML de l'utilisateur.
 //! - [`events`] : événements publiés par le noyau (document ouvert, modifié, enregistré,
 //!   fermé, focus changé).
+//! - [`notifications`] : informations, avertissements et erreurs, avec leur historique.
 //! - [`keymap`] : raccourcis clavier, simples ou en séquence, sans aucune logique.
 //! - [`Document`] : un texte, son fichier, son historique et ses sélections.
 //!
@@ -20,6 +21,7 @@ mod editor;
 pub mod events;
 pub mod keymap;
 pub mod language;
+pub mod notifications;
 mod ui_request;
 
 pub use cupride_layout as layout;

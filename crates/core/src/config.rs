@@ -67,6 +67,13 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # ou "off".
 # line_numbers = "absolute"
 
+[notifications]
+# Durée d'affichage des informations et avertissements, en millisecondes. 0 : jusqu'à un clic.
+# timeout_ms = 4000
+
+# Durée d'affichage des erreurs, en millisecondes. 0 : jusqu'à un clic.
+# error_timeout_ms = 8000
+
 [status_bar]
 # Éléments de la barre d'état, à gauche et à droite : "file" (nom du fichier), "modified"
 # (modifications non enregistrées), "keys" (séquence de touches en cours), "selections" (nombre
@@ -202,6 +209,38 @@ impl ViewConfig {
     }
 }
 
+/// Section `[notifications]`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct NotificationsConfig {
+    /// Durée d'affichage des informations et avertissements, en millisecondes (0 : jusqu'à un
+    /// clic).
+    pub timeout_ms: u64,
+    /// Durée d'affichage des erreurs, en millisecondes (0 : jusqu'à un clic).
+    pub error_timeout_ms: u64,
+}
+
+impl Default for NotificationsConfig {
+    fn default() -> Self {
+        Self {
+            timeout_ms: 4_000,
+            error_timeout_ms: 8_000,
+        }
+    }
+}
+
+impl NotificationsConfig {
+    /// Durée d'affichage d'une notification de gravité `level`, ou `None` pour la garder jusqu'à
+    /// un clic.
+    pub fn timeout(&self, level: crate::notifications::Level) -> Option<Duration> {
+        let ms = match level {
+            crate::notifications::Level::Error => self.error_timeout_ms,
+            _ => self.timeout_ms,
+        };
+        (ms > 0).then(|| Duration::from_millis(ms))
+    }
+}
+
 /// Section `[status_bar]` : éléments affichés dans la barre d'état.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default)]
@@ -238,6 +277,8 @@ pub struct Config {
     pub font: FontConfig,
     /// Section `[view]`.
     pub view: ViewConfig,
+    /// Section `[notifications]`.
+    pub notifications: NotificationsConfig,
     /// Section `[status_bar]`.
     pub status_bar: StatusBarConfig,
     /// Section `[keys]` : touches → ligne de commande (vide pour retirer un raccourci).
@@ -245,7 +286,7 @@ pub struct Config {
 }
 
 /// Clés connues, pour signaler les fautes de frappe.
-const KNOWN_KEYS: [(&str, &[&str]); 5] = [
+const KNOWN_KEYS: [(&str, &[&str]); 6] = [
     (
         "editor",
         &["line_ending", "undo_group_delay_ms", "primary_selection"],
@@ -260,6 +301,7 @@ const KNOWN_KEYS: [(&str, &[&str]); 5] = [
             "line_numbers",
         ],
     ),
+    ("notifications", &["timeout_ms", "error_timeout_ms"]),
     ("status_bar", &["left", "right"]),
     ("keys", &[]),
 ];

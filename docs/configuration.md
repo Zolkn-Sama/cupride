@@ -44,6 +44,16 @@ options, commentées, avec leur valeur par défaut. `config reload` l'applique s
 | `highlight_current_line` | `true`, `false` | `true` | Surligne la ligne du curseur principal. |
 | `line_numbers` | `"absolute"`, `"relative"`, `"off"` | `"absolute"` | Numéros de ligne dans la gouttière. `relative` : distance à la ligne du curseur, et numéro réel sur cette ligne. Avec `off`, la colonne des marqueurs (diagnostics, Git, points d'arrêt) reste réservée. |
 
+### `[notifications]`
+
+| Option | Valeurs | Défaut | Effet |
+|---|---|---|---|
+| `timeout_ms` | entier ≥ 0 | `4000` | Durée d'affichage des informations et avertissements, en millisecondes. `0` : jusqu'à un clic. |
+| `error_timeout_ms` | entier ≥ 0 | `8000` | Durée d'affichage des erreurs. `0` : jusqu'à un clic. |
+
+Les notifications s'affichent en bas à droite (quatre au plus) ; un clic en retire une.
+L'historique se consulte avec `notifications list`.
+
 ### `[status_bar]`
 
 | Option | Valeurs | Défaut | Effet |
@@ -116,6 +126,13 @@ Les commandes disponibles sont décrites dans [`commands.md`](commands.md).
 # Numéros de ligne : "absolute", "relative" (distance au curseur, numéro réel sur sa ligne)
 # ou "off".
 # line_numbers = "absolute"
+
+[notifications]
+# Durée d'affichage des informations et avertissements, en millisecondes. 0 : jusqu'à un clic.
+# timeout_ms = 4000
+
+# Durée d'affichage des erreurs, en millisecondes. 0 : jusqu'à un clic.
+# error_timeout_ms = 8000
 
 [status_bar]
 # Éléments de la barre d'état, à gauche et à droite : "file" (nom du fichier), "modified"

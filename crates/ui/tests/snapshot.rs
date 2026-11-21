@@ -8,7 +8,7 @@ use cupride_core::Editor;
 use cupride_core::text::{Selection, Selections};
 use cupride_render::{Gpu, OFFSCREEN_FORMAT, OffscreenTarget, Rect, Renderer, TextSystem};
 use cupride_ui::{
-    CommandLine, EditorView, MessageKind, StatusBar, StatusContext, StatusElements, Theme,
+    CommandLine, EditorView, MessageKind, StatusBar, StatusContext, StatusElements, Theme, Toasts,
     ViewSettings,
 };
 
@@ -96,6 +96,14 @@ fn ligne_de_commande() {
     let mut text = TextSystem::new();
     let mut editor = Editor::new();
     editor.insert_document(Document::from_text(&"let x = 1;\n".repeat(20)));
+    editor.notify(
+        cupride_core::notifications::Level::Info,
+        "src/main.rs enregistré",
+    );
+    editor.notify(
+        cupride_core::notifications::Level::Warning,
+        "barre d'état : élément inconnu « fichier » ignoré",
+    );
     let document = editor.active_document().expect("document");
     let mut view = EditorView::new(ViewSettings::default(), 1.0);
     let window = Rect::new(0.0, 0.0, width as f32, height as f32);
@@ -131,7 +139,19 @@ fn ligne_de_commande() {
     let mut frame = cupride_render::Frame::new(theme.background);
     view.draw(frame.base(), &theme, document, false);
     status.draw(frame.base(), &style, &theme);
+    let mut toasts = Toasts::default();
+    toasts.sync(
+        editor.notifications(),
+        &editor.config().notifications,
+        std::time::Instant::now(),
+    );
+    toasts.prepare(
+        &mut text,
+        &style,
+        Rect::new(0.0, 0.0, window.width, line.area().y),
+    );
     line.draw(frame.push_layer(), &style, &theme, true);
+    toasts.draw(frame.push_layer(), &style, &theme);
     renderer
         .render(&gpu, &mut text, &target.view, target.size(), &frame)
         .expect("rendu");
