@@ -142,6 +142,7 @@ de la même façon, à chaud.
 |---|---|
 | `ui command-line [texte]` | Ouvre la ligne de commande (raccourci `mod+;`), éventuellement préremplie. |
 | `ui palette` | Ouvre la palette de commandes (`mod+shift+p`, `F1`). |
+| `ui quick-open` | Ouvre un fichier du projet en tapant une partie de son chemin (`mod+p`). |
 
 Ligne de commande : Entrée exécute la commande. Sans résultat, la ligne se ferme ; en cas
 d'erreur, le message s'affiche au-dessus et le texte reste, pour être corrigé ; une sortie
@@ -163,6 +164,12 @@ Palette : recherche floue (`nucleo`) parmi toutes les commandes, avec leur descr
 raccourci ; les commandes récemment utilisées (ligne de commande ou palette) passent en tête.
 Flèches haut et bas pour choisir, Entrée ou clic pour exécuter, Échap pour fermer. Une commande
 qui attend des arguments (`file open <chemin>`) ouvre la ligne de commande, préremplie.
+
+Ouverture rapide : recherche floue sur les chemins des fichiers du projet (le dossier ouvert avec
+`cupride <dossier>`, sinon le dossier courant), les documents déjà ouverts en tête. Les fichiers
+ignorés par `.gitignore` et `.ignore`, et les fichiers cachés, sont exclus. L'indexation se fait
+en arrière-plan dès l'ouverture de la fenêtre, puis à chaque ouverture rapide (au plus toutes les
+10 secondes) : la liste s'allonge au fil de l'indexation, l'interface n'attend jamais.
 
 ## `notifications` — notifications
 

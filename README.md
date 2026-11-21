@@ -4,7 +4,7 @@
 
 Il suit la philosophie d'Arch Linux : un noyau minimal, puis chacun installe uniquement les outils dont il a besoin, via un gestionnaire de paquets intégré. L'IDE est **piloté par des commandes** : chaque action est une commande, accessible depuis la ligne de commande interne, un raccourci, la palette ou le terminal du système.
 
-> **État du projet : phase 3 terminée (première fenêtre).** Le socle, le buffer de texte (`cupride-text`), le noyau sans interface (`cupride-core`) et la première fenêtre sont en place : rendu GPU du texte (`cupride-render`), curseurs et sélections, défilement, saisie au clavier (méthodes de saisie comprises), souris, gouttière, presse-papiers et zoom (`cupride-ui`). L'éditeur se lance sur un fichier ou un dossier (`cupride src/main.rs`) ; le noyau se pilote aussi en console (`cargo run -p cupride-repl`). Voir la [feuille de route](#feuille-de-route), les [commandes](docs/commands.md) et la [configuration](docs/configuration.md).
+> **État du projet : phase 4 terminée, jalon v0.1 (éditeur mono-fenêtre).** Le socle, le buffer de texte (`cupride-text`), le noyau sans interface (`cupride-core`), le rendu GPU (`cupride-render`) et l'interface (`cupride-ui`) sont en place : édition au clavier (méthodes de saisie comprises) et à la souris, multi-curseurs, presse-papiers, zoom ; ligne de commande interne avec historique et complétion, palette de commandes et ouverture rapide de fichiers (recherche floue), barre d'état, notifications, thèmes. L'éditeur se lance sur un fichier ou un dossier (`cupride src/main.rs`) ; le noyau se pilote aussi en console (`cargo run -p cupride-repl`). Voir la [feuille de route](#feuille-de-route), les [commandes](docs/commands.md) et la [configuration](docs/configuration.md).
 
 ## Objectifs
 
@@ -164,7 +164,7 @@ text layout
 | `crates/layout/` | `cupride-layout` | Arbre de layout, panneaux, fenêtres et écrans |
 | `crates/core/` | `cupride-core` | État de l'éditeur, documents, commandes, keymap, configuration |
 | `crates/render/` | `cupride-render` | Rendu GPU (`wgpu`) : surfaces, rectangles, texte (`cosmic-text`, `glyphon`) |
-| `crates/ui/` | `cupride-ui` | Vue de l'éditeur : lignes visibles, sélections, curseurs, gouttière, défilement, souris |
+| `crates/ui/` | `cupride-ui` | Interface : vue de l'éditeur, ligne de commande, palette, ouverture rapide, barre d'état, notifications, thèmes |
 | `tools/repl/` | `cupride-repl` | Éditeur en console pour tester le noyau |
 | `docs/commands.md` | | Référence des commandes |
 

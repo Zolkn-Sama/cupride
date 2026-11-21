@@ -16,6 +16,7 @@ cupride-core.workspace = true
 cupride-render.workspace = true
 cupride-ui.workspace = true
 directories.workspace = true
+ignore.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true

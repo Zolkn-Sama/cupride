@@ -4,6 +4,7 @@ mod app;
 mod cli;
 mod clipboard;
 mod close;
+mod file_index;
 mod input;
 mod latency;
 mod logging;
@@ -44,10 +45,12 @@ fn main() -> anyhow::Result<()> {
         editor.notify(Level::Warning, problem);
     }
 
-    let event_loop = EventLoop::new().context("création de la boucle d'événements")?;
+    let event_loop = EventLoop::<file_index::AppEvent>::with_user_event()
+        .build()
+        .context("création de la boucle d'événements")?;
     // Attente passive : la boucle ne se réveille que sur un événement.
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = app::App::new(editor);
+    let mut app = app::App::new(editor, event_loop.create_proxy());
     event_loop
         .run_app(&mut app)
         .context("exécution de la boucle d'événements")?;

@@ -28,6 +28,15 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
             Ok(CommandOutput::None)
         },
     ))?;
+    registry.register(CommandDef::new(
+        "ui",
+        "quick-open",
+        "Ouvre un fichier du projet en tapant une partie de son chemin (recherche floue)",
+        |editor, _| {
+            editor.request_ui(UiRequest::QuickOpen);
+            Ok(CommandOutput::None)
+        },
+    ))?;
     Ok(())
 }
 

@@ -26,7 +26,7 @@ use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
 use winit::event::{
     ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, StartCause, WindowEvent,
 };
-use winit::event_loop::{ActiveEventLoop, ControlFlow};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::window::{CursorIcon, Window, WindowId};
@@ -38,6 +38,7 @@ use overlays::{CompletionCycle, Element};
 use pickers::PickerKind;
 
 use crate::close::{CloseDecision, CloseGuard};
+use crate::file_index::{AppEvent, FileIndex};
 use crate::input;
 use crate::latency::LatencyStats;
 
@@ -99,6 +100,10 @@ pub(crate) struct App {
     completion: Option<CompletionCycle>,
     /// Sélecteur ouvert (palette de commandes…).
     picker: Option<(PickerKind, Picker)>,
+    /// Fichiers du projet, indexés en arrière-plan pour l'ouverture rapide.
+    file_index: FileIndex,
+    /// Pour réveiller la boucle d'événements depuis les autres threads.
+    proxy: EventLoopProxy<AppEvent>,
     status_bar: StatusBar,
     status_elements: StatusElements,
     /// Configuration de la barre d'état déjà vérifiée (noms inconnus signalés une fois).
@@ -110,7 +115,7 @@ pub(crate) struct App {
 }
 
 impl App {
-    pub(crate) fn new(mut editor: Editor) -> Self {
+    pub(crate) fn new(mut editor: Editor, proxy: EventLoopProxy<AppEvent>) -> Self {
         let text = TextSystem::new();
         // Thèmes intégrés, puis ceux du dossier themes/ de la configuration.
         let mut themes = Themes::default();
@@ -169,6 +174,8 @@ impl App {
             history_path,
             completion: None,
             picker: None,
+            file_index: FileIndex::default(),
+            proxy,
             status_bar: StatusBar::default(),
             status_elements: StatusElements::default(),
             checked_status_config: None,
@@ -612,6 +619,8 @@ impl App {
         });
         // Thème et barre d'état de la configuration, dès la première image.
         self.sync_config();
+        // Fichiers du projet indexés en arrière-plan, prêts pour l'ouverture rapide.
+        self.refresh_file_index();
         Ok(())
     }
 
@@ -742,7 +751,13 @@ impl App {
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<AppEvent> for App {
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
+        match event {
+            AppEvent::FilesIndexed => self.files_indexed(),
+        }
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
