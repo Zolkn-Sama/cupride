@@ -61,7 +61,7 @@ fn bench(c: &mut Criterion) {
             type_key(&mut e, &mut insert);
             let document = e.active_document().expect("document");
             v.prepare(&mut text, document);
-            black_box(v.frame(&theme, document, true).texts.len())
+            black_box(v.frame(&theme, document, true).layers[0].texts.len())
         });
     });
 

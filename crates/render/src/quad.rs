@@ -174,39 +174,39 @@ impl QuadPipeline {
         })
     }
 
-    /// Envoie les rectangles au GPU : ceux de `under` (sous le texte) puis ceux de `over`
-    /// (par-dessus). Renvoie les plages d'instances à passer à [`QuadPipeline::draw`].
+    /// Envoie les rectangles au GPU, groupe par groupe, dans l'ordre. Renvoie la plage
+    /// d'instances de chaque groupe, à passer à [`QuadPipeline::draw`].
     pub(crate) fn prepare(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         (width, height): (u32, u32),
-        under: &[Quad],
-        over: &[Quad],
-    ) -> (Range<u32>, Range<u32>) {
+        groups: &[&[Quad]],
+    ) -> Vec<Range<u32>> {
         let srgb = self.srgb;
-        let convert = |quads: &[Quad]| -> Vec<Instance> {
-            quads
-                .iter()
-                .filter(|q| q.rect.width > 0.0 && q.rect.height > 0.0 && q.color.a > 0)
-                .map(|quad| {
-                    let r = quad.rect;
-                    Instance {
-                        rect: [r.x, r.y, r.width, r.height],
-                        color: if srgb {
-                            quad.color.to_linear()
-                        } else {
-                            let c = quad.color;
-                            [c.r, c.g, c.b, c.a].map(|v| f32::from(v) / 255.0)
-                        },
-                    }
-                })
-                .collect()
-        };
-        let mut instances = convert(under);
-        let split = instances.len() as u32;
-        instances.extend(convert(over));
-        let total = instances.len() as u32;
+        let mut instances: Vec<Instance> = Vec::new();
+        let mut ranges = Vec::with_capacity(groups.len());
+        for quads in groups {
+            let start = instances.len() as u32;
+            instances.extend(
+                quads
+                    .iter()
+                    .filter(|q| q.rect.width > 0.0 && q.rect.height > 0.0 && q.color.a > 0)
+                    .map(|quad| {
+                        let r = quad.rect;
+                        Instance {
+                            rect: [r.x, r.y, r.width, r.height],
+                            color: if srgb {
+                                quad.color.to_linear()
+                            } else {
+                                let c = quad.color;
+                                [c.r, c.g, c.b, c.a].map(|v| f32::from(v) / 255.0)
+                            },
+                        }
+                    }),
+            );
+            ranges.push(start..instances.len() as u32);
+        }
         queue.write_buffer(
             &self.uniforms,
             0,
@@ -222,7 +222,7 @@ impl QuadPipeline {
         if !instances.is_empty() {
             queue.write_buffer(&self.instances, 0, bytemuck::cast_slice(&instances));
         }
-        (0..split, split..total)
+        ranges
     }
 
     /// Dessine les instances `range` envoyées par le dernier [`QuadPipeline::prepare`].

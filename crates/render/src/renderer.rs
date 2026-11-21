@@ -13,7 +13,8 @@ pub struct Renderer {
     format: wgpu::TextureFormat,
     atlas: TextAtlas,
     viewport: Viewport,
-    text_renderer: TextRenderer,
+    /// Un moteur de texte par couche (créés au besoin) : chacun garde ses sommets préparés.
+    text_renderers: Vec<TextRenderer>,
     quads: QuadPipeline,
 }
 
@@ -31,19 +32,40 @@ impl Renderer {
         let cache = Cache::new(&gpu.device);
         let viewport = Viewport::new(&gpu.device, &cache);
         let mut atlas = TextAtlas::new(&gpu.device, &gpu.queue, &cache, format);
-        let text_renderer = TextRenderer::new(
-            &mut atlas,
-            &gpu.device,
-            wgpu::MultisampleState::default(),
-            None,
-        );
+        let text_renderer = Self::text_renderer(gpu, &mut atlas);
         Self {
             format,
             atlas,
             viewport,
-            text_renderer,
+            text_renderers: vec![text_renderer],
             quads: QuadPipeline::new(&gpu.device, format),
         }
+    }
+
+    fn text_renderer(gpu: &Gpu, atlas: &mut TextAtlas) -> TextRenderer {
+        TextRenderer::new(atlas, &gpu.device, wgpu::MultisampleState::default(), None)
+    }
+
+    /// Prépare le texte de chaque couche ; `Err(AtlasFull)` si l'atlas ne peut plus grandir.
+    fn prepare_texts(
+        &mut self,
+        gpu: &Gpu,
+        text: &mut TextSystem,
+        frame: &Frame<'_>,
+    ) -> Result<(), glyphon::PrepareError> {
+        let (font_system, swash_cache) = text.parts();
+        for (layer, renderer) in frame.layers.iter().zip(&mut self.text_renderers) {
+            renderer.prepare(
+                &gpu.device,
+                &gpu.queue,
+                font_system,
+                &mut self.atlas,
+                &self.viewport,
+                layer.texts.iter().map(|item| item.to_area()),
+                swash_cache,
+            )?;
+        }
+        Ok(())
     }
 
     /// Format des images cibles.
@@ -62,40 +84,25 @@ impl Renderer {
     ) -> Result<(), RenderError> {
         self.viewport
             .update(&gpu.queue, Resolution { width, height });
-        let areas = || frame.texts.iter().map(|item| item.to_area());
-        let (font_system, swash_cache) = text.parts();
-        let prepared = self.text_renderer.prepare(
-            &gpu.device,
-            &gpu.queue,
-            font_system,
-            &mut self.atlas,
-            &self.viewport,
-            areas(),
-            swash_cache,
-        );
-        if let Err(glyphon::PrepareError::AtlasFull) = prepared {
+        while self.text_renderers.len() < frame.layers.len() {
+            let renderer = Self::text_renderer(gpu, &mut self.atlas);
+            self.text_renderers.push(renderer);
+        }
+        if let Err(glyphon::PrepareError::AtlasFull) = self.prepare_texts(gpu, text, frame) {
             // Atlas plein de glyphes encore utilisés : libérer ceux des frames précédentes.
             self.atlas.trim();
-            self.text_renderer
-                .prepare(
-                    &gpu.device,
-                    &gpu.queue,
-                    font_system,
-                    &mut self.atlas,
-                    &self.viewport,
-                    areas(),
-                    swash_cache,
-                )
+            self.prepare_texts(gpu, text, frame)
                 .map_err(|e| RenderError::Draw(e.to_string()))?;
         }
 
-        let (under, over) = self.quads.prepare(
-            &gpu.device,
-            &gpu.queue,
-            (width, height),
-            &frame.quads,
-            &frame.overlays,
-        );
+        let groups: Vec<&[crate::quad::Quad]> = frame
+            .layers
+            .iter()
+            .flat_map(|layer| [layer.quads.as_slice(), layer.overlays.as_slice()])
+            .collect();
+        let ranges = self
+            .quads
+            .prepare(&gpu.device, &gpu.queue, (width, height), &groups);
 
         let mut encoder = gpu
             .device
@@ -119,11 +126,19 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.quads.draw(&mut pass, under);
-            self.text_renderer
-                .render(&self.atlas, &self.viewport, &mut pass)
-                .map_err(|e| RenderError::Draw(e.to_string()))?;
-            self.quads.draw(&mut pass, over);
+            // Couche par couche : fonds, texte, puis ce qui passe par-dessus le texte.
+            for (index, renderer) in self
+                .text_renderers
+                .iter()
+                .take(frame.layers.len())
+                .enumerate()
+            {
+                self.quads.draw(&mut pass, ranges[2 * index].clone());
+                renderer
+                    .render(&self.atlas, &self.viewport, &mut pass)
+                    .map_err(|e| RenderError::Draw(e.to_string()))?;
+                self.quads.draw(&mut pass, ranges[2 * index + 1].clone());
+            }
         }
         gpu.queue.submit(Some(encoder.finish()));
         // Les glyphes restent dans l'atlas ; ils ne sont seulement plus marqués « utilisés »,
@@ -211,7 +226,7 @@ pub(crate) mod tests {
         );
         buffer.shape_until_scroll(text.font_system(), false);
         let mut frame = Frame::new(BACKGROUND);
-        frame.texts.push(TextItem {
+        frame.base().texts.push(TextItem {
             buffer: &buffer,
             left: 12.0,
             top: 18.0,
@@ -260,7 +275,7 @@ pub(crate) mod tests {
         );
         buffer.shape_until_scroll(text.font_system(), false);
         let mut frame = Frame::new(BACKGROUND);
-        frame.texts.push(TextItem {
+        frame.base().texts.push(TextItem {
             buffer: &buffer,
             left: 8.0,
             top: 10.0,
@@ -296,12 +311,12 @@ pub(crate) mod tests {
         let mut renderer = Renderer::new(&gpu, OFFSCREEN_FORMAT);
         let mut text = TextSystem::new();
         let mut frame = Frame::new(BACKGROUND);
-        frame.quads.push(Quad::new(
+        frame.base().quads.push(Quad::new(
             Rect::new(0.0, 0.0, 20.0, 20.0),
             Color::rgb(0xff, 0x00, 0x00),
         ));
         // Semi-transparent, par-dessus le rouge : mélange.
-        frame.overlays.push(Quad::new(
+        frame.base().overlays.push(Quad::new(
             Rect::new(10.0, 0.0, 20.0, 20.0),
             Color::rgba(0x00, 0x00, 0xff, 0x80),
         ));
@@ -323,5 +338,45 @@ pub(crate) mod tests {
         );
         let bg = at(35, 10);
         assert!(bg[0].abs_diff(0x1e) <= 1, "fond intact : {bg:?}");
+    }
+
+    #[test]
+    fn une_couche_cache_le_texte_de_celle_du_dessous() {
+        let Some(gpu) = test_gpu() else { return };
+        let (width, height) = (200, 40);
+        let target = OffscreenTarget::new(&gpu, width, height);
+        let mut renderer = Renderer::new(&gpu, OFFSCREEN_FORMAT);
+        let mut text = TextSystem::new();
+        let mut buffer = Buffer::new(text.font_system(), Metrics::new(28.0, 36.0));
+        buffer.set_size(Some(width as f32), Some(height as f32));
+        buffer.set_text("MMMMMMMMMM", &Attrs::new(), Shaping::Advanced, None);
+        buffer.shape_until_scroll(text.font_system(), false);
+        let white = Color::rgb(0xff, 0xff, 0xff);
+        let mut frame = Frame::new(BACKGROUND);
+        frame.base().texts.push(TextItem {
+            buffer: &buffer,
+            left: 0.0,
+            top: 0.0,
+            clip: Rect::new(0.0, 0.0, width as f32, height as f32),
+            color: white,
+        });
+        // Popup opaque sur la moitié droite.
+        let popup = Color::rgb(0x00, 0x40, 0x00);
+        frame
+            .push_layer()
+            .quads
+            .push(Quad::new(Rect::new(100.0, 0.0, 100.0, 40.0), popup));
+        renderer
+            .render(&gpu, &mut text, &target.view, target.size(), &frame)
+            .unwrap();
+        let pixels = target.read_rgba(&gpu).unwrap();
+        let white_in = |x0: usize, x1: usize| {
+            (0..height as usize)
+                .flat_map(|y| (x0..x1).map(move |x| (y * width as usize + x) * 4))
+                .filter(|&i| pixels[i] > 0xc0 && pixels[i + 1] > 0xc0)
+                .count()
+        };
+        assert!(white_in(0, 100) > 50, "texte visible à gauche");
+        assert_eq!(white_in(100, 200), 0, "texte caché par la popup");
     }
 }
