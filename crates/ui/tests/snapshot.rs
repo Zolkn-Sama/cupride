@@ -4,9 +4,13 @@
 //! résultat. Sur une machine sans GPU, les tests sont ignorés.
 
 use cupride_core::Document;
+use cupride_core::Editor;
 use cupride_core::text::{Selection, Selections};
 use cupride_render::{Gpu, OFFSCREEN_FORMAT, OffscreenTarget, Rect, Renderer, TextSystem};
-use cupride_ui::{CommandLine, EditorView, MessageKind, Theme, ViewSettings};
+use cupride_ui::{
+    CommandLine, EditorView, MessageKind, StatusBar, StatusContext, StatusElements, Theme,
+    ViewSettings,
+};
 
 fn save_png(name: &str, (width, height): (u32, u32), pixels: &[u8]) {
     let dir =
@@ -90,21 +94,43 @@ fn ligne_de_commande() {
     let target = OffscreenTarget::new(&gpu, width, height);
     let mut renderer = Renderer::new(&gpu, OFFSCREEN_FORMAT);
     let mut text = TextSystem::new();
-    let document = Document::from_text(&"let x = 1;\n".repeat(20));
+    let mut editor = Editor::new();
+    editor.insert_document(Document::from_text(&"let x = 1;\n".repeat(20)));
+    let document = editor.active_document().expect("document");
     let mut view = EditorView::new(ViewSettings::default(), 1.0);
     let window = Rect::new(0.0, 0.0, width as f32, height as f32);
-    view.set_bounds(window);
-    view.prepare(&mut text, &document);
-    let theme = Theme::default();
     let style = view.style();
+    let status_height = StatusBar::height(&style);
+    view.set_bounds(Rect::new(
+        0.0,
+        0.0,
+        window.width,
+        window.height - status_height,
+    ));
+    view.prepare(&mut text, document);
+    let theme = Theme::default();
+    let mut status = StatusBar::default();
+    let config = editor.config().status_bar.clone();
+    status.prepare(
+        &mut text,
+        &style,
+        window,
+        &StatusElements::default(),
+        &StatusContext {
+            editor: &editor,
+            pending_keys: "",
+        },
+        (&config.left, &config.right),
+    );
     let mut line = CommandLine::new("file opne src/main.rs");
     line.set_message(
         MessageKind::Error,
         "commande inconnue : « file opne » (vouliez-vous dire « file open » ?)",
     );
-    line.prepare(&mut text, &style, window, 0.0);
+    line.prepare(&mut text, &style, window, status_height);
     let mut frame = cupride_render::Frame::new(theme.background);
-    view.draw(frame.base(), &theme, &document, false);
+    view.draw(frame.base(), &theme, document, false);
+    status.draw(frame.base(), &style, &theme);
     line.draw(frame.push_layer(), &style, &theme, true);
     renderer
         .render(&gpu, &mut text, &target.view, target.size(), &frame)

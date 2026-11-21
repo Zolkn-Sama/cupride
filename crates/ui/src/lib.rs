@@ -19,6 +19,8 @@
 //!   numéros de ligne.
 //! - [`MouseSelection`] : clics simples, doubles et triples, glisser, Maj+clic et Alt+clic.
 //! - [`TextInput`] : champ de saisie d'une ligne ; [`CommandLine`] : ligne de commande interne.
+//! - [`StatusBar`] : barre d'état, faite d'éléments nommés ([`StatusElements`]) choisis par la
+//!   configuration.
 //! - [`CursorBlink`] : clignotement du curseur, arrêté au repos.
 
 mod blink;
@@ -31,6 +33,7 @@ mod label;
 pub mod layout;
 mod mouse;
 mod scroll;
+mod status_bar;
 mod style;
 mod text_input;
 mod theme;
@@ -43,6 +46,7 @@ pub use gutter::GutterMarker;
 pub use history::{CommandHistory, HISTORY_LIMIT};
 pub use label::Label;
 pub use mouse::{ClickCounter, ClickModifiers, MULTI_CLICK_DELAY, MouseSelection};
+pub use status_bar::{StatusBar, StatusContext, StatusElement, StatusElements};
 pub use style::Style;
 pub use text_input::{InputEvent, TextInput};
 pub use theme::Theme;

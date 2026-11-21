@@ -19,6 +19,7 @@ mod document;
 mod editor;
 pub mod events;
 pub mod keymap;
+pub mod language;
 mod ui_request;
 
 pub use cupride_layout as layout;
