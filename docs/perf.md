@@ -14,7 +14,7 @@ vérifient en natif, en mode release.
 | Démarrage | < 100 ms | à mesurer (phase 3) |
 | Mémoire au repos | < 50 Mo | ❌ 85 Mo, fenêtre vide sans GPU (2026-11-19) |
 | CPU au repos | 0 % | ✅ 0,00 s de CPU en 20 s, fenêtre vide (2026-11-19) |
-| Latence de frappe | imperceptible | à mesurer (phase 3) |
+| Latence de frappe | imperceptible | ✅ 0,66 ms de la touche à l'image rendue, hors synchronisation de l'écran (2026-11-21) |
 
 ## Buffer de texte (`cupride-text`)
 
@@ -106,3 +106,22 @@ Lecture : seules les lignes visibles sont lues et mises en forme ; une ligne dé
 est réutilisée. Le coût d'une image ne dépend donc pas de la taille du fichier, mais du nombre
 de lignes nouvelles à l'écran (~90 µs par ligne mise en forme). Même le pire cas, une page
 entièrement nouvelle, laisse 80 % du budget d'une image.
+
+### 2026-11-21 — RENDER-06, latence de frappe
+
+- Machine : Apple M3 Pro, 18 Go, macOS ; Rust 1.95.0, profil `bench` (release)
+- Commande : `cargo bench -p cupride-ui --bench typing`
+- Fichier de 10 000 lignes de code, vue Retina 2 200 × 1 440 ; chaque mesure est une frappe,
+  alternativement un caractère (`edit insert`) et un retour arrière (`edit delete-backward`)
+
+| De la touche à… | Temps (médiane) |
+|---|---|
+| …la liste de dessin : commande, modification du document, mise en forme de la ligne | 0,21 ms |
+| …l'image rendue par le GPU (attente de la fin du rendu) | 0,66 ms |
+
+Lecture : le traitement d'une frappe tient en moins d'un millième de seconde. La latence perçue
+est dominée par la synchronisation verticale (jusqu'à 16,7 ms à 60 Hz, la présentation attend le
+prochain rafraîchissement) et par l'écran lui-même. L'application mesure la latence réelle, de
+l'événement clavier à la présentation de l'image : chaque frappe au niveau `debug`, et un résumé
+(nombre, médiane, 99e centile, maximum) à la fermeture, au niveau `info` :
+`CUPRIDE_LOG=cupride=debug cupride fichier.rs`.

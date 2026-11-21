@@ -75,6 +75,12 @@ Directions de `edit move` :
 | `word-left`, `word-right` | Début du mot précédent, fin du mot suivant. |
 | `line-start`, `line-end` | Début ou fin de la ligne (avant la fin de ligne). |
 | `doc-start`, `doc-end` | Début ou fin du texte. |
+| `page-up`, `page-down` | Une page plus haut ou plus bas (le nombre de lignes visibles), à la même colonne si possible. |
+
+Saisie au clavier : le texte imprimable tapé sans Ctrl ni Cmd (y compris les accents composés
+par une touche morte, AltGr sous Windows et le texte validé par une méthode de saisie chinoise,
+japonaise ou coréenne) est inséré avec `edit insert`. Toutes les autres touches passent par le
+keymap ([`configuration.md`](configuration.md), section `[keys]`).
 
 Exemples :
 

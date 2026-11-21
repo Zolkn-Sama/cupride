@@ -8,18 +8,23 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use cupride_core::command::CommandOutput;
+use cupride_core::keymap::{KeyResolver, Resolution};
 use cupride_core::{DocumentId, Editor};
 use cupride_render::Frame;
 use cupride_render::{Acquire, Gpu, Rect, Renderer, TextSystem, WindowSurface};
-use cupride_ui::{CursorBlink, EditorView, Theme, ViewSettings, WHEEL_LINES};
+use cupride_ui::{CursorBlink, EditorView, Preedit, Theme, ViewSettings, WHEEL_LINES};
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
-use winit::event::{MouseScrollDelta, StartCause, WindowEvent};
+use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
+use winit::event::{ElementState, Ime, KeyEvent, MouseScrollDelta, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::ModifiersState;
+use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::window::{Window, WindowId};
 
 use crate::close::{CloseDecision, CloseGuard};
+use crate::input;
+use crate::latency::LatencyStats;
 
 /// Taille initiale de la fenêtre, en pixels logiques.
 const INITIAL_SIZE: LogicalSize<f64> = LogicalSize::new(1_100.0, 720.0);
@@ -50,6 +55,13 @@ pub(crate) struct App {
     /// Document et position du curseur principal au dernier dessin : quand ils changent, la vue
     /// suit le curseur.
     last_cursor: Option<(DocumentId, usize)>,
+    /// Séquence de touches en cours (`ctrl+k …`).
+    resolver: KeyResolver,
+    /// Une méthode de saisie compose du texte : les touches lui appartiennent.
+    composing: bool,
+    /// Instant de la plus ancienne saisie pas encore affichée, pour mesurer la latence.
+    pending_input: Option<Instant>,
+    latency: LatencyStats,
     /// Message affiché dans le titre (avertissement de fermeture), s'il y en a un.
     notice: Option<String>,
     /// Erreur qui a empêché de démarrer.
@@ -77,6 +89,10 @@ impl App {
             focused: true,
             modifiers: ModifiersState::empty(),
             last_cursor: None,
+            resolver: KeyResolver::new(),
+            composing: false,
+            pending_input: None,
+            latency: LatencyStats::default(),
             text,
             theme: Theme::default(),
             gpu: None,
@@ -105,6 +121,124 @@ impl App {
             title = format!("{title} — {notice}");
         }
         title
+    }
+
+    /// Touche enfoncée : texte à insérer, ou raccourci à exécuter.
+    fn key(&mut self, event: &KeyEvent) {
+        if event.state != ElementState::Pressed || self.composing {
+            return;
+        }
+        let start = Instant::now();
+        // Hors séquence en cours, le texte imprimable est inséré directement.
+        if self.resolver.pending().is_empty()
+            && let Some(text) = input::text_to_insert(event.text.as_deref(), self.modifiers)
+        {
+            let text = text.to_owned();
+            self.insert(&text, start);
+            return;
+        }
+        let Some(combo) = input::combo(
+            &event.logical_key,
+            &event.key_without_modifiers(),
+            self.modifiers,
+        ) else {
+            return;
+        };
+        match self.resolver.feed(self.editor.keymap(), combo) {
+            Resolution::Execute(command) => self.execute(&command, start),
+            Resolution::Pending => {
+                let pending: Vec<String> = self
+                    .resolver
+                    .pending()
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect();
+                self.notice = Some(format!("{} …", pending.join(" ")));
+                self.refresh_title();
+            }
+            Resolution::Unbound => {
+                if self.notice.take().is_some() {
+                    self.refresh_title();
+                }
+                tracing::debug!(touches = %combo, "aucun raccourci");
+            }
+        }
+    }
+
+    /// Événement de méthode de saisie : composition en cours, ou texte validé.
+    fn ime(&mut self, ime: Ime) {
+        match ime {
+            Ime::Preedit(text, cursor) => {
+                self.composing = !text.is_empty();
+                let preedit = self.composing.then(|| Preedit {
+                    text,
+                    cursor: cursor.map(|(start, _)| start),
+                });
+                if let Some(state) = &mut self.window {
+                    state.view.set_preedit(preedit);
+                }
+                self.blink.reset(Instant::now());
+                self.request_redraw();
+            }
+            Ime::Commit(text) => {
+                self.composing = false;
+                if let Some(state) = &mut self.window {
+                    state.view.set_preedit(None);
+                }
+                self.insert(&text, Instant::now());
+            }
+            Ime::Enabled => {}
+            Ime::Disabled => {
+                self.composing = false;
+                if let Some(state) = &mut self.window {
+                    state.view.set_preedit(None);
+                }
+                self.request_redraw();
+            }
+        }
+    }
+
+    /// Insère du texte à chaque curseur.
+    fn insert(&mut self, text: &str, start: Instant) {
+        let result = self.editor.run("edit insert", &[text.to_owned()]);
+        self.after_command(result, start);
+    }
+
+    /// Exécute une ligne de commande (raccourci).
+    fn execute(&mut self, line: &str, start: Instant) {
+        tracing::debug!(commande = line, "raccourci");
+        let result = self.editor.execute(line);
+        self.after_command(result, start);
+    }
+
+    /// Après une commande : message éventuel dans le titre, réglages rechargés, curseur rallumé
+    /// et nouvelle image.
+    fn after_command(&mut self, result: cupride_core::command::CommandResult, start: Instant) {
+        self.notice = match result {
+            Ok(CommandOutput::None) => None,
+            Ok(CommandOutput::Message(message)) => Some(message),
+            Err(error) => {
+                tracing::warn!("{error}");
+                Some(error.to_string())
+            }
+        };
+        self.sync_config();
+        self.blink.reset(Instant::now());
+        self.pending_input.get_or_insert(start);
+        self.refresh_title();
+        self.request_redraw();
+    }
+
+    /// Applique les réglages d'affichage de la configuration (après `config reload`).
+    fn sync_config(&mut self) {
+        let config = self.editor.config();
+        self.blink.configure(
+            config.view.cursor_blink,
+            config.view.cursor_blink_interval(),
+        );
+        if let Some(state) = &mut self.window {
+            state.view.set_settings(ViewSettings::from_config(config));
+        }
     }
 
     /// Défilement à la molette (crans, animés) ou au pavé tactile (pixels, immédiats). Avec Maj,
@@ -187,6 +321,8 @@ impl App {
         tracing::info!(id = ?window.id(), "fenêtre ouverte");
         // Lancée depuis un terminal, l'application passe au premier plan avec le focus clavier.
         window.focus_window();
+        // Méthodes de saisie (IME) et touches mortes composées par le système.
+        window.set_ime_allowed(true);
         let (gpu, surface) = Gpu::for_window(Arc::clone(&window)).map_err(|e| e.to_string())?;
         let size = window.inner_size();
         let surface =
@@ -224,6 +360,7 @@ impl App {
         state
             .view
             .set_bounds(Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32));
+        self.editor.set_page_lines(state.view.page_lines());
         let now = Instant::now();
         let cursors_visible = self.focused && self.blink.visible(now);
         let animating = state.view.tick(now);
@@ -248,8 +385,22 @@ impl App {
         {
             tracing::error!("{error}");
         }
+        if let Some(cursor) = self
+            .editor
+            .active_document()
+            .and_then(|document| state.view.primary_cursor_rect(document))
+        {
+            // La fenêtre de l'IME s'ouvre sous le curseur.
+            state.window.set_ime_cursor_area(
+                PhysicalPosition::new(cursor.x, cursor.y),
+                PhysicalSize::new(cursor.width, cursor.height),
+            );
+        }
         state.window.pre_present_notify();
         state.surface.present(gpu, frame);
+        if let Some(start) = self.pending_input.take() {
+            self.latency.record(start.elapsed());
+        }
         // Défilement animé : une image par rafraîchissement de l'écran (présentation synchronisée)
         // jusqu'à la fin de l'animation, puis plus rien.
         if animating {
@@ -290,6 +441,12 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic: false,
+                ..
+            } => self.key(&event),
+            WindowEvent::Ime(ime) => self.ime(ime),
             WindowEvent::MouseWheel { delta, .. } => self.scroll(delta),
             WindowEvent::Focused(focused) => {
                 self.focused = focused;
@@ -331,6 +488,15 @@ impl ApplicationHandler for App {
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(summary) = self.latency.summary() {
+            tracing::info!(
+                frappes = summary.count,
+                mediane_us = summary.median.as_micros() as u64,
+                p99_us = summary.p99.as_micros() as u64,
+                max_us = summary.max.as_micros() as u64,
+                "latence de frappe"
+            );
+        }
         // Les ressources de la fenêtre sont libérées avant le GPU et la sortie de la boucle.
         self.window = None;
         self.gpu = None;

@@ -35,7 +35,8 @@ impl TextSystem {
     /// Charge les polices installées sur le système.
     pub fn new() -> Self {
         let start = std::time::Instant::now();
-        let font_system = FontSystem::new();
+        let mut font_system = FontSystem::new();
+        remove_broken_monospace_faces(&mut font_system);
         tracing::info!(
             faces = font_system.db().len(),
             duree_ms = start.elapsed().as_millis() as u64,
@@ -77,6 +78,29 @@ impl TextSystem {
                 .iter()
                 .any(|(family, _)| family.eq_ignore_ascii_case(name))
         })
+    }
+}
+
+/// Retire les polices à chasse fixe aux métriques invalides (`units_per_em` nul). Elles sont
+/// choisies en priorité comme police de secours de `monospace` pour les caractères absents de la
+/// police principale, et donnent alors des largeurs infinies : le texte ne s'affiche plus. C'est le
+/// cas de `GB18030Bitmap` sous macOS, choisie pour le chinois et le japonais. Seules les polices à
+/// chasse fixe sont vérifiées : elles sont peu nombreuses (quelques millisecondes).
+fn remove_broken_monospace_faces(font_system: &mut FontSystem) {
+    let monospaced: Vec<_> = font_system
+        .db()
+        .faces()
+        .filter(|face| face.monospaced)
+        .map(|face| (face.id, face.post_script_name.clone()))
+        .collect();
+    for (id, name) in monospaced {
+        let valid = font_system
+            .get_font(id, glyphon::cosmic_text::fontdb::Weight::NORMAL)
+            .is_some_and(|font| font.metrics().units_per_em > 0);
+        if !valid {
+            tracing::debug!(police = %name, "police à métriques invalides ignorée");
+            font_system.db_mut().remove_face(id);
+        }
     }
 }
 
@@ -134,6 +158,27 @@ mod tests {
             .layout_runs()
             .flat_map(|run| run.glyphs.iter().map(|glyph| glyph.glyph_id))
             .collect()
+    }
+
+    #[test]
+    fn caracteres_cjk_en_police_a_chasse_fixe() {
+        let mut system = TextSystem::new();
+        let mut buffer = Buffer::new(system.font_system(), Metrics::new(28.0, 39.0));
+        buffer.set_text(
+            "a日本語한국어b",
+            &Attrs::new().family(Family::Monospace),
+            Shaping::Advanced,
+            None,
+        );
+        buffer.shape_until_scroll(system.font_system(), false);
+        for run in buffer.layout_runs() {
+            for glyph in run.glyphs {
+                assert!(
+                    glyph.w.is_finite() && glyph.x.is_finite(),
+                    "largeur invalide : {glyph:?}"
+                );
+            }
+        }
     }
 
     #[test]

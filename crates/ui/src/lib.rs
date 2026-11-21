@@ -11,5 +11,5 @@ mod scroll;
 mod theme;
 
 pub use blink::{BLINK_IDLE_STOP, CursorBlink};
-pub use editor_view::{EditorView, ViewSettings, WHEEL_LINES};
+pub use editor_view::{EditorView, Preedit, ViewSettings, WHEEL_LINES};
 pub use theme::Theme;

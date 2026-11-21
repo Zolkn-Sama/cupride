@@ -36,7 +36,7 @@ fn editeur_avec_selections_et_curseurs() {
     let mut renderer = Renderer::new(&gpu, OFFSCREEN_FORMAT);
     let mut text = TextSystem::new();
     let mut document = Document::from_text(
-        "fn main() {\n    let message = \"bonjour\";\n    println!(\"{message} 😀\");\n}\n",
+        "fn main() {\n    let message = \"bonjour\";\n    println!(\"{message} 😀\");\n}\n// 日本語、中文、한국어\n",
     );
     let mut selections = Selections::single(Selection::new(20, 44));
     selections.push(Selection::cursor(54));

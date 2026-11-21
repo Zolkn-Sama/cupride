@@ -21,5 +21,9 @@ png.workspace = true
 name = "scroll"
 harness = false
 
+[[bench]]
+name = "typing"
+harness = false
+
 [lints]
 workspace = true
