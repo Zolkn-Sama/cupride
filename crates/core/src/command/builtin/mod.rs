@@ -3,6 +3,7 @@
 mod config;
 mod edit;
 mod file;
+mod keys;
 mod notifications;
 mod ui;
 mod view;
@@ -19,6 +20,7 @@ pub(crate) fn register_all(registry: &mut CommandRegistry) -> Result<(), Command
     view::register(registry)?;
     ui::register(registry)?;
     notifications::register(registry)?;
+    keys::register(registry)?;
     Ok(())
 }
 

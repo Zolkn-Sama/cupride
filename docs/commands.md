@@ -168,6 +168,13 @@ autres raccourcis restent actifs pendant la saisie.
 Le résultat d'une commande lancée par un raccourci s'affiche en notification (information), une
 erreur aussi (erreur), comme les avertissements de configuration et de fermeture.
 
+## `keys` — raccourcis
+
+| Commande | Description |
+|---|---|
+| `keys list [filtre]` | Affiche les raccourcis actifs, triés par commande ; `*` marque ceux de la configuration. Avec un filtre, seulement ceux dont la commande ou les touches le contiennent. |
+| `keys describe <touches>` | Indique la commande exécutée par une combinaison (`mod+s`) ou une séquence (`"ctrl+k ctrl+w"`). |
+
 ## `window` — fenêtres
 
 | Commande | Description | Issue |

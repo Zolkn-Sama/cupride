@@ -82,6 +82,60 @@ remplacent pour les mêmes touches ; une chaîne vide retire un raccourci par d�
 
 Les commandes disponibles sont décrites dans [`commands.md`](commands.md).
 
+#### Raccourcis par défaut
+
+Les mêmes commandes sur les trois OS : Cmd sous macOS là où Windows et Linux utilisent Ctrl, et
+Option pour les déplacements par mot. `keys list` affiche les raccourcis actifs (`*` : ceux de la
+configuration), `keys describe <touches>` la commande d'une combinaison.
+
+<!-- raccourcis par défaut : début -->
+| Commande | Windows et Linux | macOS |
+|---|---|---|
+| `edit move left` | `←` | `←` |
+| `edit move right` | `→` | `→` |
+| `edit move up` | `↑` | `↑` |
+| `edit move down` | `↓` | `↓` |
+| `edit move left --extend` | `Maj+←` | `Maj+←` |
+| `edit move right --extend` | `Maj+→` | `Maj+→` |
+| `edit move up --extend` | `Maj+↑` | `Maj+↑` |
+| `edit move down --extend` | `Maj+↓` | `Maj+↓` |
+| `edit move line-start` | `Début` | `Début`, `Cmd+←` |
+| `edit move line-end` | `Fin` | `Fin`, `Cmd+→` |
+| `edit move line-start --extend` | `Maj+Début` | `Maj+Début` |
+| `edit move line-end --extend` | `Maj+Fin` | `Maj+Fin` |
+| `edit move doc-start` | `Ctrl+Début` | `Cmd+Début`, `Cmd+↑` |
+| `edit move doc-end` | `Ctrl+Fin` | `Cmd+Fin`, `Cmd+↓` |
+| `edit move page-up` | `Page préc.` | `Page préc.` |
+| `edit move page-down` | `Page suiv.` | `Page suiv.` |
+| `edit move page-up --extend` | `Maj+Page préc.` | `Maj+Page préc.` |
+| `edit move page-down --extend` | `Maj+Page suiv.` | `Maj+Page suiv.` |
+| `edit newline` | `Entrée` | `Entrée` |
+| `edit insert '\t'` | `Tab` | `Tab` |
+| `edit delete-backward` | `Retour arrière` | `Retour arrière` |
+| `edit delete-forward` | `Suppr` | `Suppr` |
+| `edit keep-primary` | `Échap` | `Échap` |
+| `edit select-all` | `Ctrl+A` | `Cmd+A` |
+| `edit copy` | `Ctrl+C`, `Ctrl+Inser` | `Cmd+C` |
+| `edit cut` | `Ctrl+X`, `Maj+Suppr` | `Cmd+X` |
+| `edit paste` | `Ctrl+V`, `Maj+Inser` | `Cmd+V` |
+| `edit undo` | `Ctrl+Z` | `Cmd+Z` |
+| `edit redo` | `Ctrl+Maj+Z`, `Ctrl+Y` | `Cmd+Maj+Z` |
+| `ui command-line` | `Ctrl+;` | `Cmd+;` |
+| `file save` | `Ctrl+S` | `Cmd+S` |
+| `ui command-line 'file save-as '` | `Ctrl+Maj+S` | `Cmd+Maj+S` |
+| `ui command-line 'file open '` | `Ctrl+O` | `Cmd+O` |
+| `file close` | `Ctrl+W`, `Ctrl+K Ctrl+W` | `Cmd+W`, `Cmd+K Cmd+W` |
+| `view zoom-in` | `Ctrl+=`, `Ctrl+Maj+=`, `Ctrl++` | `Cmd+=`, `Cmd+Maj+=`, `Cmd++` |
+| `view zoom-out` | `Ctrl+-` | `Cmd+-` |
+| `view zoom-reset` | `Ctrl+0` | `Cmd+0` |
+| `edit move word-left` | `Ctrl+←` | `Option+←` |
+| `edit move word-right` | `Ctrl+→` | `Option+→` |
+| `edit move word-left --extend` | `Ctrl+Maj+←` | `Option+Maj+←` |
+| `edit move word-right --extend` | `Ctrl+Maj+→` | `Option+Maj+→` |
+| `edit add-cursor up` | `Ctrl+Alt+↑` | `Option+Cmd+↑` |
+| `edit add-cursor down` | `Ctrl+Alt+↓` | `Option+Cmd+↓` |
+<!-- raccourcis par défaut : fin -->
+
 ## Fichier par défaut
 
 ```toml
