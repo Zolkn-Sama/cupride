@@ -10,6 +10,7 @@ mod logging;
 
 use anyhow::Context;
 use cupride_core::Editor;
+use cupride_core::notifications::Level;
 use winit::event_loop::{ControlFlow, EventLoop};
 
 fn main() -> anyhow::Result<()> {
@@ -33,21 +34,20 @@ fn main() -> anyhow::Result<()> {
     editor.set_clipboard(clipboard::SystemClipboard::new_or_memory());
     for message in editor.reload_config() {
         tracing::warn!("configuration : {message}");
+        editor.notify(Level::Warning, format!("configuration : {message}"));
     }
 
     // Un fichier ou un dossier illisible n'empêche pas de démarrer : il est signalé.
     let problems = cli::open(&mut editor, &paths);
-    for problem in &problems {
+    for problem in problems {
         tracing::warn!("{problem}");
+        editor.notify(Level::Warning, problem);
     }
 
     let event_loop = EventLoop::new().context("création de la boucle d'événements")?;
     // Attente passive : la boucle ne se réveille que sur un événement.
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app = app::App::new(editor);
-    if !problems.is_empty() {
-        app.set_notice(problems.join(" ; "));
-    }
     event_loop
         .run_app(&mut app)
         .context("exécution de la boucle d'événements")?;

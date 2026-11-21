@@ -14,6 +14,7 @@ use crate::config::{self, Config};
 use crate::document::{Document, DocumentError};
 use crate::events::{Event, EventBus};
 use crate::keymap::{Keymap, KeymapIssue, Platform, default_bindings};
+use crate::notifications::{Level, Notifications};
 use crate::ui_request::UiRequest;
 
 slotmap::new_key_type! {
@@ -59,6 +60,7 @@ pub struct Editor {
     project: Option<PathBuf>,
     /// Demandes à l'interface, pas encore lues.
     ui_requests: Vec<UiRequest>,
+    notifications: Notifications,
 }
 
 impl Default for Editor {
@@ -98,6 +100,7 @@ impl Editor {
             zoom: 1.0,
             project: None,
             ui_requests: Vec::new(),
+            notifications: Notifications::default(),
         }
     }
 
@@ -384,6 +387,21 @@ impl Editor {
         document
             .history_mut()
             .set_group_delay(self.config.editor.undo_group_delay());
+    }
+
+    /// Émet une notification, affichée par l'interface et gardée dans l'historique.
+    pub fn notify(&mut self, level: Level, message: impl Into<String>) -> u64 {
+        self.notifications.push(level, message)
+    }
+
+    /// Notifications émises.
+    pub fn notifications(&self) -> &Notifications {
+        &self.notifications
+    }
+
+    /// Notifications émises, modifiables.
+    pub fn notifications_mut(&mut self) -> &mut Notifications {
+        &mut self.notifications
     }
 
     /// Dépose une demande pour l'interface (ouvrir la ligne de commande…).

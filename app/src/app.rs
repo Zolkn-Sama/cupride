@@ -11,13 +11,14 @@ use std::time::Instant;
 use cupride_core::clipboard::ClipboardKind;
 use cupride_core::command::CommandOutput;
 use cupride_core::keymap::{KeyResolver, Resolution};
+use cupride_core::notifications::Level;
 use cupride_core::text::{Selections, TextBuffer};
 use cupride_core::{DocumentId, Editor};
 use cupride_render::Frame;
 use cupride_render::{Acquire, Gpu, Rect, Renderer, TextSystem, WindowSurface};
 use cupride_ui::{
     ClickCounter, ClickModifiers, CommandHistory, CommandLine, CursorBlink, EditorView, Focus,
-    MouseSelection, Pointer, Preedit, StatusBar, StatusContext, StatusElements, Theme,
+    MouseSelection, Pointer, Preedit, StatusBar, StatusContext, StatusElements, Theme, Toasts,
     ViewSettings, WHEEL_LINES,
 };
 use winit::application::ApplicationHandler;
@@ -95,8 +96,8 @@ pub(crate) struct App {
     status_elements: StatusElements,
     /// Configuration de la barre d'état déjà vérifiée (noms inconnus signalés une fois).
     checked_status_config: Option<cupride_core::config::StatusBarConfig>,
-    /// Message affiché dans le titre (avertissement de fermeture), s'il y en a un.
-    notice: Option<String>,
+    /// Notifications affichées.
+    toasts: Toasts,
     /// Erreur qui a empêché de démarrer.
     fatal: Option<String>,
 }
@@ -155,7 +156,7 @@ impl App {
             gpu: None,
             window: None,
             close_guard: CloseGuard::default(),
-            notice: None,
+            toasts: Toasts::default(),
             fatal: None,
         }
     }
@@ -165,13 +166,7 @@ impl App {
         self.fatal.as_deref()
     }
 
-    /// Message affiché dans le titre jusqu'à la prochaine commande.
-    pub(crate) fn set_notice(&mut self, notice: String) {
-        self.notice = Some(notice);
-        self.refresh_title();
-    }
-
-    /// Titre de la fenêtre : document actif, état modifié, projet, et avertissement éventuel.
+    /// Titre de la fenêtre : document actif, état modifié et projet.
     fn title(&self) -> String {
         let mut title = match self.editor.active_document() {
             Some(doc) => {
@@ -185,9 +180,6 @@ impl App {
             title.push_str(" — ");
         }
         title.push_str("CuprIDE");
-        if let Some(notice) = &self.notice {
-            title = format!("{title} — {notice}");
-        }
         title
     }
 
@@ -285,17 +277,19 @@ impl App {
         self.after_command(result, start);
     }
 
-    /// Après une commande : message éventuel dans le titre, réglages rechargés, curseur rallumé
-    /// et nouvelle image.
+    /// Après une commande (raccourci, frappe) : message ou erreur en notification, puis la
+    /// suite commune.
     fn after_command(&mut self, result: cupride_core::command::CommandResult, start: Instant) {
-        self.notice = match result {
-            Ok(CommandOutput::None) => None,
-            Ok(CommandOutput::Message(message)) => Some(message),
+        match result {
+            Ok(CommandOutput::None) => {}
+            Ok(CommandOutput::Message(message)) => {
+                self.editor.notify(Level::Info, message);
+            }
             Err(error) => {
                 tracing::warn!("{error}");
-                Some(error.to_string())
+                self.editor.notify(Level::Error, error.to_string());
             }
-        };
+        }
         self.after_any_command(start);
     }
 
@@ -313,19 +307,22 @@ impl App {
 
     /// Applique les réglages d'affichage de la configuration (après `config reload`).
     fn sync_config(&mut self) {
-        let config = self.editor.config();
-        if self.checked_status_config.as_ref() != Some(&config.status_bar) {
-            let status = &config.status_bar;
-            for name in self
+        let status = &self.editor.config().status_bar;
+        if self.checked_status_config.as_ref() != Some(status) {
+            let unknown: Vec<String> = self
                 .status_elements
                 .unknown(&status.left)
                 .into_iter()
                 .chain(self.status_elements.unknown(&status.right))
-            {
-                tracing::warn!("barre d'état : élément inconnu « {name} » ignoré");
-            }
+                .map(|name| format!("barre d'état : élément inconnu « {name} » ignoré"))
+                .collect();
             self.checked_status_config = Some(status.clone());
+            for message in unknown {
+                tracing::warn!("{message}");
+                self.editor.notify(Level::Warning, message);
+            }
         }
+        let config = self.editor.config();
         self.blink.configure(
             config.view.cursor_blink,
             config.view.cursor_blink_interval(),
@@ -343,6 +340,11 @@ impl App {
     /// sélection, Alt ajoute un curseur.
     fn mouse_pressed(&mut self) {
         let (x, y) = self.mouse_position;
+        // Un clic sur une notification la retire.
+        if self.toasts.dismiss_at(x, y) {
+            self.request_redraw();
+            return;
+        }
         if let Some(line) = &self.command_line
             && line.area().contains(x, y)
         {
@@ -510,9 +512,8 @@ impl App {
             }
             CloseDecision::Warn(message) => {
                 tracing::warn!("{message}");
-                self.notice = Some(message);
-                self.refresh_title();
-                // Le réveil à l'expiration de l'avertissement est programmé par `about_to_wait`.
+                self.editor.notify(Level::Warning, message);
+                self.request_redraw();
             }
         }
     }
@@ -634,6 +635,20 @@ impl App {
         if let Some(line) = &self.command_line {
             line.draw(scene.push_layer(), &style, &self.theme, blink_on);
         }
+        // Notifications, au-dessus de tout, dans la zone de l'éditeur.
+        self.toasts.sync(
+            self.editor.notifications(),
+            &self.editor.config().notifications,
+            now,
+        );
+        self.toasts.expire(now);
+        if !self.toasts.is_empty() {
+            let above = self.command_line.as_ref().map_or(parts[0], |line| {
+                Rect::new(0.0, 0.0, window_rect.width, line.area().y)
+            });
+            self.toasts.prepare(&mut self.text, &style, above);
+            self.toasts.draw(scene.push_layer(), &style, &self.theme);
+        }
         if let Err(error) = state
             .renderer
             .render(gpu, &mut self.text, &frame.view, size, &scene)
@@ -737,9 +752,9 @@ impl ApplicationHandler for App {
     fn new_events(&mut self, _event_loop: &ActiveEventLoop, cause: StartCause) {
         if let StartCause::ResumeTimeReached { .. } = cause {
             let now = Instant::now();
-            if self.close_guard.expired(now) {
-                self.notice = None;
-                self.refresh_title();
+            self.close_guard.expired(now);
+            if self.toasts.expire(now) {
+                self.request_redraw();
             }
             // Réveil du clignotement : le curseur change d'état.
             if self.focused {
@@ -749,14 +764,19 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        // Prochain réveil : expiration de l'avertissement de fermeture, ou changement d'état du
-        // curseur. Sans l'un ni l'autre, la boucle dort jusqu'au prochain événement.
+        // Prochain réveil : fin du délai de confirmation de fermeture, changement d'état du
+        // curseur ou expiration d'une notification. Sans rien de tout cela, la boucle dort
+        // jusqu'au prochain événement.
         let now = Instant::now();
         let blink = self.focused.then(|| self.blink.next_change(now)).flatten();
-        let wake = match (self.close_guard.deadline(), blink) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        };
+        let wake = [
+            self.close_guard.deadline(),
+            blink,
+            self.toasts.next_expiry(),
+        ]
+        .into_iter()
+        .flatten()
+        .min();
         event_loop.set_control_flow(match wake {
             Some(deadline) => ControlFlow::WaitUntil(deadline),
             None => ControlFlow::Wait,

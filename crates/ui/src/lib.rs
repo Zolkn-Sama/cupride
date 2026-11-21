@@ -21,6 +21,7 @@
 //! - [`TextInput`] : champ de saisie d'une ligne ; [`CommandLine`] : ligne de commande interne.
 //! - [`StatusBar`] : barre d'état, faite d'éléments nommés ([`StatusElements`]) choisis par la
 //!   configuration.
+//! - [`Toasts`] : notifications affichées quelques secondes en bas à droite.
 //! - [`CursorBlink`] : clignotement du curseur, arrêté au repos.
 
 mod blink;
@@ -37,6 +38,7 @@ mod status_bar;
 mod style;
 mod text_input;
 mod theme;
+mod toasts;
 
 pub use blink::{BLINK_IDLE_STOP, CursorBlink};
 pub use command_line::{CommandLine, MessageKind};
@@ -50,3 +52,4 @@ pub use status_bar::{StatusBar, StatusContext, StatusElement, StatusElements};
 pub use style::Style;
 pub use text_input::{InputEvent, TextInput};
 pub use theme::Theme;
+pub use toasts::{MAX_TOASTS, Toasts};
