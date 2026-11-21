@@ -37,6 +37,10 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # d'annulation. 0 : chaque frappe est annulée séparément.
 # undo_group_delay_ms = 1000
 
+# Sélection primaire (Linux, X11 et Wayland) : le texte sélectionné est copié dans la sélection
+# primaire, et le clic du milieu le colle. Sans effet sous Windows et macOS.
+# primary_selection = false
+
 [font]
 # Famille de police : "monospace" (police à chasse fixe du système) ou un nom de famille
 # installée, par exemple "JetBrains Mono" ou "Fira Code" (ligatures).
@@ -103,6 +107,8 @@ pub struct EditorConfig {
     pub line_ending: LineEndingSetting,
     /// Délai de regroupement des frappes dans l'historique, en millisecondes.
     pub undo_group_delay_ms: u64,
+    /// Sélection primaire de X11 et Wayland.
+    pub primary_selection: bool,
 }
 
 impl Default for EditorConfig {
@@ -110,6 +116,7 @@ impl Default for EditorConfig {
         Self {
             line_ending: LineEndingSetting::Auto,
             undo_group_delay_ms: 1_000,
+            primary_selection: false,
         }
     }
 }
@@ -204,7 +211,10 @@ pub struct Config {
 
 /// Clés connues, pour signaler les fautes de frappe.
 const KNOWN_KEYS: [(&str, &[&str]); 4] = [
-    ("editor", &["line_ending", "undo_group_delay_ms"]),
+    (
+        "editor",
+        &["line_ending", "undo_group_delay_ms", "primary_selection"],
+    ),
     ("font", &["family", "size", "line_height"]),
     (
         "view",

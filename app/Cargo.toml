@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+arboard.workspace = true
 cupride-core.workspace = true
 cupride-render.workspace = true
 cupride-ui.workspace = true
