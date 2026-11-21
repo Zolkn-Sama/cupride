@@ -4,7 +4,7 @@
 
 Il suit la philosophie d'Arch Linux : un noyau minimal, puis chacun installe uniquement les outils dont il a besoin, via un gestionnaire de paquets intégré. L'IDE est **piloté par des commandes** : chaque action est une commande, accessible depuis la ligne de commande interne, un raccourci, la palette ou le terminal du système.
 
-> **État du projet : phase 2 terminée (noyau et commandes).** Le socle, le buffer de texte (`cupride-text`) et le noyau sans interface (`cupride-core` : documents, commandes, keymap, configuration, événements) sont en place. L'éditeur se pilote entièrement par commandes dans le REPL console (`cargo run -p cupride-repl`) ; il n'y a pas encore de fenêtre. Voir la [feuille de route](#feuille-de-route), les [commandes](docs/commands.md) et la [configuration](docs/configuration.md).
+> **État du projet : phase 3 terminée (première fenêtre).** Le socle, le buffer de texte (`cupride-text`), le noyau sans interface (`cupride-core`) et la première fenêtre sont en place : rendu GPU du texte (`cupride-render`), curseurs et sélections, défilement, saisie au clavier (méthodes de saisie comprises), souris, gouttière, presse-papiers et zoom (`cupride-ui`). L'éditeur se lance sur un fichier ou un dossier (`cupride src/main.rs`) ; le noyau se pilote aussi en console (`cargo run -p cupride-repl`). Voir la [feuille de route](#feuille-de-route), les [commandes](docs/commands.md) et la [configuration](docs/configuration.md).
 
 ## Objectifs
 
@@ -76,9 +76,13 @@ Docker et Docker Compose suffisent pour compiler et tester sans rien installer d
 ```sh
 git clone https://github.com/Zolkn-Sama/cupride.git
 cd cupride
-cargo run                    # lance l'IDE (binaire `cupride`)
+cargo run                    # lance l'IDE (binaire `cupride`) sur un document vide
+cargo run -- src/main.rs     # … sur un fichier (inexistant : nouveau document)
+cargo run -- .               # … sur un dossier, ouvert comme projet
 cargo run -p cupride-repl    # lance le REPL console du noyau
 ```
+
+`cupride --help` décrit la ligne de commande, `cupride --version` affiche la version.
 
 Au premier appel, `rustup` installe automatiquement la version de Rust figée dans `rust-toolchain.toml`.
 
@@ -159,10 +163,12 @@ text layout
 | `crates/text/` | `cupride-text` | Buffer (rope), positions, Unicode, sélections, historique |
 | `crates/layout/` | `cupride-layout` | Arbre de layout, panneaux, fenêtres et écrans |
 | `crates/core/` | `cupride-core` | État de l'éditeur, documents, commandes, keymap, configuration |
+| `crates/render/` | `cupride-render` | Rendu GPU (`wgpu`) : surfaces, rectangles, texte (`cosmic-text`, `glyphon`) |
+| `crates/ui/` | `cupride-ui` | Vue de l'éditeur : lignes visibles, sélections, curseurs, gouttière, défilement, souris |
 | `tools/repl/` | `cupride-repl` | Éditeur en console pour tester le noyau |
 | `docs/commands.md` | | Référence des commandes |
 
-Les autres crates (`render`, `ui`, `syntax`, `lsp`, `terminal`, `ipc`, `plugin-api`, `plugin-host`, `pkg`) sont ajoutées à leur phase.
+Les autres crates (`syntax`, `lsp`, `terminal`, `ipc`, `plugin-api`, `plugin-host`, `pkg`) sont ajoutées à leur phase.
 
 ## Feuille de route
 

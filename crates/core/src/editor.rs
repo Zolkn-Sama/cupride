@@ -54,6 +54,8 @@ pub struct Editor {
     last_copy: Option<LastCopy>,
     /// Zoom de l'interface (1 : taille normale), multiplié par l'échelle de l'écran.
     zoom: f32,
+    /// Dossier ouvert comme projet, s'il y en a un.
+    project: Option<PathBuf>,
 }
 
 impl Default for Editor {
@@ -91,6 +93,7 @@ impl Editor {
             clipboard: Box::new(MemoryClipboard::default()),
             last_copy: None,
             zoom: 1.0,
+            project: None,
         }
     }
 
@@ -377,6 +380,25 @@ impl Editor {
         document
             .history_mut()
             .set_group_delay(self.config.editor.undo_group_delay());
+    }
+
+    /// Dossier ouvert comme projet.
+    pub fn project(&self) -> Option<&Path> {
+        self.project.as_deref()
+    }
+
+    /// Ouvre le dossier `path` comme projet (chemin absolu et canonique). Erreur si ce n'est
+    /// pas un dossier existant.
+    pub fn set_project(&mut self, path: impl AsRef<Path>) -> io::Result<()> {
+        let path = path.as_ref().canonicalize()?;
+        if !path.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotADirectory,
+                "ce n'est pas un dossier",
+            ));
+        }
+        self.project = Some(path);
+        Ok(())
     }
 
     /// Zoom de l'interface : 1 pour la taille normale.

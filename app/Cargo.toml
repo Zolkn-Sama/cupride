@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 arboard.workspace = true
+clap.workspace = true
 cupride-core.workspace = true
 cupride-render.workspace = true
 cupride-ui.workspace = true
@@ -19,6 +20,9 @@ tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
 winit.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [[bin]]
 name = "cupride"
