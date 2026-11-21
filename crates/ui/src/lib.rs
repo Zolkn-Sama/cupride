@@ -9,7 +9,8 @@
 //!   au-dessus des panneaux ;
 //! - [`Label`] : texte d'interface, mis en forme seulement quand il change ; [`Style`] : police
 //!   et dimensions communes ;
-//! - [`Theme`] : toutes les couleurs ; aucun élément n'a de couleur en dur.
+//! - [`Theme`] : toutes les couleurs ; aucun élément n'a de couleur en dur. [`Themes`] : thèmes
+//!   intégrés (Padparadscha, Clair, Sombre) et de l'utilisateur, au format TOML.
 //!
 //! Éléments :
 //!
@@ -51,5 +52,5 @@ pub use mouse::{ClickCounter, ClickModifiers, MULTI_CLICK_DELAY, MouseSelection}
 pub use status_bar::{StatusBar, StatusContext, StatusElement, StatusElements};
 pub use style::Style;
 pub use text_input::{InputEvent, TextInput};
-pub use theme::Theme;
+pub use theme::{DEFAULT_THEME, ParsedTheme, SyntaxColors, Theme, Themes};
 pub use toasts::{MAX_TOASTS, Toasts};

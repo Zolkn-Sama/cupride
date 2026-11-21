@@ -158,3 +158,65 @@ fn ligne_de_commande() {
     let pixels = target.read_rgba(&gpu).expect("relecture de l'image");
     save_png("ligne_de_commande", (width, height), &pixels);
 }
+
+/// Les trois thèmes intégrés, côte à côte dans des captures séparées.
+#[test]
+fn themes_integres() {
+    for id in ["padparadscha", "clair", "sombre"] {
+        let theme = cupride_ui::Themes::default()
+            .get(id)
+            .cloned()
+            .expect("thème intégré");
+        render_with_theme(&format!("theme_{id}"), &theme);
+    }
+}
+
+fn render_with_theme(name: &str, theme: &Theme) {
+    let gpu = match Gpu::headless() {
+        Ok(gpu) => gpu,
+        Err(error) => {
+            eprintln!("test ignoré, pas de GPU : {error}");
+            return;
+        }
+    };
+    let (width, height) = (480, 120);
+    let target = OffscreenTarget::new(&gpu, width, height);
+    let mut renderer = Renderer::new(&gpu, OFFSCREEN_FORMAT);
+    let mut text = TextSystem::new();
+    let mut document = Document::from_text("fn main() {\n    let x = \"thème\";\n}\n");
+    document.set_selections(Selections::single(Selection::new(20, 25)));
+    let mut view = EditorView::new(ViewSettings::default(), 1.0);
+    let style = view.style();
+    let window = Rect::new(0.0, 0.0, width as f32, height as f32);
+    view.set_bounds(Rect::new(
+        0.0,
+        0.0,
+        window.width,
+        window.height - StatusBar::height(&style),
+    ));
+    let mut editor = Editor::new();
+    editor.insert_document(document);
+    let document = editor.active_document().expect("document");
+    view.prepare(&mut text, document);
+    let mut status = StatusBar::default();
+    let config = editor.config().status_bar.clone();
+    status.prepare(
+        &mut text,
+        &style,
+        window,
+        &StatusElements::default(),
+        &StatusContext {
+            editor: &editor,
+            pending_keys: "",
+        },
+        (&config.left, &config.right),
+    );
+    let mut frame = cupride_render::Frame::new(theme.background);
+    view.draw(frame.base(), theme, document, true);
+    status.draw(frame.base(), &style, theme);
+    renderer
+        .render(&gpu, &mut text, &target.view, target.size(), &frame)
+        .expect("rendu");
+    let pixels = target.read_rgba(&gpu).expect("relecture de l'image");
+    save_png(name, (width, height), &pixels);
+}

@@ -1,0 +1,35 @@
+# Padparadscha : un saphir rose-orangé sur fond sombre. Thème par défaut de CuprIDE.
+#
+# Format des thèmes : chaque couleur est "#rrggbb" ou "#rrggbbaa" (opacité). Une couleur absente
+# est reprise du thème `base` (Padparadscha par défaut).
+name = "Padparadscha"
+
+[ui]
+background = "#1e1a1d"
+foreground = "#f2e6e3"
+cursor = "#f79e86"
+selection = "#e87e6c48"
+current_line = "#2a2428"
+line_number = "#6e6066"
+line_number_active = "#f79e86"
+panel = "#171416"
+popup = "#2b2429"
+border = "#42383e"
+accent = "#f79e86"
+muted = "#9a8a90"
+list_selection = "#4a3333"
+info = "#8cb8d8"
+warning = "#e8c06c"
+error = "#f06c6c"
+
+[syntax]
+comment = "#7d6b72"
+keyword = "#f0889a"
+string = "#c9d98f"
+number = "#f7b98a"
+constant = "#f7b98a"
+function = "#f5c6a5"
+type = "#e8a0c8"
+variable = "#f2e6e3"
+operator = "#d8a0a8"
+punctuation = "#b8a6ac"

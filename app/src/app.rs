@@ -18,8 +18,8 @@ use cupride_render::Frame;
 use cupride_render::{Acquire, Gpu, Rect, Renderer, TextSystem, WindowSurface};
 use cupride_ui::{
     ClickCounter, ClickModifiers, CommandHistory, CommandLine, CursorBlink, EditorView, Focus,
-    MouseSelection, Pointer, Preedit, StatusBar, StatusContext, StatusElements, Theme, Toasts,
-    ViewSettings, WHEEL_LINES,
+    MouseSelection, Pointer, Preedit, StatusBar, StatusContext, StatusElements, Theme, Themes,
+    Toasts, ViewSettings, WHEEL_LINES,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
@@ -55,7 +55,10 @@ struct WindowState {
 pub(crate) struct App {
     editor: Editor,
     text: TextSystem,
+    /// Thèmes disponibles, thème affiché et son identifiant.
+    themes: Themes,
     theme: Theme,
+    theme_id: String,
     gpu: Option<Gpu>,
     window: Option<WindowState>,
     close_guard: CloseGuard,
@@ -103,8 +106,21 @@ pub(crate) struct App {
 }
 
 impl App {
-    pub(crate) fn new(editor: Editor) -> Self {
+    pub(crate) fn new(mut editor: Editor) -> Self {
         let text = TextSystem::new();
+        // Thèmes intégrés, puis ceux du dossier themes/ de la configuration.
+        let mut themes = Themes::default();
+        if let Some(dir) = editor
+            .config_path()
+            .and_then(|p| p.parent())
+            .map(|d| d.join("themes"))
+        {
+            for problem in themes.load_dir(&dir) {
+                tracing::warn!("{problem}");
+                editor.notify(Level::Warning, problem);
+            }
+        }
+        editor.set_themes(themes.ids().map(ToOwned::to_owned).collect());
         let family = &editor.config().font.family;
         if !family.eq_ignore_ascii_case("monospace") && !text.has_family(family) {
             tracing::warn!(
@@ -152,7 +168,9 @@ impl App {
             status_elements: StatusElements::default(),
             checked_status_config: None,
             text,
+            themes,
             theme: Theme::default(),
+            theme_id: cupride_ui::DEFAULT_THEME.to_owned(),
             gpu: None,
             window: None,
             close_guard: CloseGuard::default(),
@@ -322,6 +340,9 @@ impl App {
                 self.editor.notify(Level::Warning, message);
             }
         }
+        if self.editor.theme() != self.theme_id {
+            self.apply_theme();
+        }
         let config = self.editor.config();
         self.blink.configure(
             config.view.cursor_blink,
@@ -334,6 +355,25 @@ impl App {
                 .view
                 .set_scale(state.window.scale_factor() as f32 * self.editor.zoom());
         }
+    }
+
+    /// Affiche le thème choisi dans l'éditeur ; un thème inconnu (configuration) est signalé et
+    /// remplacé par le thème par défaut.
+    fn apply_theme(&mut self) {
+        let id = self.editor.theme().to_owned();
+        match self.themes.get(&id) {
+            Some(theme) => self.theme = theme.clone(),
+            None => {
+                let message = format!(
+                    "thème inconnu : « {id} », thème par défaut utilisé ; voir « theme list »"
+                );
+                tracing::warn!("{message}");
+                self.editor.notify(Level::Warning, message);
+                self.theme = Theme::default();
+            }
+        }
+        self.theme_id = id;
+        self.request_redraw();
     }
 
     /// Bouton gauche enfoncé : curseur, mot ou ligne selon le nombre de clics ; Maj étend la
@@ -556,6 +596,8 @@ impl App {
             view,
             window,
         });
+        // Thème et barre d'état de la configuration, dès la première image.
+        self.sync_config();
         Ok(())
     }
 
