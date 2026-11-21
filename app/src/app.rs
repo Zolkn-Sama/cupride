@@ -17,7 +17,8 @@ use cupride_render::Frame;
 use cupride_render::{Acquire, Gpu, Rect, Renderer, TextSystem, WindowSurface};
 use cupride_ui::{
     ClickCounter, ClickModifiers, CommandHistory, CommandLine, CursorBlink, EditorView, Focus,
-    MouseSelection, Pointer, Preedit, Theme, ViewSettings, WHEEL_LINES,
+    MouseSelection, Pointer, Preedit, StatusBar, StatusContext, StatusElements, Theme,
+    ViewSettings, WHEEL_LINES,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
@@ -90,6 +91,10 @@ pub(crate) struct App {
     history_path: Option<std::path::PathBuf>,
     /// Complétion en cours dans la ligne de commande.
     completion: Option<CompletionCycle>,
+    status_bar: StatusBar,
+    status_elements: StatusElements,
+    /// Configuration de la barre d'état déjà vérifiée (noms inconnus signalés une fois).
+    checked_status_config: Option<cupride_core::config::StatusBarConfig>,
     /// Message affiché dans le titre (avertissement de fermeture), s'il y en a un.
     notice: Option<String>,
     /// Erreur qui a empêché de démarrer.
@@ -142,6 +147,9 @@ impl App {
             history,
             history_path,
             completion: None,
+            status_bar: StatusBar::default(),
+            status_elements: StatusElements::default(),
+            checked_status_config: None,
             text,
             theme: Theme::default(),
             gpu: None,
@@ -218,21 +226,11 @@ impl App {
         };
         match self.resolver.feed(self.editor.keymap(), combo) {
             Resolution::Execute(command) => self.execute(&command, start),
-            Resolution::Pending => {
-                let pending: Vec<String> = self
-                    .resolver
-                    .pending()
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect();
-                self.notice = Some(format!("{} …", pending.join(" ")));
-                self.refresh_title();
-            }
+            // La séquence en cours s'affiche dans la barre d'état.
+            Resolution::Pending => self.request_redraw(),
             Resolution::Unbound => {
-                if self.notice.take().is_some() {
-                    self.refresh_title();
-                }
                 tracing::debug!(touches = %combo, "aucun raccourci");
+                self.request_redraw();
             }
         }
     }
@@ -316,6 +314,18 @@ impl App {
     /// Applique les réglages d'affichage de la configuration (après `config reload`).
     fn sync_config(&mut self) {
         let config = self.editor.config();
+        if self.checked_status_config.as_ref() != Some(&config.status_bar) {
+            let status = &config.status_bar;
+            for name in self
+                .status_elements
+                .unknown(&status.left)
+                .into_iter()
+                .chain(self.status_elements.unknown(&status.right))
+            {
+                tracing::warn!("barre d'état : élément inconnu « {name} » ignoré");
+            }
+            self.checked_status_config = Some(status.clone());
+        }
         self.blink.configure(
             config.view.cursor_blink,
             config.view.cursor_blink_interval(),
@@ -564,7 +574,36 @@ impl App {
         };
         let size = state.surface.size();
         let window_rect = Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32);
-        state.view.set_bounds(window_rect);
+        let style = state.view.style();
+        let status_height = StatusBar::height(&style);
+        let parts = cupride_ui::layout::split(
+            window_rect,
+            cupride_ui::layout::Axis::Vertical,
+            &[
+                cupride_ui::layout::Size::FILL,
+                cupride_ui::layout::Size::Fixed(status_height),
+            ],
+        );
+        state.view.set_bounds(parts[0]);
+        let pending_keys: Vec<String> = self
+            .resolver
+            .pending()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let pending_keys = pending_keys.join(" ");
+        let status_config = &self.editor.config().status_bar;
+        self.status_bar.prepare(
+            &mut self.text,
+            &style,
+            window_rect,
+            &self.status_elements,
+            &StatusContext {
+                editor: &self.editor,
+                pending_keys: &pending_keys,
+            },
+            (&status_config.left, &status_config.right),
+        );
         self.editor.set_page_lines(state.view.page_lines());
         let now = Instant::now();
         let blink_on = self.focused && self.blink.visible(now);
@@ -586,10 +625,10 @@ impl App {
                 .view
                 .draw(scene.base(), &self.theme, document, cursors_visible);
         }
-        let style = state.view.style();
+        self.status_bar.draw(scene.base(), &style, &self.theme);
         let mut ime_area = None;
         if let Some(line) = &mut self.command_line {
-            line.prepare(&mut self.text, &style, window_rect, 0.0);
+            line.prepare(&mut self.text, &style, window_rect, status_height);
             ime_area = Some(line.cursor_rect(&style));
         }
         if let Some(line) = &self.command_line {

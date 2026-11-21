@@ -44,6 +44,19 @@ options, commentées, avec leur valeur par défaut. `config reload` l'applique s
 | `highlight_current_line` | `true`, `false` | `true` | Surligne la ligne du curseur principal. |
 | `line_numbers` | `"absolute"`, `"relative"`, `"off"` | `"absolute"` | Numéros de ligne dans la gouttière. `relative` : distance à la ligne du curseur, et numéro réel sur cette ligne. Avec `off`, la colonne des marqueurs (diagnostics, Git, points d'arrêt) reste réservée. |
 
+### `[status_bar]`
+
+| Option | Valeurs | Défaut | Effet |
+|---|---|---|---|
+| `left` | liste d'éléments | `["file", "modified", "keys"]` | Éléments à gauche de la barre d'état, dans l'ordre. |
+| `right` | liste d'éléments | `["selections", "position", "line_ending", "encoding", "language"]` | Éléments à droite. |
+
+Éléments : `file` (nom du fichier), `modified` (● si modifié), `keys` (séquence de touches en
+cours, `ctrl+k …`), `selections` (nombre de curseurs, s'il y en a plusieurs), `position` (ligne et
+colonne, en caractères affichés, et taille de la sélection), `line_ending` (`LF`, `CRLF`),
+`encoding` (`UTF-8`, `UTF-8 BOM`), `language` (d'après l'extension). Un nom inconnu est signalé
+et ignoré. Les plugins pourront ajouter leurs propres éléments.
+
 ### `[keys]`
 
 Raccourcis : `"touches" = "ligne de commande"`. Ils s'ajoutent aux raccourcis par défaut et les
@@ -103,6 +116,13 @@ Les commandes disponibles sont décrites dans [`commands.md`](commands.md).
 # Numéros de ligne : "absolute", "relative" (distance au curseur, numéro réel sur sa ligne)
 # ou "off".
 # line_numbers = "absolute"
+
+[status_bar]
+# Éléments de la barre d'état, à gauche et à droite : "file" (nom du fichier), "modified"
+# (modifications non enregistrées), "keys" (séquence de touches en cours), "selections" (nombre
+# de curseurs), "position" (ligne et colonne), "line_ending", "encoding", "language".
+# left = ["file", "modified", "keys"]
+# right = ["selections", "position", "line_ending", "encoding", "language"]
 
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les

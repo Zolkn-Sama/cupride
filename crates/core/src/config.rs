@@ -67,6 +67,13 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # ou "off".
 # line_numbers = "absolute"
 
+[status_bar]
+# Éléments de la barre d'état, à gauche et à droite : "file" (nom du fichier), "modified"
+# (modifications non enregistrées), "keys" (séquence de touches en cours), "selections" (nombre
+# de curseurs), "position" (ligne et colonne), "line_ending", "encoding", "language".
+# left = ["file", "modified", "keys"]
+# right = ["selections", "position", "line_ending", "encoding", "language"]
+
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les
 # remplacent pour les mêmes touches. Une chaîne vide retire un raccourci par défaut.
@@ -195,6 +202,32 @@ impl ViewConfig {
     }
 }
 
+/// Section `[status_bar]` : éléments affichés dans la barre d'état.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct StatusBarConfig {
+    /// Éléments à gauche.
+    pub left: Vec<String>,
+    /// Éléments à droite.
+    pub right: Vec<String>,
+}
+
+impl Default for StatusBarConfig {
+    fn default() -> Self {
+        let names = |items: &[&str]| items.iter().map(|s| (*s).to_owned()).collect();
+        Self {
+            left: names(&["file", "modified", "keys"]),
+            right: names(&[
+                "selections",
+                "position",
+                "line_ending",
+                "encoding",
+                "language",
+            ]),
+        }
+    }
+}
+
 /// Configuration complète.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
@@ -205,12 +238,14 @@ pub struct Config {
     pub font: FontConfig,
     /// Section `[view]`.
     pub view: ViewConfig,
+    /// Section `[status_bar]`.
+    pub status_bar: StatusBarConfig,
     /// Section `[keys]` : touches → ligne de commande (vide pour retirer un raccourci).
     pub keys: BTreeMap<String, String>,
 }
 
 /// Clés connues, pour signaler les fautes de frappe.
-const KNOWN_KEYS: [(&str, &[&str]); 4] = [
+const KNOWN_KEYS: [(&str, &[&str]); 5] = [
     (
         "editor",
         &["line_ending", "undo_group_delay_ms", "primary_selection"],
@@ -225,6 +260,7 @@ const KNOWN_KEYS: [(&str, &[&str]); 4] = [
             "line_numbers",
         ],
     ),
+    ("status_bar", &["left", "right"]),
     ("keys", &[]),
 ];
 
