@@ -61,6 +61,9 @@ pub struct Editor {
     /// Demandes à l'interface, pas encore lues.
     ui_requests: Vec<UiRequest>,
     notifications: Notifications,
+    /// Thème en cours, et thèmes disponibles (fournis par l'interface).
+    theme: String,
+    themes: Vec<String>,
 }
 
 impl Default for Editor {
@@ -101,6 +104,8 @@ impl Editor {
             project: None,
             ui_requests: Vec::new(),
             notifications: Notifications::default(),
+            theme: crate::config::ViewConfig::default().theme,
+            themes: Vec::new(),
         }
     }
 
@@ -356,6 +361,7 @@ impl Editor {
             }
         }
         self.keymap = keymap;
+        self.theme = config.view.theme.clone();
         self.config = config;
         let delay = self.config.editor.undo_group_delay();
         for (_, document) in &mut self.documents {
@@ -387,6 +393,42 @@ impl Editor {
         document
             .history_mut()
             .set_group_delay(self.config.editor.undo_group_delay());
+    }
+
+    /// Identifiant du thème en cours.
+    pub fn theme(&self) -> &str {
+        &self.theme
+    }
+
+    /// Thèmes disponibles, fournis par l'interface ; vide tant qu'elle ne les a pas donnés.
+    pub fn themes(&self) -> &[String] {
+        &self.themes
+    }
+
+    /// Donne la liste des thèmes disponibles (l'interface les charge).
+    pub fn set_themes(&mut self, themes: Vec<String>) {
+        self.themes = themes;
+    }
+
+    /// Change de thème. Erreur, avec le nom le plus proche, si la liste des thèmes est connue et
+    /// ne le contient pas.
+    pub fn set_theme(&mut self, theme: &str) -> Result<(), CommandError> {
+        let theme = theme.to_lowercase();
+        if !self.themes.is_empty() && !self.themes.contains(&theme) {
+            let closest = self
+                .themes
+                .iter()
+                .map(|t| (strsim::levenshtein(t, &theme), t))
+                .min()
+                .filter(|(distance, _)| *distance <= 3)
+                .map(|(_, t)| format!(" (vouliez-vous dire « {t} » ?)"))
+                .unwrap_or_default();
+            return Err(CommandError::Failed(format!(
+                "thème inconnu : « {theme} »{closest} ; voir « theme list »"
+            )));
+        }
+        self.theme = theme;
+        Ok(())
     }
 
     /// Émet une notification, affichée par l'interface et gardée dans l'historique.

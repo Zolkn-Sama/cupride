@@ -43,6 +43,7 @@ options, commentées, avec leur valeur par défaut. `config reload` l'applique s
 | `cursor_blink_ms` | entier, de 50 à 5000 | `530` | Demi-période du clignotement, en millisecondes. |
 | `highlight_current_line` | `true`, `false` | `true` | Surligne la ligne du curseur principal. |
 | `line_numbers` | `"absolute"`, `"relative"`, `"off"` | `"absolute"` | Numéros de ligne dans la gouttière. `relative` : distance à la ligne du curseur, et numéro réel sur cette ligne. Avec `off`, la colonne des marqueurs (diagnostics, Git, points d'arrêt) reste réservée. |
+| `theme` | identifiant de thème | `"padparadscha"` | Thème de couleurs : `padparadscha`, `clair`, `sombre`, ou un thème de l'utilisateur (voir [Thèmes](#thèmes)). |
 
 ### `[notifications]`
 
@@ -136,6 +137,37 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `edit add-cursor down` | `Ctrl+Alt+↓` | `Option+Cmd+↓` |
 <!-- raccourcis par défaut : fin -->
 
+## Thèmes
+
+Thèmes intégrés : **Padparadscha** (par défaut, sombre), **Clair** et **Sombre**. `theme list`
+les liste, `theme set <nom>` change de thème pour la session ; `[view] theme` le garde.
+
+Un thème de l'utilisateur est un fichier `.toml` du dossier `themes/`, à côté de `config.toml` ;
+son identifiant est le nom du fichier sans l'extension (`themes/rubis.toml` → `rubis`). Chaque
+couleur s'écrit `"#rrggbb"` ou `"#rrggbbaa"` ; une couleur absente est reprise du thème `base`
+(Padparadscha par défaut). Une couleur invalide ou inconnue est signalée et ignorée.
+
+```toml
+name = "Rubis"
+base = "sombre"          # facultatif
+
+[ui]
+accent = "#e0115f"
+cursor = "#e0115f"
+selection = "#e0115f44"
+
+[syntax]
+keyword = "#ff5c8a"
+```
+
+| Section | Couleurs |
+|---|---|
+| `[ui]` | `background`, `foreground`, `cursor`, `selection`, `current_line`, `line_number`, `line_number_active`, `panel`, `popup`, `border`, `accent`, `muted`, `list_selection`, `info`, `warning`, `error` |
+| `[syntax]` | `comment`, `keyword`, `string`, `number`, `constant`, `function`, `type`, `variable`, `operator`, `punctuation` |
+
+Les fichiers des thèmes intégrés servent d'exemples complets :
+[`crates/ui/themes/`](../crates/ui/themes/).
+
 ## Fichier par défaut
 
 ```toml
@@ -180,6 +212,10 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 # Numéros de ligne : "absolute", "relative" (distance au curseur, numéro réel sur sa ligne)
 # ou "off".
 # line_numbers = "absolute"
+
+# Thème : "padparadscha", "clair", "sombre", ou un thème du dossier themes/ de la configuration
+# (son nom de fichier, sans .toml).
+# theme = "padparadscha"
 
 [notifications]
 # Durée d'affichage des informations et avertissements, en millisecondes. 0 : jusqu'à un clic.

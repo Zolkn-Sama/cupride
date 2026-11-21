@@ -175,6 +175,13 @@ erreur aussi (erreur), comme les avertissements de configuration et de fermeture
 | `keys list [filtre]` | Affiche les raccourcis actifs, triés par commande ; `*` marque ceux de la configuration. Avec un filtre, seulement ceux dont la commande ou les touches le contiennent. |
 | `keys describe <touches>` | Indique la commande exécutée par une combinaison (`mod+s`) ou une séquence (`"ctrl+k ctrl+w"`). |
 
+## `theme` — thèmes
+
+| Commande | Description |
+|---|---|
+| `theme set <nom>` | Change de thème pour la session (`[view] theme` dans la configuration pour le garder). Un nom inconnu est refusé, avec le nom le plus proche. |
+| `theme list` | Liste les thèmes disponibles ; `>` marque le thème en cours. |
+
 ## `window` — fenêtres
 
 | Commande | Description | Issue |

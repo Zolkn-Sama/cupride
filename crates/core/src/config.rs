@@ -67,6 +67,10 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # ou "off".
 # line_numbers = "absolute"
 
+# Thème : "padparadscha", "clair", "sombre", ou un thème du dossier themes/ de la configuration
+# (son nom de fichier, sans .toml).
+# theme = "padparadscha"
+
 [notifications]
 # Durée d'affichage des informations et avertissements, en millisecondes. 0 : jusqu'à un clic.
 # timeout_ms = 4000
@@ -189,6 +193,8 @@ pub struct ViewConfig {
     pub highlight_current_line: bool,
     /// Numéros de ligne.
     pub line_numbers: LineNumbers,
+    /// Identifiant du thème.
+    pub theme: String,
 }
 
 impl Default for ViewConfig {
@@ -198,6 +204,7 @@ impl Default for ViewConfig {
             cursor_blink_ms: 530,
             highlight_current_line: true,
             line_numbers: LineNumbers::Absolute,
+            theme: "padparadscha".to_owned(),
         }
     }
 }
@@ -299,6 +306,7 @@ const KNOWN_KEYS: [(&str, &[&str]); 6] = [
             "cursor_blink_ms",
             "highlight_current_line",
             "line_numbers",
+            "theme",
         ],
     ),
     ("notifications", &["timeout_ms", "error_timeout_ms"]),

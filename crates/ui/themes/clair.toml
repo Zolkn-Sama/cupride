@@ -1,0 +1,32 @@
+# Clair : fond blanc cassé, accent rose-orangé.
+name = "Clair"
+
+[ui]
+background = "#fbf8f6"
+foreground = "#2b2326"
+cursor = "#c8553d"
+selection = "#e8907a55"
+current_line = "#f2ece8"
+line_number = "#a8999e"
+line_number_active = "#c8553d"
+panel = "#f1ebe7"
+popup = "#ffffff"
+border = "#ddd3cd"
+accent = "#c8553d"
+muted = "#7a6b70"
+list_selection = "#f6d8cf"
+info = "#2f6fa8"
+warning = "#a86b00"
+error = "#c62f3a"
+
+[syntax]
+comment = "#8c7f84"
+keyword = "#a8325a"
+string = "#4f7a28"
+number = "#b3541e"
+constant = "#b3541e"
+function = "#7a4fa8"
+type = "#2f6fa8"
+variable = "#2b2326"
+operator = "#8a4b5a"
+punctuation = "#6b5c61"
