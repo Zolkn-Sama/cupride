@@ -13,14 +13,19 @@ use cupride_core::keymap::{KeyResolver, Resolution};
 use cupride_core::{DocumentId, Editor};
 use cupride_render::Frame;
 use cupride_render::{Acquire, Gpu, Rect, Renderer, TextSystem, WindowSurface};
-use cupride_ui::{CursorBlink, EditorView, Preedit, Theme, ViewSettings, WHEEL_LINES};
+use cupride_ui::{
+    ClickCounter, ClickModifiers, CursorBlink, EditorView, MouseSelection, Pointer, Preedit, Theme,
+    ViewSettings, WHEEL_LINES,
+};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
-use winit::event::{ElementState, Ime, KeyEvent, MouseScrollDelta, StartCause, WindowEvent};
+use winit::event::{
+    ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, StartCause, WindowEvent,
+};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::ModifiersState;
 use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
-use winit::window::{Window, WindowId};
+use winit::window::{CursorIcon, Window, WindowId};
 
 use crate::close::{CloseDecision, CloseGuard};
 use crate::input;
@@ -62,6 +67,12 @@ pub(crate) struct App {
     /// Instant de la plus ancienne saisie pas encore affichée, pour mesurer la latence.
     pending_input: Option<Instant>,
     latency: LatencyStats,
+    /// Position de la souris dans la fenêtre, en pixels physiques.
+    mouse_position: (f32, f32),
+    clicks: ClickCounter,
+    mouse: MouseSelection,
+    /// Forme actuelle du pointeur.
+    pointer: Pointer,
     /// Message affiché dans le titre (avertissement de fermeture), s'il y en a un.
     notice: Option<String>,
     /// Erreur qui a empêché de démarrer.
@@ -93,6 +104,10 @@ impl App {
             composing: false,
             pending_input: None,
             latency: LatencyStats::default(),
+            mouse_position: (0.0, 0.0),
+            clicks: ClickCounter::default(),
+            mouse: MouseSelection::default(),
+            pointer: Pointer::Default,
             text,
             theme: Theme::default(),
             gpu: None,
@@ -238,6 +253,70 @@ impl App {
         );
         if let Some(state) = &mut self.window {
             state.view.set_settings(ViewSettings::from_config(config));
+        }
+    }
+
+    /// Bouton gauche enfoncé : curseur, mot ou ligne selon le nombre de clics ; Maj étend la
+    /// sélection, Alt ajoute un curseur.
+    fn mouse_pressed(&mut self) {
+        let (Some(state), Some(document)) = (&self.window, self.editor.active_document_mut())
+        else {
+            return;
+        };
+        let (x, y) = self.mouse_position;
+        let now = Instant::now();
+        let clicks = self
+            .clicks
+            .click(now, x, y, state.window.scale_factor() as f32);
+        let offset = state.view.offset_at(x, y, document.buffer());
+        let modifiers = ClickModifiers {
+            extend: self.modifiers.shift_key(),
+            add: self.modifiers.alt_key(),
+        };
+        let selections = self.mouse.press(
+            document.buffer(),
+            document.selections(),
+            offset,
+            clicks,
+            modifiers,
+        );
+        document.set_selections(selections);
+        self.blink.reset(now);
+        self.request_redraw();
+    }
+
+    /// Souris déplacée : forme du pointeur, et sélection si le bouton est enfoncé. Hors de la
+    /// vue, la sélection continue sur les lignes au-delà, que la vue fait défiler pour suivre.
+    fn mouse_moved(&mut self, x: f32, y: f32) {
+        self.mouse_position = (x, y);
+        let Some(state) = &self.window else {
+            return;
+        };
+        let pointer = state.view.pointer_at(x, y);
+        if pointer != self.pointer {
+            self.pointer = pointer;
+            state.window.set_cursor(match pointer {
+                Pointer::Default => CursorIcon::Default,
+                Pointer::Text => CursorIcon::Text,
+                Pointer::ResizeHorizontal => CursorIcon::ColResize,
+                Pointer::ResizeVertical => CursorIcon::RowResize,
+            });
+        }
+        if !self.mouse.is_dragging() {
+            return;
+        }
+        let Some(document) = self.editor.active_document_mut() else {
+            return;
+        };
+        let offset = state.view.offset_at(x, y, document.buffer());
+        if let Some(selections) = self
+            .mouse
+            .drag(document.buffer(), document.selections(), offset)
+            && &selections != document.selections()
+        {
+            document.set_selections(selections);
+            self.blink.reset(Instant::now());
+            state.window.request_redraw();
         }
     }
 
@@ -448,6 +527,17 @@ impl ApplicationHandler for App {
             } => self.key(&event),
             WindowEvent::Ime(ime) => self.ime(ime),
             WindowEvent::MouseWheel { delta, .. } => self.scroll(delta),
+            WindowEvent::CursorMoved { position, .. } => {
+                self.mouse_moved(position.x as f32, position.y as f32);
+            }
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } => match state {
+                ElementState::Pressed => self.mouse_pressed(),
+                ElementState::Released => self.mouse.release(),
+            },
             WindowEvent::Focused(focused) => {
                 self.focused = focused;
                 self.blink.reset(Instant::now());
