@@ -136,6 +136,19 @@ l'échelle de l'écran : le texte est remis en forme à la nouvelle taille, net,
 le haut de la vue reste sur le même texte. Un changement d'écran (densité différente) est appliqué
 de la même façon, à chaud.
 
+## `ui` — interface
+
+| Commande | Description |
+|---|---|
+| `ui command-line [texte]` | Ouvre la ligne de commande (raccourci `mod+;`), éventuellement préremplie. |
+
+Ligne de commande : Entrée exécute la commande. Sans résultat, la ligne se ferme ; en cas
+d'erreur, le message s'affiche au-dessus et le texte reste, pour être corrigé ; une sortie
+(`file list`) s'affiche au-dessus d'une ligne vidée. Échap ferme la ligne. Édition : flèches,
+mot par mot (Alt sous macOS, Ctrl ailleurs), Début et Fin, retour arrière et suppression (par
+mot avec le même modificateur), sélection avec Maj, `mod+a`, `mod+c`, `mod+x`, `mod+v`. Les
+autres raccourcis restent actifs pendant la saisie.
+
 ## `window` — fenêtres
 
 | Commande | Description | Issue |

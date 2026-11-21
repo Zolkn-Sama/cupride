@@ -7,7 +7,8 @@
 //!   et survol de la souris ;
 //! - couches superposées : chaque popup se dessine dans sa propre [`cupride_render::Layer`],
 //!   au-dessus des panneaux ;
-//! - [`Label`] : texte d'interface, mis en forme seulement quand il change ;
+//! - [`Label`] : texte d'interface, mis en forme seulement quand il change ; [`Style`] : police
+//!   et dimensions communes ;
 //! - [`Theme`] : toutes les couleurs ; aucun élément n'a de couleur en dur.
 //!
 //! Éléments :
@@ -17,9 +18,11 @@
 //! - [`GutterMarker`] : marqueur de la gouttière (diagnostic, Git, point d'arrêt), à côté des
 //!   numéros de ligne.
 //! - [`MouseSelection`] : clics simples, doubles et triples, glisser, Maj+clic et Alt+clic.
+//! - [`TextInput`] : champ de saisie d'une ligne ; [`CommandLine`] : ligne de commande interne.
 //! - [`CursorBlink`] : clignotement du curseur, arrêté au repos.
 
 mod blink;
+mod command_line;
 mod editor_view;
 mod focus;
 mod gutter;
@@ -27,12 +30,17 @@ mod label;
 pub mod layout;
 mod mouse;
 mod scroll;
+mod style;
+mod text_input;
 mod theme;
 
 pub use blink::{BLINK_IDLE_STOP, CursorBlink};
+pub use command_line::{CommandLine, MessageKind};
 pub use editor_view::{EditorView, Pointer, Preedit, ViewSettings, WHEEL_LINES};
 pub use focus::Focus;
 pub use gutter::GutterMarker;
 pub use label::Label;
 pub use mouse::{ClickCounter, ClickModifiers, MULTI_CLICK_DELAY, MouseSelection};
+pub use style::Style;
+pub use text_input::{InputEvent, TextInput};
 pub use theme::Theme;

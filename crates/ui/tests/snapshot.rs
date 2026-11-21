@@ -6,7 +6,7 @@
 use cupride_core::Document;
 use cupride_core::text::{Selection, Selections};
 use cupride_render::{Gpu, OFFSCREEN_FORMAT, OffscreenTarget, Rect, Renderer, TextSystem};
-use cupride_ui::{EditorView, Theme, ViewSettings};
+use cupride_ui::{CommandLine, EditorView, MessageKind, Theme, ViewSettings};
 
 fn save_png(name: &str, (width, height): (u32, u32), pixels: &[u8]) {
     let dir =
@@ -74,4 +74,41 @@ fn render_editor(name: &str, scale: f32) {
         cursor_pixels > 20,
         "curseur introuvable : {cursor_pixels} pixels"
     );
+}
+
+/// Ligne de commande ouverte par-dessus l'éditeur, avec un message d'erreur.
+#[test]
+fn ligne_de_commande() {
+    let gpu = match Gpu::headless() {
+        Ok(gpu) => gpu,
+        Err(error) => {
+            eprintln!("test ignoré, pas de GPU : {error}");
+            return;
+        }
+    };
+    let (width, height) = (640, 200);
+    let target = OffscreenTarget::new(&gpu, width, height);
+    let mut renderer = Renderer::new(&gpu, OFFSCREEN_FORMAT);
+    let mut text = TextSystem::new();
+    let document = Document::from_text(&"let x = 1;\n".repeat(20));
+    let mut view = EditorView::new(ViewSettings::default(), 1.0);
+    let window = Rect::new(0.0, 0.0, width as f32, height as f32);
+    view.set_bounds(window);
+    view.prepare(&mut text, &document);
+    let theme = Theme::default();
+    let style = view.style();
+    let mut line = CommandLine::new("file opne src/main.rs");
+    line.set_message(
+        MessageKind::Error,
+        "commande inconnue : « file opne » (vouliez-vous dire « file open » ?)",
+    );
+    line.prepare(&mut text, &style, window, 0.0);
+    let mut frame = cupride_render::Frame::new(theme.background);
+    view.draw(frame.base(), &theme, &document, false);
+    line.draw(frame.push_layer(), &style, &theme, true);
+    renderer
+        .render(&gpu, &mut text, &target.view, target.size(), &frame)
+        .expect("rendu");
+    let pixels = target.read_rgba(&gpu).expect("relecture de l'image");
+    save_png("ligne_de_commande", (width, height), &pixels);
 }

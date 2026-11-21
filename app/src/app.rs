@@ -16,8 +16,8 @@ use cupride_core::{DocumentId, Editor};
 use cupride_render::Frame;
 use cupride_render::{Acquire, Gpu, Rect, Renderer, TextSystem, WindowSurface};
 use cupride_ui::{
-    ClickCounter, ClickModifiers, CursorBlink, EditorView, MouseSelection, Pointer, Preedit, Theme,
-    ViewSettings, WHEEL_LINES,
+    ClickCounter, ClickModifiers, CommandLine, CursorBlink, EditorView, Focus, MouseSelection,
+    Pointer, Preedit, Theme, ViewSettings, WHEEL_LINES,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
@@ -28,6 +28,10 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::keyboard::ModifiersState;
 use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::window::{CursorIcon, Window, WindowId};
+
+mod overlays;
+
+use overlays::Element;
 
 use crate::close::{CloseDecision, CloseGuard};
 use crate::input;
@@ -77,6 +81,10 @@ pub(crate) struct App {
     pointer: Pointer,
     /// Dernier texte envoyé à la sélection primaire, pour ne pas le renvoyer à chaque image.
     last_primary: Option<String>,
+    /// Élément qui reçoit le clavier : l'éditeur, ou une couche ouverte par-dessus.
+    focus: Focus<Element>,
+    /// Ligne de commande, quand elle est ouverte.
+    command_line: Option<CommandLine>,
     /// Message affiché dans le titre (avertissement de fermeture), s'il y en a un.
     notice: Option<String>,
     /// Erreur qui a empêché de démarrer.
@@ -113,6 +121,8 @@ impl App {
             mouse: MouseSelection::default(),
             pointer: Pointer::Default,
             last_primary: None,
+            focus: Focus::new(Element::Editor),
+            command_line: None,
             text,
             theme: Theme::default(),
             gpu: None,
@@ -160,6 +170,18 @@ impl App {
             return;
         }
         let start = Instant::now();
+        // Une couche ouverte (ligne de commande…) reçoit d'abord les touches.
+        if self.focus.current() != Element::Editor && self.resolver.pending().is_empty() {
+            let text = input::text_to_insert(event.text.as_deref(), self.modifiers);
+            let combo = input::combo(
+                &event.logical_key,
+                &event.key_without_modifiers(),
+                self.modifiers,
+            );
+            if self.overlay_key(combo, text) {
+                return;
+            }
+        }
         // Hors séquence en cours, le texte imprimable est inséré directement.
         if self.resolver.pending().is_empty()
             && let Some(text) = input::text_to_insert(event.text.as_deref(), self.modifiers)
@@ -199,6 +221,8 @@ impl App {
     /// Événement de méthode de saisie : composition en cours, ou texte validé.
     fn ime(&mut self, ime: Ime) {
         match ime {
+            // La composition n'est affichée que dans l'éditeur.
+            Ime::Preedit(..) if self.focus.current() != Element::Editor => {}
             Ime::Preedit(text, cursor) => {
                 self.composing = !text.is_empty();
                 let preedit = self.composing.then(|| Preedit {
@@ -216,7 +240,9 @@ impl App {
                 if let Some(state) = &mut self.window {
                     state.view.set_preedit(None);
                 }
-                self.insert(&text, Instant::now());
+                if !self.overlay_commit(&text) {
+                    self.insert(&text, Instant::now());
+                }
             }
             Ime::Enabled => {}
             Ime::Disabled => {
@@ -253,6 +279,13 @@ impl App {
                 Some(error.to_string())
             }
         };
+        self.after_any_command(start);
+    }
+
+    /// Après toute commande (raccourci, ligne de commande) : demandes à l'interface, réglages
+    /// rechargés, curseur rallumé et nouvelle image.
+    fn after_any_command(&mut self, start: Instant) {
+        self.process_ui_requests();
         self.sync_config();
         self.update_primary_selection();
         self.blink.reset(Instant::now());
@@ -280,6 +313,14 @@ impl App {
     /// Bouton gauche enfoncé : curseur, mot ou ligne selon le nombre de clics ; Maj étend la
     /// sélection, Alt ajoute un curseur.
     fn mouse_pressed(&mut self) {
+        let (x, y) = self.mouse_position;
+        if let Some(line) = &self.command_line
+            && line.area().contains(x, y)
+        {
+            return;
+        }
+        // Un clic dans l'éditeur ferme les couches et lui rend le focus.
+        self.close_overlays();
         let (Some(state), Some(document)) = (&self.window, self.editor.active_document_mut())
         else {
             return;
@@ -503,39 +544,49 @@ impl App {
             Acquire::Hidden => return,
         };
         let size = state.surface.size();
-        state
-            .view
-            .set_bounds(Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32));
+        let window_rect = Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32);
+        state.view.set_bounds(window_rect);
         self.editor.set_page_lines(state.view.page_lines());
         let now = Instant::now();
-        let cursors_visible = self.focused && self.blink.visible(now);
+        let blink_on = self.focused && self.blink.visible(now);
+        let editor_focused = self.focus.is_focused(Element::Editor);
+        let cursors_visible = blink_on && editor_focused;
         let animating = state.view.tick(now);
-        let scene = match self.editor.active_document() {
-            Some(document) => {
-                let cursor = self
-                    .editor
-                    .active_id()
-                    .map(|id| (id, document.selections().primary().head));
-                if cursor != self.last_cursor {
-                    self.last_cursor = cursor;
-                    state.view.follow_cursor();
-                }
-                state.view.prepare(&mut self.text, document);
-                state.view.frame(&self.theme, document, cursors_visible)
+        let mut scene = Frame::new(self.theme.background);
+        if let Some(document) = self.editor.active_document() {
+            let cursor = self
+                .editor
+                .active_id()
+                .map(|id| (id, document.selections().primary().head));
+            if cursor != self.last_cursor {
+                self.last_cursor = cursor;
+                state.view.follow_cursor();
             }
-            None => Frame::new(self.theme.background),
-        };
+            state.view.prepare(&mut self.text, document);
+            state
+                .view
+                .draw(scene.base(), &self.theme, document, cursors_visible);
+        }
+        let style = state.view.style();
+        let mut ime_area = None;
+        if let Some(line) = &mut self.command_line {
+            line.prepare(&mut self.text, &style, window_rect, 0.0);
+            ime_area = Some(line.cursor_rect(&style));
+        }
+        if let Some(line) = &self.command_line {
+            line.draw(scene.push_layer(), &style, &self.theme, blink_on);
+        }
         if let Err(error) = state
             .renderer
             .render(gpu, &mut self.text, &frame.view, size, &scene)
         {
             tracing::error!("{error}");
         }
-        if let Some(cursor) = self
-            .editor
-            .active_document()
-            .and_then(|document| state.view.primary_cursor_rect(document))
-        {
+        if let Some(cursor) = ime_area.or_else(|| {
+            self.editor
+                .active_document()
+                .and_then(|document| state.view.primary_cursor_rect(document))
+        }) {
             // La fenêtre de l'IME s'ouvre sous le curseur.
             state.window.set_ime_cursor_area(
                 PhysicalPosition::new(cursor.x, cursor.y),
