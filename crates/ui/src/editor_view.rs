@@ -187,10 +187,16 @@ impl EditorView {
         self.settings = settings;
     }
 
-    /// Change l'échelle de l'écran.
+    /// Change l'échelle : facteur de l'écran (DPI) multiplié par le zoom de l'interface. Le
+    /// défilement suit, pour garder le même texte en haut de la vue.
     pub fn set_scale(&mut self, scale: f32) {
-        if (scale - self.scale).abs() > f32::EPSILON {
+        if (scale - self.scale).abs() > f32::EPSILON && scale > 0.0 {
+            // Verticalement, en lignes : la hauteur de ligne est arrondie au pixel.
+            let [x, y] = self.scroll.position();
+            let lines = y / self.line_height().max(1.0);
+            let x = x * scale / self.scale;
             self.scale = scale;
+            self.scroll.jump_to([x, lines * self.line_height()]);
             self.lines.clear();
             self.gutter.clear();
             self.content_width = 0.0;
@@ -1076,5 +1082,25 @@ mod tests {
         view.prepare(&mut text, &document);
         assert!(view.gutter.numbers.is_empty());
         assert_eq!(view.gutter_width(), view.marker_lane());
+    }
+
+    #[test]
+    fn zoom_a_chaud() {
+        let mut text = TextSystem::new();
+        let document = Document::from_text(&"ligne\n".repeat(1_000));
+        let mut view = view(600.0);
+        view.prepare(&mut text, &document);
+        view.scroll_by(0.0, 39.0 * 100.0, false, Instant::now());
+        view.prepare(&mut text, &document);
+        assert_eq!(view.visible_lines().start, 99);
+        let width = view.lines[&100].x(5);
+
+        // Zoom ×1,5 sur l'écran ×2 : tout grandit, le haut de la vue reste sur le même texte.
+        view.set_scale(3.0);
+        view.prepare(&mut text, &document);
+        assert_eq!(view.line_height(), (14.0_f32 * 1.4 * 3.0).round());
+        assert_eq!(view.visible_lines().start, 99);
+        let zoomed = view.lines[&100].x(5);
+        assert!((zoomed / width - 1.5).abs() < 0.05, "{width} → {zoomed}");
     }
 }

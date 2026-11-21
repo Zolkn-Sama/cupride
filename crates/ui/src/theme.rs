@@ -31,7 +31,9 @@ impl Theme {
         foreground: Color::rgb(0xf2, 0xe6, 0xe3),
         cursor: Color::rgb(0xf7, 0x9e, 0x86),
         selection: Color::rgba(0xe8, 0x7e, 0x6c, 0x48),
-        current_line: Color::rgba(0xff, 0xff, 0xff, 0x0b),
+        // Opaque : un blanc très transparent paraît bien plus clair, le mélange se faisant en
+        // couleurs linéaires.
+        current_line: Color::rgb(0x2a, 0x24, 0x28),
         line_number: Color::rgb(0x6e, 0x60, 0x66),
         line_number_active: Color::rgb(0xf7, 0x9e, 0x86),
     };

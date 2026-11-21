@@ -259,6 +259,10 @@ impl App {
         );
         if let Some(state) = &mut self.window {
             state.view.set_settings(ViewSettings::from_config(config));
+            // Zoom de l'interface (view zoom-in…) : appliqué à chaud, comme un changement d'écran.
+            state
+                .view
+                .set_scale(state.window.scale_factor() as f32 * self.editor.zoom());
         }
     }
 
@@ -462,7 +466,7 @@ impl App {
         tracing::info!(gpu = %gpu.describe(), format = ?surface.format(), "rendu prêt");
         let renderer = Renderer::new(&gpu, surface.format());
         let settings = ViewSettings::from_config(self.editor.config());
-        let view = EditorView::new(settings, window.scale_factor() as f32);
+        let view = EditorView::new(settings, window.scale_factor() as f32 * self.editor.zoom());
         self.gpu = Some(gpu);
         self.window = Some(WindowState {
             surface,
@@ -567,7 +571,9 @@ impl ApplicationHandler for App {
                 // Fenêtre déplacée vers un écran d'une autre densité : le texte est remis en
                 // forme à la nouvelle échelle. `Resized` suit avec la nouvelle taille physique.
                 if let Some(state) = &mut self.window {
-                    state.view.set_scale(scale_factor as f32);
+                    state
+                        .view
+                        .set_scale(scale_factor as f32 * self.editor.zoom());
                     state.window.request_redraw();
                 }
             }

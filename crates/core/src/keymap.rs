@@ -544,6 +544,11 @@ pub fn default_bindings(platform: Platform) -> Vec<(&'static str, &'static str)>
         ("mod+z", "edit undo"),
         ("mod+shift+z", "edit redo"),
         ("mod+s", "file save"),
+        ("mod+=", "view zoom-in"),
+        ("mod+shift+=", "view zoom-in"),
+        ("mod+plus", "view zoom-in"),
+        ("mod+-", "view zoom-out"),
+        ("mod+0", "view zoom-reset"),
         ("mod+k mod+w", "file close"),
     ];
     match platform {
