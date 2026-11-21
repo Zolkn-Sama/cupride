@@ -1,14 +1,14 @@
-//! Vue d'un document : lignes visibles mises en forme et dessinées.
+//! Vue d'un document : lignes visibles mises en forme et dessinées, sélections et curseurs.
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
 
 use cupride_core::Document;
-use cupride_core::config::FontConfig;
+use cupride_core::config::Config;
 use cupride_core::text::TextBuffer;
 use cupride_render::text::{Attrs, Buffer, Family, Metrics, Shaping, Wrap};
-use cupride_render::{Frame, Rect, TextItem, TextSystem};
+use cupride_render::{Frame, Quad, Rect, TextItem, TextSystem};
 
 use crate::theme::Theme;
 
@@ -17,6 +17,9 @@ const PADDING: f32 = 8.0;
 
 /// Largeur d'une tabulation, en espaces.
 const TAB_WIDTH: u16 = 4;
+
+/// Épaisseur du curseur, en pixels logiques.
+const CURSOR_WIDTH: f32 = 2.0;
 
 /// Réglages d'affichage, en pixels logiques.
 #[derive(Debug, Clone, PartialEq)]
@@ -27,27 +30,42 @@ pub struct ViewSettings {
     pub font_size: f32,
     /// Hauteur de ligne, en multiple de la taille.
     pub line_height: f32,
+    /// Surlignage de la ligne du curseur principal.
+    pub highlight_current_line: bool,
 }
 
 impl Default for ViewSettings {
     fn default() -> Self {
-        Self::from(&FontConfig::default())
+        Self::from_config(&Config::default())
     }
 }
 
-impl From<&FontConfig> for ViewSettings {
-    fn from(font: &FontConfig) -> Self {
+impl ViewSettings {
+    /// Réglages tirés de la configuration, bornés à des valeurs utilisables.
+    pub fn from_config(config: &Config) -> Self {
         Self {
-            font_family: font.family.clone(),
-            font_size: font.size.clamp(4.0, 200.0),
-            line_height: font.line_height.clamp(0.8, 4.0),
+            font_family: config.font.family.clone(),
+            font_size: config.font.size.clamp(4.0, 200.0),
+            line_height: config.font.line_height.clamp(0.8, 4.0),
+            highlight_current_line: config.view.highlight_current_line,
         }
+    }
+
+    /// Les deux réglages donnent-ils la même mise en forme du texte ?
+    fn same_shaping(&self, other: &Self) -> bool {
+        self.font_family == other.font_family
+            && self.font_size == other.font_size
+            && self.line_height == other.line_height
     }
 }
 
 /// Une ligne mise en forme, gardée tant que son texte ne change pas.
 struct CachedLine {
     hash: u64,
+    /// Position du début de la ligne dans le document, mise à jour à chaque préparation.
+    start: usize,
+    /// Longueur du contenu, sans la fin de ligne.
+    len: usize,
     buffer: Buffer,
 }
 
@@ -91,12 +109,13 @@ impl EditorView {
         }
     }
 
-    /// Change les réglages d'affichage ; toutes les lignes seront remises en forme.
+    /// Change les réglages d'affichage ; si la police change, toutes les lignes seront remises
+    /// en forme.
     pub fn set_settings(&mut self, settings: ViewSettings) {
-        if settings != self.settings {
-            self.settings = settings;
+        if !settings.same_shaping(&self.settings) {
             self.lines.clear();
         }
+        self.settings = settings;
     }
 
     /// Change l'échelle de l'écran.
@@ -156,13 +175,13 @@ impl EditorView {
         let metrics = self.metrics();
         let family = self.settings.font_family.clone();
         for line in self.visible.clone() {
+            let start = buffer.line_to_byte(line).unwrap_or_default();
             let content = buffer.line(line).unwrap_or_default();
             let hash = hash_text(&content);
-            if self
-                .lines
-                .get(&line)
-                .is_some_and(|cached| cached.hash == hash)
+            if let Some(cached) = self.lines.get_mut(&line)
+                && cached.hash == hash
             {
+                cached.start = start;
                 continue;
             }
             let mut shaped = Buffer::new(text.font_system(), metrics);
@@ -175,32 +194,144 @@ impl EditorView {
                 line,
                 CachedLine {
                     hash,
+                    start,
+                    len: content.len(),
                     buffer: shaped,
                 },
             );
         }
     }
 
-    /// Liste de dessin de la vue, à partir des lignes préparées.
-    pub fn frame(&self, theme: &Theme) -> Frame<'_> {
+    /// Bord gauche du texte, en pixels physiques.
+    fn text_left(&self) -> f32 {
+        self.bounds.x + self.padding()
+    }
+
+    /// Haut de la ligne `line`, en pixels physiques.
+    fn line_top(&self, line: usize) -> f32 {
+        self.bounds.y + self.padding() + line as f32 * self.line_height() - self.scroll_y
+    }
+
+    /// Largeur réservée au saut de ligne d'une sélection qui continue sur la ligne suivante.
+    fn newline_width(&self) -> f32 {
+        (self.settings.font_size * self.scale * 0.5).round()
+    }
+
+    /// Liste de dessin de la vue, à partir des lignes préparées : ligne courante, sélections,
+    /// texte, puis curseurs si `cursors_visible`.
+    pub fn frame(&self, theme: &Theme, document: &Document, cursors_visible: bool) -> Frame<'_> {
         let mut frame = Frame::new(theme.background);
         let line_height = self.line_height();
-        let left = self.bounds.x + self.padding();
+        let selections = document.selections();
+        let buffer = document.buffer();
+        let line_of = |offset: usize| buffer.byte_to_line(offset).unwrap_or_default();
+
+        if self.settings.highlight_current_line {
+            let line = line_of(selections.primary().head);
+            if self.visible.contains(&line) {
+                let rect = Rect::new(
+                    self.bounds.x,
+                    self.line_top(line),
+                    self.bounds.width,
+                    line_height,
+                );
+                frame
+                    .quads
+                    .push(Quad::new(rect.intersect(&self.bounds), theme.current_line));
+            }
+        }
+
+        for selection in selections.iter().filter(|s| !s.is_empty()) {
+            let (first, last) = (line_of(selection.start()), line_of(selection.end()));
+            let lines = first.max(self.visible.start)..(last + 1).min(self.visible.end);
+            for line in lines {
+                let Some(cached) = self.lines.get(&line) else {
+                    continue;
+                };
+                let from = selection
+                    .start()
+                    .saturating_sub(cached.start)
+                    .min(cached.len);
+                let to = selection.end().saturating_sub(cached.start).min(cached.len);
+                let mut right = x_at(&cached.buffer, to);
+                // La sélection continue après la fin de la ligne : le saut de ligne est inclus.
+                if selection.end() > cached.start + cached.len {
+                    right += self.newline_width();
+                }
+                let left = x_at(&cached.buffer, from);
+                let rect = Rect::new(
+                    self.text_left() + left,
+                    self.line_top(line),
+                    right - left,
+                    line_height,
+                );
+                frame
+                    .quads
+                    .push(Quad::new(rect.intersect(&self.bounds), theme.selection));
+            }
+        }
+
         for line in self.visible.clone() {
             let Some(cached) = self.lines.get(&line) else {
                 continue;
             };
-            let top = self.bounds.y + self.padding() + line as f32 * line_height - self.scroll_y;
             frame.texts.push(TextItem {
                 buffer: &cached.buffer,
-                left,
-                top,
+                left: self.text_left(),
+                top: self.line_top(line),
                 clip: self.bounds,
                 color: theme.foreground,
             });
         }
+
+        if cursors_visible {
+            let width = (CURSOR_WIDTH * self.scale).round().max(1.0);
+            for selection in selections.iter() {
+                if let Some(rect) = self.cursor_rect(buffer, selection.head, width) {
+                    frame
+                        .overlays
+                        .push(Quad::new(rect.intersect(&self.bounds), theme.cursor));
+                }
+            }
+        }
         frame
     }
+
+    /// Rectangle du curseur à la position `offset`, s'il est sur une ligne préparée.
+    fn cursor_rect(&self, buffer: &impl TextBuffer, offset: usize, width: f32) -> Option<Rect> {
+        let line = buffer.byte_to_line(offset).ok()?;
+        let cached = self.lines.get(&line)?;
+        let x = x_at(&cached.buffer, offset.saturating_sub(cached.start));
+        Some(Rect::new(
+            (self.text_left() + x - width / 2.0).round(),
+            self.line_top(line),
+            width,
+            self.line_height(),
+        ))
+    }
+
+    /// Position du curseur principal dans la fenêtre (pour placer la fenêtre de l'IME), si sa
+    /// ligne est préparée.
+    pub fn primary_cursor_rect(&self, document: &Document) -> Option<Rect> {
+        let head = document.selections().primary().head;
+        self.cursor_rect(document.buffer(), head, 1.0)
+    }
+}
+
+/// Abscisse, depuis le bord gauche du texte, de la position `index` (en octets) d'une ligne mise
+/// en forme. Au milieu d'une ligature, la position est interpolée.
+fn x_at(buffer: &Buffer, index: usize) -> f32 {
+    let mut end = 0.0_f32;
+    for run in buffer.layout_runs() {
+        for glyph in run.glyphs {
+            if (glyph.start..glyph.end).contains(&index) {
+                let span = (glyph.end - glyph.start).max(1) as f32;
+                return glyph.x + glyph.w * (index - glyph.start) as f32 / span;
+            }
+            end = end.max(glyph.x + glyph.w);
+        }
+    }
+    end
 }
 
 fn attrs(family: &str) -> Attrs<'_> {
@@ -221,6 +352,7 @@ fn hash_text(text: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cupride_core::text::{Selection, Selections};
 
     fn view(height: f32) -> EditorView {
         let mut view = EditorView::new(ViewSettings::default(), 2.0);
@@ -239,7 +371,8 @@ mod tests {
         assert_eq!(view.line_height(), 39.0);
         assert_eq!(visible, 0..17);
         assert_eq!(view.cached_lines(), 17);
-        assert_eq!(view.frame(&Theme::default()).texts.len(), 17);
+        let frame = view.frame(&Theme::default(), &document, true);
+        assert_eq!(frame.texts.len(), 17);
     }
 
     #[test]
@@ -257,6 +390,10 @@ mod tests {
             .unwrap();
         view.prepare(&mut text, &document);
         assert_eq!(view.lines[&1].buffer.lines[0].text(), "xb");
+        assert_eq!(
+            view.lines[&2].start, 5,
+            "début de ligne décalé par l'insertion"
+        );
         assert_eq!(view.visible_lines(), 0..3);
     }
 
@@ -268,6 +405,15 @@ mod tests {
         view.prepare(&mut text, &document);
         assert_eq!(view.cached_lines(), 2);
         view.set_settings(ViewSettings {
+            highlight_current_line: false,
+            ..ViewSettings::default()
+        });
+        assert_eq!(
+            view.cached_lines(),
+            2,
+            "pas de remise en forme sans changement de police"
+        );
+        view.set_settings(ViewSettings {
             font_size: 20.0,
             ..ViewSettings::default()
         });
@@ -275,5 +421,70 @@ mod tests {
         view.set_scale(1.0);
         view.prepare(&mut text, &document);
         assert_eq!(view.line_height(), 28.0);
+    }
+
+    #[test]
+    fn curseurs_et_selections_multiples() {
+        let mut text = TextSystem::new();
+        let mut document = Document::from_text("abcd\nefgh\nijkl");
+        // Une sélection sur deux lignes, et un curseur seul sur la troisième.
+        let mut selections = Selections::single(Selection::new(2, 7));
+        selections.push(Selection::cursor(12));
+        document.set_selections(selections);
+        let mut view = view(600.0);
+        view.prepare(&mut text, &document);
+        let theme = Theme::default();
+
+        let frame = view.frame(&theme, &document, true);
+        let selection: Vec<&Quad> = frame
+            .quads
+            .iter()
+            .filter(|q| q.color == theme.selection)
+            .collect();
+        assert_eq!(selection.len(), 2, "un rectangle par ligne sélectionnée");
+        let (first, second) = (selection[0].rect, selection[1].rect);
+        assert!(first.x > view.text_left(), "commence après « ab »");
+        assert!(first.width > 0.0 && second.width > 0.0);
+        assert_eq!(
+            second.x,
+            view.text_left(),
+            "deuxième ligne depuis son début"
+        );
+        assert_eq!(second.y - first.y, view.line_height());
+
+        assert_eq!(frame.overlays.len(), 2, "un curseur par sélection");
+        assert!(frame.overlays.iter().all(|q| q.color == theme.cursor));
+        let current: Vec<&Quad> = frame
+            .quads
+            .iter()
+            .filter(|q| q.color == theme.current_line)
+            .collect();
+        assert_eq!(current.len(), 1);
+        // Le curseur ajouté est devenu la sélection principale : sa ligne est surlignée.
+        assert_eq!(current[0].rect.y, first.y + 2.0 * view.line_height());
+
+        // Curseurs éteints (clignotement) ; ligne courante désactivée.
+        view.set_settings(ViewSettings {
+            highlight_current_line: false,
+            ..ViewSettings::default()
+        });
+        let frame = view.frame(&theme, &document, false);
+        assert!(frame.overlays.is_empty());
+        assert!(frame.quads.iter().all(|q| q.color != theme.current_line));
+    }
+
+    #[test]
+    fn abscisse_des_positions() {
+        let mut text = TextSystem::new();
+        let document = Document::from_text("abc");
+        let mut view = view(600.0);
+        view.prepare(&mut text, &document);
+        let buffer = &view.lines[&0].buffer;
+        let (x0, x1, x3) = (x_at(buffer, 0), x_at(buffer, 1), x_at(buffer, 3));
+        assert_eq!(x0, 0.0);
+        assert!(x1 > 0.0);
+        // Police à chasse fixe : trois caractères font trois fois la largeur d'un.
+        assert!((x3 - 3.0 * x1).abs() < 0.5, "{x1} {x3}");
+        assert_eq!(x_at(buffer, 99), x3, "au-delà de la fin : fin de ligne");
     }
 }

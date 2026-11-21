@@ -5,6 +5,7 @@ use glyphon::{Cache, Resolution, TextAtlas, TextRenderer, Viewport};
 use crate::error::RenderError;
 use crate::frame::Frame;
 use crate::gpu::Gpu;
+use crate::quad::QuadPipeline;
 use crate::text::TextSystem;
 
 /// Moteur de rendu pour un format d'image donné.
@@ -13,6 +14,7 @@ pub struct Renderer {
     atlas: TextAtlas,
     viewport: Viewport,
     text_renderer: TextRenderer,
+    quads: QuadPipeline,
 }
 
 impl std::fmt::Debug for Renderer {
@@ -40,6 +42,7 @@ impl Renderer {
             atlas,
             viewport,
             text_renderer,
+            quads: QuadPipeline::new(&gpu.device, format),
         }
     }
 
@@ -86,6 +89,14 @@ impl Renderer {
                 .map_err(|e| RenderError::Draw(e.to_string()))?;
         }
 
+        let (under, over) = self.quads.prepare(
+            &gpu.device,
+            &gpu.queue,
+            (width, height),
+            &frame.quads,
+            &frame.overlays,
+        );
+
         let mut encoder = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -108,9 +119,11 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
+            self.quads.draw(&mut pass, under);
             self.text_renderer
                 .render(&self.atlas, &self.viewport, &mut pass)
                 .map_err(|e| RenderError::Draw(e.to_string()))?;
+            self.quads.draw(&mut pass, over);
         }
         gpu.queue.submit(Some(encoder.finish()));
         // Les glyphes restent dans l'atlas ; ils ne sont seulement plus marqués « utilisés »,
@@ -126,6 +139,7 @@ pub(crate) mod tests {
     use crate::color::Color;
     use crate::geometry::Rect;
     use crate::offscreen::{OFFSCREEN_FORMAT, OffscreenTarget};
+    use crate::quad::Quad;
     use crate::text::{Attrs, Buffer, Family, Metrics, Shaping, TextItem};
 
     /// GPU de test, ou `None` si la machine n'en a pas (certaines machines de CI).
@@ -272,5 +286,42 @@ pub(crate) mod tests {
             .render(&gpu, &mut no_fonts, &target.view, target.size(), &frame)
             .unwrap();
         assert_ne!(target.read_rgba(&gpu).unwrap(), first);
+    }
+
+    #[test]
+    fn rectangles_sous_et_par_dessus_le_texte() {
+        let Some(gpu) = test_gpu() else { return };
+        let (width, height) = (40, 20);
+        let target = OffscreenTarget::new(&gpu, width, height);
+        let mut renderer = Renderer::new(&gpu, OFFSCREEN_FORMAT);
+        let mut text = TextSystem::new();
+        let mut frame = Frame::new(BACKGROUND);
+        frame.quads.push(Quad::new(
+            Rect::new(0.0, 0.0, 20.0, 20.0),
+            Color::rgb(0xff, 0x00, 0x00),
+        ));
+        // Semi-transparent, par-dessus le rouge : mélange.
+        frame.overlays.push(Quad::new(
+            Rect::new(10.0, 0.0, 20.0, 20.0),
+            Color::rgba(0x00, 0x00, 0xff, 0x80),
+        ));
+        renderer
+            .render(&gpu, &mut text, &target.view, target.size(), &frame)
+            .unwrap();
+        let pixels = target.read_rgba(&gpu).unwrap();
+        let at = |x: usize, y: usize| {
+            let i = (y * width as usize + x) * 4;
+            [pixels[i], pixels[i + 1], pixels[i + 2]]
+        };
+        assert_eq!(at(5, 10), [0xff, 0x00, 0x00]);
+        let mixed = at(15, 10);
+        assert!(mixed[0] > 0x80 && mixed[2] > 0x80, "mélange : {mixed:?}");
+        let over_bg = at(25, 10);
+        assert!(
+            over_bg[2] > 0x80 && over_bg[0] < 0x40,
+            "bleu sur fond : {over_bg:?}"
+        );
+        let bg = at(35, 10);
+        assert!(bg[0].abs_diff(0x1e) <= 1, "fond intact : {bg:?}");
     }
 }

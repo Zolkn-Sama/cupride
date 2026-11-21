@@ -67,3 +67,21 @@ Lecture : la boucle dort réellement au repos. La mémoire dépasse déjà l'obj
 tout rendu : l'essentiel vient des bibliothèques système chargées par une application macOS
 fenêtrée (AppKit). L'objectif sera réévalué une fois le rendu en place, en distinguant la mémoire
 propre à CuprIDE (`footprint`, `heaptrack`) de celle des bibliothèques partagées.
+
+### 2026-11-21 — RENDER-04, clignotement du curseur
+
+- Machine : Apple M3 Pro, 18 Go, macOS ; Rust 1.95.0, binaire de release
+- Fichier de 450 lignes ouvert, fenêtre au premier plan (focus clavier), curseur clignotant
+  toutes les 530 ms, sans aucune saisie
+
+| Phase | Temps CPU | Soit |
+|---|---|---|
+| Clignotement (de 1 s à 10 s, ~17 redessins) | 0,06 s en 9 s | ~0,7 % d'un cœur, ~3,5 ms par redessin |
+| Après l'arrêt automatique (de 10 s à 30 s) | 0,01 s en 20 s | le dernier redessin, puis 0 |
+| Mémoire résidente | 100 Mo | |
+
+Lecture : le clignotement coûte un redessin complet de la fenêtre par changement d'état ; c'est
+peu, mais pas nul. C'est pourquoi il s'arrête, curseur visible, 10 s après la dernière saisie :
+l'objectif de 0 % de CPU au repos est tenu. Désactivé (`cursor_blink = false`), aucun réveil
+n'est programmé. Le coût d'un redessin (préparation des glyphes, envoi au GPU, présentation)
+pourra être réduit en ne redessinant que la zone du curseur si le besoin s'en fait sentir.

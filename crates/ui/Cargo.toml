@@ -13,5 +13,8 @@ cupride-core.workspace = true
 cupride-render.workspace = true
 tracing.workspace = true
 
+[dev-dependencies]
+png.workspace = true
+
 [lints]
 workspace = true
