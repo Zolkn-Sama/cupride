@@ -59,6 +59,10 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # Surligne la ligne du curseur principal.
 # highlight_current_line = true
 
+# Numéros de ligne : "absolute", "relative" (distance au curseur, numéro réel sur sa ligne)
+# ou "off".
+# line_numbers = "absolute"
+
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les
 # remplacent pour les mêmes touches. Une chaîne vide retire un raccourci par défaut.
@@ -139,6 +143,19 @@ impl Default for FontConfig {
     }
 }
 
+/// Numéros de ligne dans la gouttière.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LineNumbers {
+    /// Numéro de chaque ligne.
+    #[default]
+    Absolute,
+    /// Distance à la ligne du curseur ; numéro réel sur la ligne du curseur.
+    Relative,
+    /// Pas de numéros (la place des marqueurs reste réservée).
+    Off,
+}
+
 /// Section `[view]` : affichage de l'éditeur.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default)]
@@ -149,6 +166,8 @@ pub struct ViewConfig {
     pub cursor_blink_ms: u64,
     /// Surlignage de la ligne du curseur principal.
     pub highlight_current_line: bool,
+    /// Numéros de ligne.
+    pub line_numbers: LineNumbers,
 }
 
 impl Default for ViewConfig {
@@ -157,6 +176,7 @@ impl Default for ViewConfig {
             cursor_blink: true,
             cursor_blink_ms: 530,
             highlight_current_line: true,
+            line_numbers: LineNumbers::Absolute,
         }
     }
 }
@@ -188,7 +208,12 @@ const KNOWN_KEYS: [(&str, &[&str]); 4] = [
     ("font", &["family", "size", "line_height"]),
     (
         "view",
-        &["cursor_blink", "cursor_blink_ms", "highlight_current_line"],
+        &[
+            "cursor_blink",
+            "cursor_blink_ms",
+            "highlight_current_line",
+            "line_numbers",
+        ],
     ),
     ("keys", &[]),
 ];

@@ -41,6 +41,7 @@ options, commentées, avec leur valeur par défaut. `config reload` l'applique s
 | `cursor_blink` | `true`, `false` | `true` | Clignotement du curseur. Il s'arrête, curseur visible, 10 secondes après la dernière saisie : au repos, l'IDE ne consomme pas de CPU. |
 | `cursor_blink_ms` | entier, de 50 à 5000 | `530` | Demi-période du clignotement, en millisecondes. |
 | `highlight_current_line` | `true`, `false` | `true` | Surligne la ligne du curseur principal. |
+| `line_numbers` | `"absolute"`, `"relative"`, `"off"` | `"absolute"` | Numéros de ligne dans la gouttière. `relative` : distance à la ligne du curseur, et numéro réel sur cette ligne. Avec `off`, la colonne des marqueurs (diagnostics, Git, points d'arrêt) reste réservée. |
 
 ### `[keys]`
 
@@ -93,6 +94,10 @@ Les commandes disponibles sont décrites dans [`commands.md`](commands.md).
 
 # Surligne la ligne du curseur principal.
 # highlight_current_line = true
+
+# Numéros de ligne : "absolute", "relative" (distance au curseur, numéro réel sur sa ligne)
+# ou "off".
+# line_numbers = "absolute"
 
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les
