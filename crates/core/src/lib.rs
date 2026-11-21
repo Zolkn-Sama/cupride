@@ -1,6 +1,7 @@
 //! Noyau de CuprIDE, sans interface graphique.
 //!
 //! - [`Editor`] : état global de l'éditeur (documents ouverts, document actif, workspace).
+//! - [`clipboard`] : presse-papiers, fourni par l'application (mémoire par défaut).
 //! - [`command`] : registre unique des commandes, utilisé par toutes les sources d'actions.
 //! - [`config`] : configuration TOML de l'utilisateur.
 //! - [`events`] : événements publiés par le noyau (document ouvert, modifié, enregistré,
@@ -11,6 +12,7 @@
 //! Ne dépend jamais de `render`, `ui` ou `app` : tout le noyau se teste avec `cargo test` et se
 //! pilote depuis le REPL console.
 
+pub mod clipboard;
 pub mod command;
 pub mod config;
 mod document;

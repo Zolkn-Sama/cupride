@@ -8,8 +8,10 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use cupride_core::clipboard::ClipboardKind;
 use cupride_core::command::CommandOutput;
 use cupride_core::keymap::{KeyResolver, Resolution};
+use cupride_core::text::{Selections, TextBuffer};
 use cupride_core::{DocumentId, Editor};
 use cupride_render::Frame;
 use cupride_render::{Acquire, Gpu, Rect, Renderer, TextSystem, WindowSurface};
@@ -73,6 +75,8 @@ pub(crate) struct App {
     mouse: MouseSelection,
     /// Forme actuelle du pointeur.
     pointer: Pointer,
+    /// Dernier texte envoyé à la sélection primaire, pour ne pas le renvoyer à chaque image.
+    last_primary: Option<String>,
     /// Message affiché dans le titre (avertissement de fermeture), s'il y en a un.
     notice: Option<String>,
     /// Erreur qui a empêché de démarrer.
@@ -108,6 +112,7 @@ impl App {
             clicks: ClickCounter::default(),
             mouse: MouseSelection::default(),
             pointer: Pointer::Default,
+            last_primary: None,
             text,
             theme: Theme::default(),
             gpu: None,
@@ -238,6 +243,7 @@ impl App {
             }
         };
         self.sync_config();
+        self.update_primary_selection();
         self.blink.reset(Instant::now());
         self.pending_input.get_or_insert(start);
         self.refresh_title();
@@ -283,6 +289,52 @@ impl App {
         document.set_selections(selections);
         self.blink.reset(now);
         self.request_redraw();
+    }
+
+    /// Sélection primaire (X11, Wayland, si activée) : le texte sélectionné y est copié.
+    fn update_primary_selection(&mut self) {
+        if !self.editor.config().editor.primary_selection
+            || !self.editor.clipboard_mut().has_primary()
+        {
+            return;
+        }
+        let Some(document) = self.editor.active_document() else {
+            return;
+        };
+        let selection = document.selections().primary();
+        if selection.is_empty() {
+            return;
+        }
+        let Ok(text) = document.buffer().slice(selection.range()) else {
+            return;
+        };
+        if self.last_primary.as_ref() == Some(&text) {
+            return;
+        }
+        if let Err(error) = self
+            .editor
+            .clipboard_mut()
+            .set(ClipboardKind::Primary, text.clone())
+        {
+            tracing::warn!("sélection primaire : {error}");
+        }
+        self.last_primary = Some(text);
+    }
+
+    /// Clic du milieu (sélection primaire activée) : place le curseur sous la souris et y colle
+    /// la sélection primaire.
+    fn paste_primary(&mut self) {
+        if !self.editor.config().editor.primary_selection {
+            return;
+        }
+        let (Some(state), Some(document)) = (&self.window, self.editor.active_document_mut())
+        else {
+            return;
+        };
+        let (x, y) = self.mouse_position;
+        let offset = state.view.offset_at(x, y, document.buffer());
+        document.set_selections(Selections::cursor(offset));
+        self.execute("edit paste --primary", Instant::now());
     }
 
     /// Souris déplacée : forme du pointeur, et sélection si le bouton est enfoncé. Hors de la
@@ -536,8 +588,16 @@ impl ApplicationHandler for App {
                 ..
             } => match state {
                 ElementState::Pressed => self.mouse_pressed(),
-                ElementState::Released => self.mouse.release(),
+                ElementState::Released => {
+                    self.mouse.release();
+                    self.update_primary_selection();
+                }
             },
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Middle,
+                ..
+            } => self.paste_primary(),
             WindowEvent::Focused(focused) => {
                 self.focused = focused;
                 self.blink.reset(Instant::now());

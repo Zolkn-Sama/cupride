@@ -1,6 +1,7 @@
 //! Point d'entrée de CuprIDE.
 
 mod app;
+mod clipboard;
 mod close;
 mod input;
 mod latency;
@@ -15,6 +16,7 @@ fn main() -> anyhow::Result<()> {
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "démarrage de CuprIDE");
 
     let mut editor = Editor::new();
+    editor.set_clipboard(clipboard::SystemClipboard::new_or_memory());
     for message in editor.reload_config() {
         tracing::warn!("configuration : {message}");
     }

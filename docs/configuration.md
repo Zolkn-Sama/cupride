@@ -25,6 +25,7 @@ options, commentées, avec leur valeur par défaut. `config reload` l'applique s
 |---|---|---|---|
 | `line_ending` | `"auto"`, `"lf"`, `"crlf"` | `"auto"` | Fin de ligne des **nouveaux** documents (`auto` : LF). Un fichier existant garde toujours ses fins de ligne. |
 | `undo_group_delay_ms` | entier ≥ 0 | `1000` | Pause, en millisecondes, au-delà de laquelle une nouvelle frappe commence un nouveau bloc d'annulation. `0` : chaque frappe s'annule séparément. |
+| `primary_selection` | `true`, `false` | `false` | Sélection primaire (Linux, X11 et Wayland) : le texte sélectionné y est copié, et le clic du milieu le colle. Sans effet sous Windows et macOS. |
 
 ### `[font]`
 
@@ -72,6 +73,10 @@ Les commandes disponibles sont décrites dans [`commands.md`](commands.md).
 # Pause, en millisecondes, au-delà de laquelle une nouvelle frappe commence un nouveau bloc
 # d'annulation. 0 : chaque frappe est annulée séparément.
 # undo_group_delay_ms = 1000
+
+# Sélection primaire (Linux, X11 et Wayland) : le texte sélectionné est copié dans la sélection
+# primaire, et le clic du milieu le colle. Sans effet sous Windows et macOS.
+# primary_selection = false
 
 [font]
 # Famille de police : "monospace" (police à chasse fixe du système) ou un nom de famille

@@ -13,7 +13,9 @@ use cupride_text::{
 };
 
 use super::active;
+use crate::clipboard::{ClipboardKind, LastCopy, split_for_cursors};
 use crate::command::{CommandDef, CommandError, CommandOutput, CommandRegistry};
+use crate::editor::Editor;
 
 /// Directions acceptées par `edit move`.
 const DIRECTIONS: [&str; 12] = [
@@ -205,6 +207,111 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
         ),
     )?;
 
+    registry.register(CommandDef::new(
+        "edit",
+        "copy",
+        "Copie les sélections dans le presse-papiers (un fragment par sélection)",
+        |editor, _| {
+            Ok(match copy(editor)? {
+                true => CommandOutput::None,
+                false => CommandOutput::message("rien à copier : aucune sélection"),
+            })
+        },
+    ))?;
+
+    registry.register(CommandDef::new(
+        "edit",
+        "cut",
+        "Copie les sélections dans le presse-papiers, puis les supprime",
+        |editor, _| {
+            if !copy(editor)? {
+                return Ok(CommandOutput::message("rien à couper : aucune sélection"));
+            }
+            let (_, document) = active(editor)?;
+            document.transact(EditKind::Other, |buffer, tx| {
+                delete_each(buffer, tx, |_, offset| Ok(offset..offset))
+            })?;
+            Ok(CommandOutput::None)
+        },
+    ))?;
+
+    registry.register(
+        CommandDef::new(
+            "edit",
+            "paste",
+            "Colle le presse-papiers à chaque curseur (un fragment par curseur si les nombres correspondent)",
+            |editor, args| {
+                let kind = if args.get_flag("primary") {
+                    ClipboardKind::Primary
+                } else {
+                    ClipboardKind::Standard
+                };
+                let cursors = active(editor)?.1.selections().len();
+                let Some(text) = editor.clipboard_mut().get(kind).filter(|t| !t.is_empty()) else {
+                    return Ok(CommandOutput::message("presse-papiers vide"));
+                };
+                let fragments = split_for_cursors(&text, cursors, editor.last_copy());
+                let (_, document) = active(editor)?;
+                let newline = document.line_ending().as_str();
+                let adapt = |text: &str| text.replace("\r\n", "\n").replace('\n', newline);
+                document.transact(EditKind::Other, |buffer, tx| match &fragments {
+                    Some(fragments) => {
+                        let fragments: Vec<String> = fragments.iter().map(|f| adapt(f)).collect();
+                        replace_each(buffer, tx, &fragments)
+                    }
+                    None => replace_selections(buffer, tx, &adapt(&text)),
+                })?;
+                Ok(CommandOutput::None)
+            },
+        )
+        .arg(
+            Arg::new("primary")
+                .long("primary")
+                .action(ArgAction::SetTrue)
+                .help("Colle la sélection primaire (X11, Wayland) au lieu du presse-papiers"),
+        ),
+    )?;
+
+    Ok(())
+}
+
+/// Copie le texte des sélections non vides dans le presse-papiers, séparé par la fin de ligne du
+/// document. Renvoie faux s'il n'y avait rien à copier.
+fn copy(editor: &mut Editor) -> Result<bool, CommandError> {
+    let (_, document) = active(editor)?;
+    let buffer = document.buffer();
+    let fragments = document
+        .selections()
+        .iter()
+        .filter(|s| !s.is_empty())
+        .map(|s| buffer.slice(s.range()))
+        .collect::<Result<Vec<String>, TextError>>()?;
+    if fragments.is_empty() {
+        return Ok(false);
+    }
+    let text = fragments.join(document.line_ending().as_str());
+    editor
+        .clipboard_mut()
+        .set(ClipboardKind::Standard, text.clone())
+        .map_err(|e| CommandError::Failed(format!("presse-papiers inaccessible : {e}")))?;
+    editor.set_last_copy(LastCopy { text, fragments });
+    Ok(true)
+}
+
+/// Remplace la `i`-ième sélection par `texts[i]` ; les curseurs se retrouvent après le texte.
+fn replace_each(
+    buffer: &mut Rope,
+    tx: &mut Transaction,
+    texts: &[String],
+) -> Result<(), TextError> {
+    let mut i = 0;
+    while i < tx.selections_after().len() && i < texts.len() {
+        let range = tx.selections_after().as_slice()[i].range();
+        let edit = Edit::replace(buffer, range, &texts[i])?;
+        tx.apply(buffer, edit)?;
+        i += 1;
+    }
+    collapse_to_end(tx);
     Ok(())
 }
 
@@ -442,6 +549,95 @@ mod tests {
         assert_eq!(heads(&e), [0]);
         run(&mut e, &["edit move line-end", "edit move line-start"]);
         assert_eq!(heads(&e), [0]);
+    }
+
+    #[test]
+    fn copier_couper_coller() {
+        let mut e = editor_with("un deux trois", 0);
+        assert_eq!(
+            e.execute("edit copy").unwrap(),
+            CommandOutput::message("rien à copier : aucune sélection")
+        );
+        run(&mut e, &["edit move word-right --extend", "edit copy"]);
+        run(
+            &mut e,
+            &["edit move doc-end", "edit insert ' '", "edit paste"],
+        );
+        assert_eq!(text(&e), "un deux trois un");
+        run(
+            &mut e,
+            &[
+                "edit move doc-start",
+                "edit move word-right --extend",
+                "edit cut",
+            ],
+        );
+        assert_eq!(text(&e), " deux trois un");
+        run(&mut e, &["edit undo"]);
+        assert_eq!(text(&e), "un deux trois un", "couper s'annule");
+        run(&mut e, &["edit undo"]);
+        assert_eq!(
+            text(&e),
+            "un deux trois ",
+            "coller s'annule séparément de la frappe"
+        );
+    }
+
+    #[test]
+    fn un_fragment_par_curseur() {
+        let mut e = editor_with("ab\ncd\nef", 0);
+        run(
+            &mut e,
+            &[
+                "edit add-cursor down",
+                "edit add-cursor down",
+                "edit move right --extend",
+                "edit copy",
+                "edit move line-end",
+                "edit paste",
+            ],
+        );
+        assert_eq!(
+            text(&e),
+            "aba\ncdc\nefe",
+            "chaque curseur reçoit son fragment"
+        );
+        // Un seul curseur : les trois fragments, séparés par des fins de ligne.
+        run(
+            &mut e,
+            &["edit keep-primary", "edit move doc-end", "edit paste"],
+        );
+        assert_eq!(text(&e), "aba\ncdc\nefea\nc\ne");
+    }
+
+    #[test]
+    fn coller_du_texte_d_ailleurs() {
+        let mut e = editor_with("1\r\n2", 0);
+        e.clipboard_mut()
+            .set(crate::clipboard::ClipboardKind::Standard, "x\ny\n".into())
+            .unwrap();
+        run(&mut e, &["edit paste"]);
+        assert_eq!(text(&e), "x\r\ny\r\n1\r\n2", "fins de ligne du document");
+        // Deux curseurs, deux lignes : une par curseur.
+        let mut e = editor_with("a\nb", 1);
+        e.clipboard_mut()
+            .set(crate::clipboard::ClipboardKind::Standard, "X\nY".into())
+            .unwrap();
+        run(&mut e, &["edit add-cursor down", "edit paste"]);
+        assert_eq!(text(&e), "aX\nbY");
+        // Sélection primaire.
+        e.clipboard_mut()
+            .set(crate::clipboard::ClipboardKind::Primary, "!".into())
+            .unwrap();
+        run(&mut e, &["edit keep-primary", "edit paste --primary"]);
+        assert!(text(&e).contains('!'));
+        assert_eq!(
+            Editor::new()
+                .execute("edit paste")
+                .map(|_| ())
+                .map_err(|e| e.to_string()),
+            Err("aucun document ouvert".to_owned())
+        );
     }
 
     #[test]

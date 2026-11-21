@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use cupride_layout::Workspace;
 use slotmap::{SecondaryMap, SlotMap};
 
+use crate::clipboard::{Clipboard, LastCopy, MemoryClipboard};
 use crate::command::{
     CommandError, CommandOutput, CommandRegistry, CommandResult, builtin, parser,
 };
@@ -43,6 +44,9 @@ pub struct Editor {
     published_active: Option<DocumentId>,
     /// Nombre de lignes d'une page, pour `edit move page-up` : fourni par la vue.
     page_lines: usize,
+    clipboard: Box<dyn Clipboard>,
+    /// Dernière copie faite dans l'IDE, pour redistribuer ses fragments entre les curseurs.
+    last_copy: Option<LastCopy>,
 }
 
 impl Default for Editor {
@@ -77,6 +81,8 @@ impl Editor {
             published: SecondaryMap::new(),
             published_active: None,
             page_lines: DEFAULT_PAGE_LINES,
+            clipboard: Box::new(MemoryClipboard::default()),
+            last_copy: None,
         }
     }
 
@@ -363,6 +369,24 @@ impl Editor {
         document
             .history_mut()
             .set_group_delay(self.config.editor.undo_group_delay());
+    }
+
+    /// Presse-papiers utilisé par `edit copy`, `cut` et `paste`.
+    pub fn clipboard_mut(&mut self) -> &mut dyn Clipboard {
+        self.clipboard.as_mut()
+    }
+
+    /// Remplace le presse-papiers : l'application y met celui de l'OS.
+    pub fn set_clipboard(&mut self, clipboard: Box<dyn Clipboard>) {
+        self.clipboard = clipboard;
+    }
+
+    pub(crate) fn last_copy(&self) -> Option<&LastCopy> {
+        self.last_copy.as_ref()
+    }
+
+    pub(crate) fn set_last_copy(&mut self, copy: LastCopy) {
+        self.last_copy = Some(copy);
     }
 
     /// Nombre de lignes parcourues par `edit move page-up` et `page-down`.

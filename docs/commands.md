@@ -65,6 +65,9 @@ Les frappes et effacements consécutifs sont annulés par blocs (voir `edit undo
 | `edit collapse` | Réduit chaque sélection à un curseur sur sa tête. |
 | `edit keep-primary` | Ne garde que la sélection principale. |
 | `edit add-cursor <up\|down>` | Ajoute un curseur sur la ligne au-dessus ou en dessous du curseur principal. |
+| `edit copy` | Copie les sélections dans le presse-papiers : un fragment par sélection, séparés par des fins de ligne. |
+| `edit cut` | Copie les sélections, puis les supprime. |
+| `edit paste [--primary]` | Colle le presse-papiers à chaque curseur, avec les fins de ligne du document. Avec plusieurs curseurs, chacun reçoit son fragment si les nombres correspondent (fragments de la dernière copie faite dans l'IDE, ou sinon lignes du texte collé). `--primary` : sélection primaire de X11 et Wayland. |
 
 Directions de `edit move` :
 
