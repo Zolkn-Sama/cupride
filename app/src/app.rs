@@ -8,14 +8,15 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use cupride_core::Editor;
+use cupride_core::{DocumentId, Editor};
 use cupride_render::Frame;
 use cupride_render::{Acquire, Gpu, Rect, Renderer, TextSystem, WindowSurface};
-use cupride_ui::{CursorBlink, EditorView, Theme, ViewSettings};
+use cupride_ui::{CursorBlink, EditorView, Theme, ViewSettings, WHEEL_LINES};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{StartCause, WindowEvent};
+use winit::event::{MouseScrollDelta, StartCause, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
+use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 
 use crate::close::{CloseDecision, CloseGuard};
@@ -44,6 +45,11 @@ pub(crate) struct App {
     /// La fenêtre a-t-elle le focus clavier ? Sans focus, les curseurs sont masqués et ne
     /// clignotent pas.
     focused: bool,
+    /// Modificateurs enfoncés.
+    modifiers: ModifiersState,
+    /// Document et position du curseur principal au dernier dessin : quand ils changent, la vue
+    /// suit le curseur.
+    last_cursor: Option<(DocumentId, usize)>,
     /// Message affiché dans le titre (avertissement de fermeture), s'il y en a un.
     notice: Option<String>,
     /// Erreur qui a empêché de démarrer.
@@ -69,6 +75,8 @@ impl App {
             editor,
             blink,
             focused: true,
+            modifiers: ModifiersState::empty(),
+            last_cursor: None,
             text,
             theme: Theme::default(),
             gpu: None,
@@ -97,6 +105,28 @@ impl App {
             title = format!("{title} — {notice}");
         }
         title
+    }
+
+    /// Défilement à la molette (crans, animés) ou au pavé tactile (pixels, immédiats). Avec Maj,
+    /// la molette fait défiler horizontalement.
+    fn scroll(&mut self, delta: MouseScrollDelta) {
+        let Some(state) = &mut self.window else {
+            return;
+        };
+        let (dx, dy, smooth) = match delta {
+            MouseScrollDelta::LineDelta(x, y) => {
+                let step = WHEEL_LINES * state.view.line_height();
+                (-x * step, -y * step, true)
+            }
+            MouseScrollDelta::PixelDelta(p) => (-p.x as f32, -p.y as f32, false),
+        };
+        let (dx, dy) = if self.modifiers.shift_key() && dx == 0.0 {
+            (dy, 0.0)
+        } else {
+            (dx, dy)
+        };
+        state.view.scroll_by(dx, dy, smooth, Instant::now());
+        state.window.request_redraw();
     }
 
     fn request_redraw(&self) {
@@ -194,9 +224,19 @@ impl App {
         state
             .view
             .set_bounds(Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32));
-        let cursors_visible = self.focused && self.blink.visible(Instant::now());
+        let now = Instant::now();
+        let cursors_visible = self.focused && self.blink.visible(now);
+        let animating = state.view.tick(now);
         let scene = match self.editor.active_document() {
             Some(document) => {
+                let cursor = self
+                    .editor
+                    .active_id()
+                    .map(|id| (id, document.selections().primary().head));
+                if cursor != self.last_cursor {
+                    self.last_cursor = cursor;
+                    state.view.follow_cursor();
+                }
                 state.view.prepare(&mut self.text, document);
                 state.view.frame(&self.theme, document, cursors_visible)
             }
@@ -210,6 +250,11 @@ impl App {
         }
         state.window.pre_present_notify();
         state.surface.present(gpu, frame);
+        // Défilement animé : une image par rafraîchissement de l'écran (présentation synchronisée)
+        // jusqu'à la fin de l'animation, puis plus rien.
+        if animating {
+            state.window.request_redraw();
+        }
     }
 }
 
@@ -244,6 +289,8 @@ impl ApplicationHandler for App {
                     state.window.request_redraw();
                 }
             }
+            WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
+            WindowEvent::MouseWheel { delta, .. } => self.scroll(delta),
             WindowEvent::Focused(focused) => {
                 self.focused = focused;
                 self.blink.reset(Instant::now());

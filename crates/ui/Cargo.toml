@@ -14,7 +14,12 @@ cupride-render.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 png.workspace = true
+
+[[bench]]
+name = "scroll"
+harness = false
 
 [lints]
 workspace = true
