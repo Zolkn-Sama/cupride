@@ -32,6 +32,10 @@ pub enum RenderError {
     #[error("la fenêtre n'accepte aucun format d'image compatible avec la carte graphique")]
     NoSurfaceFormat,
 
+    /// Échec du dessin d'une frame.
+    #[error("échec du dessin : {0}")]
+    Draw(String),
+
     /// Lecture d'une image rendue impossible.
     #[error("lecture de l'image rendue impossible : {0}")]
     Readback(String),

@@ -17,6 +17,18 @@ fn main() -> anyhow::Result<()> {
         tracing::warn!("configuration : {message}");
     }
 
+    // Provisoire : le premier argument est le fichier à ouvrir (vraie CLI : RENDER-11).
+    match std::env::args().nth(1) {
+        Some(path) => {
+            editor
+                .open(&path)
+                .with_context(|| format!("ouverture de {path}"))?;
+        }
+        None => {
+            editor.new_document();
+        }
+    }
+
     let event_loop = EventLoop::new().context("création de la boucle d'événements")?;
     // Attente passive : la boucle ne se réveille que sur un événement.
     event_loop.set_control_flow(ControlFlow::Wait);

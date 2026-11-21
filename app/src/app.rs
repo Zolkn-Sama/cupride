@@ -8,7 +8,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use cupride_core::Editor;
-use cupride_render::{Acquire, Color, Gpu, Renderer, WindowSurface};
+use cupride_render::{Acquire, Gpu, Rect, Renderer, TextSystem, WindowSurface};
+use cupride_ui::{EditorView, Theme, ViewSettings};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{StartCause, WindowEvent};
@@ -20,20 +21,20 @@ use crate::close::{CloseDecision, CloseGuard};
 /// Taille initiale de la fenêtre, en pixels logiques.
 const INITIAL_SIZE: LogicalSize<f64> = LogicalSize::new(1_100.0, 720.0);
 
-/// Couleur de fond en attendant les thèmes.
-const BACKGROUND: Color = Color::rgb(0x1e, 0x1a, 0x1d);
-
 /// Fenêtre ouverte et ses ressources de rendu.
 struct WindowState {
     // Ordre des champs : la surface doit être libérée avant la fenêtre.
     surface: WindowSurface,
     renderer: Renderer,
+    view: EditorView,
     window: Arc<Window>,
 }
 
 /// État de l'application.
 pub(crate) struct App {
     editor: Editor,
+    text: TextSystem,
+    theme: Theme,
     gpu: Option<Gpu>,
     window: Option<WindowState>,
     close_guard: CloseGuard,
@@ -45,8 +46,17 @@ pub(crate) struct App {
 
 impl App {
     pub(crate) fn new(editor: Editor) -> Self {
+        let text = TextSystem::new();
+        let family = &editor.config().font.family;
+        if !family.eq_ignore_ascii_case("monospace") && !text.has_family(family) {
+            tracing::warn!(
+                "police « {family} » introuvable : police à chasse fixe du système utilisée"
+            );
+        }
         Self {
             editor,
+            text,
+            theme: Theme::default(),
             gpu: None,
             window: None,
             close_guard: CloseGuard::default(),
@@ -135,10 +145,13 @@ impl App {
                 .map_err(|e| e.to_string())?;
         tracing::info!(gpu = %gpu.describe(), format = ?surface.format(), "rendu prêt");
         let renderer = Renderer::new(&gpu, surface.format());
+        let settings = ViewSettings::from(&self.editor.config().font);
+        let view = EditorView::new(settings, window.scale_factor() as f32);
         self.gpu = Some(gpu);
         self.window = Some(WindowState {
             surface,
             renderer,
+            view,
             window,
         });
         Ok(())
@@ -158,7 +171,23 @@ impl App {
             // Fenêtre masquée : le prochain dessin viendra quand elle redeviendra visible.
             Acquire::Hidden => return,
         };
-        state.renderer.clear(gpu, &frame.view, BACKGROUND);
+        let size = state.surface.size();
+        state
+            .view
+            .set_bounds(Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32));
+        if let Some(document) = self.editor.active_document() {
+            state.view.prepare(&mut self.text, document);
+        }
+        let mut scene = state.view.frame(&self.theme);
+        if self.editor.active_document().is_none() {
+            scene.texts.clear();
+        }
+        if let Err(error) = state
+            .renderer
+            .render(gpu, &mut self.text, &frame.view, size, &scene)
+        {
+            tracing::error!("{error}");
+        }
         state.window.pre_present_notify();
         state.surface.present(gpu, frame);
     }
@@ -175,6 +204,7 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        tracing::trace!(?event, "événement de fenêtre");
         match event {
             WindowEvent::CloseRequested => self.request_close(event_loop),
             WindowEvent::Destroyed => event_loop.exit(),
@@ -185,6 +215,14 @@ impl ApplicationHandler for App {
                 // Dessin immédiat : pendant un redimensionnement à la souris, l'image suit la
                 // fenêtre au lieu d'être étirée.
                 self.redraw();
+            }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                // Fenêtre déplacée vers un écran d'une autre densité : le texte est remis en
+                // forme à la nouvelle échelle. `Resized` suit avec la nouvelle taille physique.
+                if let Some(state) = &mut self.window {
+                    state.view.set_scale(scale_factor as f32);
+                    state.window.request_redraw();
+                }
             }
             WindowEvent::RedrawRequested | WindowEvent::Occluded(false) => self.redraw(),
             _ => {}

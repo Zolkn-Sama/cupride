@@ -6,6 +6,7 @@ members = [
     "crates/layout",
     "crates/core",
     "crates/render",
+    "crates/ui",
     "tools/repl",
 ]
 default-members = ["app"]
@@ -25,6 +26,7 @@ cupride-text = { path = "crates/text" }
 cupride-layout = { path = "crates/layout" }
 cupride-core = { path = "crates/core" }
 cupride-render = { path = "crates/render" }
+cupride-ui = { path = "crates/ui" }
 
 # Erreurs : thiserror dans les bibliothèques, anyhow dans les binaires.
 anyhow = "1.0.100"
@@ -44,6 +46,7 @@ toml = "1.2.1"
 
 # Tests et mesures
 criterion = "0.8.2"
+png = "0.18.1"
 proptest = "1.12.0"
 
 # Fenêtres, GPU et texte
