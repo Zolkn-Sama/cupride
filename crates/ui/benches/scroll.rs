@@ -63,7 +63,7 @@ fn bench(c: &mut Criterion) {
             } else if v.visible_lines().start == 0 {
                 down = true;
             }
-            black_box(v.frame(&theme, &document, true).texts.len())
+            black_box(v.frame(&theme, &document, true).layers[0].texts.len())
         });
     });
 
@@ -80,7 +80,7 @@ fn bench(c: &mut Criterion) {
             };
             v.scroll_by(0.0, dy, false, Instant::now());
             v.prepare(&mut text, &document);
-            black_box(v.frame(&theme, &document, true).texts.len())
+            black_box(v.frame(&theme, &document, true).layers[0].texts.len())
         });
     });
 

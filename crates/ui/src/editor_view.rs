@@ -8,10 +8,11 @@ use std::time::Instant;
 use cupride_core::Document;
 use cupride_core::config::{Config, LineNumbers};
 use cupride_core::text::TextBuffer;
-use cupride_render::text::{Attrs, Buffer, Family, Metrics, Shaping, Wrap};
-use cupride_render::{Frame, Quad, Rect, TextItem, TextSystem};
+use cupride_render::text::{Buffer, Metrics, Shaping, Wrap};
+use cupride_render::{Frame, Layer, Quad, Rect, TextItem, TextSystem};
 
 use crate::gutter::{self, Gutter, GutterMarker, MARKER_LANE, NUMBER_GAP};
+use crate::label::attrs;
 use crate::scroll::Scroll;
 use crate::theme::Theme;
 
@@ -478,6 +479,20 @@ impl EditorView {
     /// texte, puis curseurs si `cursors_visible`.
     pub fn frame(&self, theme: &Theme, document: &Document, cursors_visible: bool) -> Frame<'_> {
         let mut frame = Frame::new(theme.background);
+        self.draw(frame.base(), theme, document, cursors_visible);
+        frame
+    }
+
+    /// Dessine la vue dans la couche `frame` : fond, ligne courante, sélections, texte,
+    /// gouttière, puis curseurs si `cursors_visible`.
+    pub fn draw<'a>(
+        &'a self,
+        frame: &mut Layer<'a>,
+        theme: &Theme,
+        document: &Document,
+        cursors_visible: bool,
+    ) {
+        frame.quads.push(Quad::new(self.bounds, theme.background));
         let line_height = self.line_height();
         let selections = document.selections();
         let buffer = document.buffer();
@@ -541,7 +556,7 @@ impl EditorView {
                 color: theme.foreground,
             });
         }
-        self.draw_gutter(&mut frame, theme);
+        self.draw_gutter(frame, theme);
 
         // Texte en composition : souligné.
         let head_line = line_of(selections.primary().head);
@@ -574,11 +589,10 @@ impl EditorView {
                 }
             }
         }
-        frame
     }
 
     /// Numéros de ligne et marqueurs.
-    fn draw_gutter<'a>(&'a self, frame: &mut Frame<'a>, theme: &Theme) {
+    fn draw_gutter<'a>(&'a self, frame: &mut Layer<'a>, theme: &Theme) {
         let gutter = Rect::new(
             self.bounds.x,
             self.bounds.y,
@@ -716,15 +730,6 @@ fn x_at(buffer: &Buffer, index: usize) -> f32 {
     end
 }
 
-fn attrs(family: &str) -> Attrs<'_> {
-    let family = if family.eq_ignore_ascii_case("monospace") {
-        Family::Monospace
-    } else {
-        Family::Name(family)
-    };
-    Attrs::new().family(family)
-}
-
 fn hash_text(text: &str) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     text.hash(&mut hasher);
@@ -754,7 +759,11 @@ mod tests {
         assert_eq!(visible, 0..17);
         assert_eq!(view.cached_lines(), 17);
         let frame = view.frame(&Theme::default(), &document, true);
-        assert_eq!(frame.texts.len(), 2 * 17, "17 lignes et leurs 17 numéros");
+        assert_eq!(
+            frame.layers[0].texts.len(),
+            2 * 17,
+            "17 lignes et leurs 17 numéros"
+        );
     }
 
     #[test]
@@ -818,7 +827,7 @@ mod tests {
         let theme = Theme::default();
 
         let frame = view.frame(&theme, &document, true);
-        let selection: Vec<&Quad> = frame
+        let selection: Vec<&Quad> = frame.layers[0]
             .quads
             .iter()
             .filter(|q| q.color == theme.selection)
@@ -834,9 +843,18 @@ mod tests {
         );
         assert_eq!(second.y - first.y, view.line_height());
 
-        assert_eq!(frame.overlays.len(), 2, "un curseur par sélection");
-        assert!(frame.overlays.iter().all(|q| q.color == theme.cursor));
-        let current: Vec<&Quad> = frame
+        assert_eq!(
+            frame.layers[0].overlays.len(),
+            2,
+            "un curseur par sélection"
+        );
+        assert!(
+            frame.layers[0]
+                .overlays
+                .iter()
+                .all(|q| q.color == theme.cursor)
+        );
+        let current: Vec<&Quad> = frame.layers[0]
             .quads
             .iter()
             .filter(|q| q.color == theme.current_line)
@@ -851,8 +869,13 @@ mod tests {
             ..ViewSettings::default()
         });
         let frame = view.frame(&theme, &document, false);
-        assert!(frame.overlays.is_empty());
-        assert!(frame.quads.iter().all(|q| q.color != theme.current_line));
+        assert!(frame.layers[0].overlays.is_empty());
+        assert!(
+            frame.layers[0]
+                .quads
+                .iter()
+                .all(|q| q.color != theme.current_line)
+        );
     }
 
     #[test]
@@ -954,8 +977,12 @@ mod tests {
         let during = view.primary_cursor_rect(&document).unwrap().x;
         assert!(during > before, "curseur après « 日 »");
         let frame = view.frame(&theme, &document, false);
-        assert_eq!(frame.overlays.len(), 1, "soulignement de la composition");
-        let underline = frame.overlays[0].rect;
+        assert_eq!(
+            frame.layers[0].overlays.len(),
+            1,
+            "soulignement de la composition"
+        );
+        let underline = frame.layers[0].overlays[0].rect;
         assert!(underline.x <= before + 1.0 && underline.right() > during);
 
         view.set_preedit(None);
@@ -1032,7 +1059,7 @@ mod tests {
         assert!(view.text_left() > view.gutter_width());
 
         let frame = view.frame(&theme, &document, false);
-        let numbers: Vec<_> = frame
+        let numbers: Vec<_> = frame.layers[0]
             .texts
             .iter()
             .filter(|t| t.color == theme.line_number || t.color == theme.line_number_active)
@@ -1056,7 +1083,7 @@ mod tests {
                 .left
         };
         assert!(left_of(9) < left_of(8));
-        let marker = frame
+        let marker = frame.layers[0]
             .quads
             .iter()
             .find(|q| q.color.r == 0xff && q.color.g == 0)
