@@ -19,8 +19,10 @@ mod document;
 mod editor;
 pub mod events;
 pub mod keymap;
+mod ui_request;
 
 pub use cupride_layout as layout;
 pub use cupride_text as text;
 pub use document::{Document, DocumentError, LineEnding};
 pub use editor::{DocumentId, Editor};
+pub use ui_request::UiRequest;

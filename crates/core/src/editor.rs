@@ -14,6 +14,7 @@ use crate::config::{self, Config};
 use crate::document::{Document, DocumentError};
 use crate::events::{Event, EventBus};
 use crate::keymap::{Keymap, KeymapIssue, Platform, default_bindings};
+use crate::ui_request::UiRequest;
 
 slotmap::new_key_type! {
     /// Identifiant stable d'un document ouvert. Il reste valide tant que le document est ouvert,
@@ -56,6 +57,8 @@ pub struct Editor {
     zoom: f32,
     /// Dossier ouvert comme projet, s'il y en a un.
     project: Option<PathBuf>,
+    /// Demandes à l'interface, pas encore lues.
+    ui_requests: Vec<UiRequest>,
 }
 
 impl Default for Editor {
@@ -94,6 +97,7 @@ impl Editor {
             last_copy: None,
             zoom: 1.0,
             project: None,
+            ui_requests: Vec::new(),
         }
     }
 
@@ -380,6 +384,16 @@ impl Editor {
         document
             .history_mut()
             .set_group_delay(self.config.editor.undo_group_delay());
+    }
+
+    /// Dépose une demande pour l'interface (ouvrir la ligne de commande…).
+    pub fn request_ui(&mut self, request: UiRequest) {
+        self.ui_requests.push(request);
+    }
+
+    /// Demandes à l'interface déposées depuis le dernier appel.
+    pub fn take_ui_requests(&mut self) -> Vec<UiRequest> {
+        std::mem::take(&mut self.ui_requests)
     }
 
     /// Dossier ouvert comme projet.

@@ -209,6 +209,16 @@ impl EditorView {
         self.bounds = bounds;
     }
 
+    /// Police et dimensions de l'interface, alignées sur celles de l'éditeur.
+    pub fn style(&self) -> crate::style::Style {
+        crate::style::Style {
+            family: self.settings.font_family.clone(),
+            font_size: self.settings.font_size * self.scale,
+            line_height: self.line_height(),
+            scale: self.scale,
+        }
+    }
+
     /// Hauteur d'une ligne, en pixels physiques.
     pub fn line_height(&self) -> f32 {
         (self.settings.font_size * self.settings.line_height * self.scale).round()
