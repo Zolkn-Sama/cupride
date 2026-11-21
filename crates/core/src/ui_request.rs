@@ -8,4 +8,6 @@
 pub enum UiRequest {
     /// Ouvrir la ligne de commande, préremplie avec ce texte.
     CommandLine(String),
+    /// Ouvrir la palette de commandes.
+    Palette,
 }

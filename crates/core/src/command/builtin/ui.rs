@@ -19,6 +19,15 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
         )
         .arg(Arg::new("texte").help("Texte placé dans la ligne de commande")),
     )?;
+    registry.register(CommandDef::new(
+        "ui",
+        "palette",
+        "Ouvre la palette : recherche floue parmi toutes les commandes",
+        |editor, _| {
+            editor.request_ui(UiRequest::Palette);
+            Ok(CommandOutput::None)
+        },
+    ))?;
     Ok(())
 }
 

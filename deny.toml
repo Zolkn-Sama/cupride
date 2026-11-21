@@ -41,6 +41,9 @@ exceptions = [
     # MPL-2.0 (copyleft au niveau du fichier, compatible avec la distribution de binaires) :
     # dépendance de `directories`, via dirs-sys. Le code de la crate n'est pas modifié.
     { crate = "option-ext", allow = ["MPL-2.0"] },
+    # MPL-2.0 : recherche floue de la palette et de l'ouverture rapide (le moteur de Helix).
+    # Copyleft au niveau du fichier ; le code de la crate n'est pas modifié.
+    { crate = "nucleo-matcher", allow = ["MPL-2.0"] },
 ]
 
 # Les crates du workspace ne sont pas publiées : leur licence est vérifiée à part.

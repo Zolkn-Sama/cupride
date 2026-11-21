@@ -27,6 +27,8 @@ const SHOWN_CANDIDATES: usize = 12;
 pub(super) enum Element {
     Editor,
     CommandLine,
+    /// Palette de commandes ou ouverture rapide.
+    Picker,
 }
 
 impl App {
@@ -35,11 +37,18 @@ impl App {
         for request in self.editor.take_ui_requests() {
             match request {
                 UiRequest::CommandLine(text) => self.open_command_line(&text),
+                UiRequest::Palette => {
+                    self.close_overlays();
+                    self.open_palette();
+                }
             }
         }
     }
 
     pub(super) fn open_command_line(&mut self, text: &str) {
+        if self.picker.is_some() {
+            self.close_picker();
+        }
         self.command_line = Some(CommandLine::new(text));
         self.history.reset();
         self.completion = None;
@@ -62,13 +71,65 @@ impl App {
         if self.command_line.is_some() {
             self.close_command_line();
         }
+        if self.picker.is_some() {
+            self.close_picker();
+        }
+    }
+
+    /// Touche pour le sélecteur ouvert.
+    fn picker_key(&mut self, combo: Option<KeyCombo>, text: Option<&str>) -> bool {
+        let Some((_, picker)) = &mut self.picker else {
+            return false;
+        };
+        if let Some(text) = text {
+            picker.input.insert(text);
+            self.after_overlay_edit();
+            return true;
+        }
+        let Some(combo) = combo else {
+            return true;
+        };
+        match picker.input.key(combo, Platform::current()) {
+            InputEvent::Handled | InputEvent::Complete => {}
+            InputEvent::Up => picker.move_selection(-1),
+            InputEvent::Down => picker.move_selection(1),
+            InputEvent::Submit => {
+                self.choose(None);
+                return true;
+            }
+            InputEvent::Cancel => {
+                self.close_picker();
+                return true;
+            }
+            InputEvent::Copy(text) => {
+                if let Err(error) = self
+                    .editor
+                    .clipboard_mut()
+                    .set(ClipboardKind::Standard, text)
+                {
+                    tracing::warn!("presse-papiers : {error}");
+                }
+            }
+            InputEvent::Paste => {
+                if let Some(text) = self.editor.clipboard_mut().get(ClipboardKind::Standard)
+                    && let Some((_, picker)) = &mut self.picker
+                {
+                    picker.input.insert(&text);
+                }
+            }
+            InputEvent::Ignored => return false,
+        }
+        self.after_overlay_edit();
+        true
     }
 
     /// Touche pour la couche qui a le focus. Renvoie faux si elle ne la traite pas : elle passe
     /// alors au keymap (les raccourcis globaux restent utilisables).
     pub(super) fn overlay_key(&mut self, combo: Option<KeyCombo>, text: Option<&str>) -> bool {
-        if self.focus.current() != Element::CommandLine {
-            return false;
+        match self.focus.current() {
+            Element::Picker => return self.picker_key(combo, text),
+            Element::CommandLine => {}
+            Element::Editor => return false,
         }
         let Some(line) = &mut self.command_line else {
             return false;
@@ -204,9 +265,19 @@ impl App {
         }
     }
 
-    fn after_overlay_edit(&mut self) {
+    pub(super) fn after_overlay_edit(&mut self) {
         self.blink.reset(Instant::now());
         self.request_redraw();
+    }
+
+    /// Ajoute une commande à l'historique, gardé entre les sessions.
+    pub(super) fn remember_command(&mut self, command: &str) {
+        self.history.push(command);
+        if let Some(path) = &self.history_path
+            && let Err(error) = self.history.save(path)
+        {
+            tracing::warn!("historique des commandes non enregistré : {error}");
+        }
     }
 
     /// Entrée dans la ligne de commande : exécute la commande. Sans résultat, la ligne se
@@ -222,12 +293,7 @@ impl App {
             return;
         }
         tracing::debug!(commande = text, "ligne de commande");
-        self.history.push(&text);
-        if let Some(path) = &self.history_path
-            && let Err(error) = self.history.save(path)
-        {
-            tracing::warn!("historique des commandes non enregistré : {error}");
-        }
+        self.remember_command(&text);
         let result = self.editor.execute(&text);
         let start = Instant::now();
         match result {
