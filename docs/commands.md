@@ -141,6 +141,7 @@ de la même façon, à chaud.
 | Commande | Description |
 |---|---|
 | `ui command-line [texte]` | Ouvre la ligne de commande (raccourci `mod+;`), éventuellement préremplie. |
+| `ui palette` | Ouvre la palette de commandes (`mod+shift+p`, `F1`). |
 
 Ligne de commande : Entrée exécute la commande. Sans résultat, la ligne se ferme ; en cas
 d'erreur, le message s'affiche au-dessus et le texte reste, pour être corrigé ; une sortie
@@ -157,6 +158,11 @@ autres raccourcis restent actifs pendant la saisie.
   début commun est complété et elles sont listées sous la ligne ; Tab de nouveau les parcourt.
 - **Aide** : dès que la commande est reconnue, son utilisation et sa description s'affichent sous
   la ligne.
+
+Palette : recherche floue (`nucleo`) parmi toutes les commandes, avec leur description et leur
+raccourci ; les commandes récemment utilisées (ligne de commande ou palette) passent en tête.
+Flèches haut et bas pour choisir, Entrée ou clic pour exécuter, Échap pour fermer. Une commande
+qui attend des arguments (`file open <chemin>`) ouvre la ligne de commande, préremplie.
 
 ## `notifications` — notifications
 

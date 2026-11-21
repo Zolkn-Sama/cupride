@@ -125,3 +125,20 @@ prochain rafraîchissement) et par l'écran lui-même. L'application mesure la l
 l'événement clavier à la présentation de l'image : chaque frappe au niveau `debug`, et un résumé
 (nombre, médiane, 99e centile, maximum) à la fermeture, au niveau `info` :
 `CUPRIDE_LOG=cupride=debug cupride fichier.rs`.
+
+### 2026-11-21 — UI-04, recherche dans la palette
+
+- Machine : Apple M3 Pro, 18 Go, macOS ; Rust 1.95.0, profil `bench` (release)
+- Commande : `cargo bench -p cupride-ui --bench palette`
+- 5 000 commandes (libellé et description), recherche floue `nucleo` refaite entièrement à chaque
+  frappe, résultats triés
+
+| Recherche | Temps (médiane, une recherche) |
+|---|---|
+| `t` (presque tout correspond) | 65 µs |
+| `tog` | 62 µs |
+| `g42 tog` (deux mots) | 67 µs |
+| `grp4sel` | 91 µs |
+
+Lecture : moins d'un dixième de milliseconde pour 5 000 commandes : la liste suit la frappe sans
+délai perceptible, sans index ni recherche en arrière-plan.

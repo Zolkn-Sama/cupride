@@ -18,8 +18,8 @@ use cupride_render::Frame;
 use cupride_render::{Acquire, Gpu, Rect, Renderer, TextSystem, WindowSurface};
 use cupride_ui::{
     ClickCounter, ClickModifiers, CommandHistory, CommandLine, CursorBlink, EditorView, Focus,
-    MouseSelection, Pointer, Preedit, StatusBar, StatusContext, StatusElements, Theme, Themes,
-    Toasts, ViewSettings, WHEEL_LINES,
+    MouseSelection, Picker, Pointer, Preedit, StatusBar, StatusContext, StatusElements, Theme,
+    Themes, Toasts, ViewSettings, WHEEL_LINES,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
@@ -32,8 +32,10 @@ use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::window::{CursorIcon, Window, WindowId};
 
 mod overlays;
+mod pickers;
 
 use overlays::{CompletionCycle, Element};
+use pickers::PickerKind;
 
 use crate::close::{CloseDecision, CloseGuard};
 use crate::input;
@@ -95,6 +97,8 @@ pub(crate) struct App {
     history_path: Option<std::path::PathBuf>,
     /// Complétion en cours dans la ligne de commande.
     completion: Option<CompletionCycle>,
+    /// Sélecteur ouvert (palette de commandes…).
+    picker: Option<(PickerKind, Picker)>,
     status_bar: StatusBar,
     status_elements: StatusElements,
     /// Configuration de la barre d'état déjà vérifiée (noms inconnus signalés une fois).
@@ -164,6 +168,7 @@ impl App {
             history,
             history_path,
             completion: None,
+            picker: None,
             status_bar: StatusBar::default(),
             status_elements: StatusElements::default(),
             checked_status_config: None,
@@ -388,6 +393,15 @@ impl App {
         if let Some(line) = &self.command_line
             && line.area().contains(x, y)
         {
+            return;
+        }
+        if let Some((_, picker)) = &self.picker
+            && picker.area().contains(x, y)
+        {
+            let item = picker.item_at(x, y);
+            if item.is_some() {
+                self.choose(item);
+            }
             return;
         }
         // Un clic dans l'éditeur ferme les couches et lui rend le focus.
@@ -676,6 +690,13 @@ impl App {
         }
         if let Some(line) = &self.command_line {
             line.draw(scene.push_layer(), &style, &self.theme, blink_on);
+        }
+        if let Some((_, picker)) = &mut self.picker {
+            picker.prepare(&mut self.text, &style, &self.theme, parts[0]);
+            ime_area = Some(picker.cursor_rect(&style));
+        }
+        if let Some((_, picker)) = &self.picker {
+            picker.draw(scene.push_layer(), &style, &self.theme, blink_on);
         }
         // Notifications, au-dessus de tout, dans la zone de l'éditeur.
         self.toasts.sync(

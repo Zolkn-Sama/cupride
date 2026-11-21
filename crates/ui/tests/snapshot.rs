@@ -220,3 +220,48 @@ fn render_with_theme(name: &str, theme: &Theme) {
     let pixels = target.read_rgba(&gpu).expect("relecture de l'image");
     save_png(name, (width, height), &pixels);
 }
+
+/// Palette de commandes ouverte sur « fop », avec les vraies commandes.
+#[test]
+fn palette() {
+    let gpu = match Gpu::headless() {
+        Ok(gpu) => gpu,
+        Err(error) => {
+            eprintln!("test ignoré, pas de GPU : {error}");
+            return;
+        }
+    };
+    let (width, height) = (800, 420);
+    let target = OffscreenTarget::new(&gpu, width, height);
+    let mut renderer = Renderer::new(&gpu, OFFSCREEN_FORMAT);
+    let mut text = TextSystem::new();
+    let editor = Editor::new();
+    let items: Vec<cupride_ui::PickerItem> = editor
+        .commands()
+        .list()
+        .map(|c| cupride_ui::PickerItem {
+            label: c.full_name(),
+            detail: c.description().to_owned(),
+            hint: editor
+                .keymap()
+                .keys_for(&c.full_name())
+                .next()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
+        })
+        .collect();
+    let mut picker = cupride_ui::Picker::new("Commande…", items, vec![], false);
+    picker.input.insert("fo");
+    let theme = Theme::default();
+    let view = EditorView::new(ViewSettings::default(), 1.0);
+    let style = view.style();
+    let window = Rect::new(0.0, 0.0, width as f32, height as f32);
+    picker.prepare(&mut text, &style, &theme, window);
+    let mut frame = cupride_render::Frame::new(theme.background);
+    picker.draw(frame.push_layer(), &style, &theme, true);
+    renderer
+        .render(&gpu, &mut text, &target.view, target.size(), &frame)
+        .expect("rendu");
+    let pixels = target.read_rgba(&gpu).expect("relecture de l'image");
+    save_png("palette", (width, height), &pixels);
+}

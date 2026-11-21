@@ -6,6 +6,9 @@ use cupride_render::{Color, Rect, TextItem, TextSystem};
 /// Une ligne de texte mise en forme.
 pub struct Label {
     text: String,
+    /// Positions mises en valeur (en octets) et leur couleur.
+    highlights: Vec<usize>,
+    highlight_color: Color,
     family: String,
     metrics: Metrics,
     buffer: Option<Buffer>,
@@ -24,6 +27,8 @@ impl Default for Label {
     fn default() -> Self {
         Self {
             text: String::new(),
+            highlights: Vec::new(),
+            highlight_color: Color::default(),
             family: String::new(),
             metrics: Metrics::new(1.0, 1.0),
             buffer: None,
@@ -51,8 +56,24 @@ impl Label {
         family: &str,
         metrics: Metrics,
     ) {
+        self.set_highlighted(text_system, text, &[], Color::default(), family, metrics);
+    }
+
+    /// Met `text` en forme, les caractères aux positions `highlights` (en octets) de la couleur
+    /// `color` ; les autres prennent la couleur donnée au dessin.
+    pub fn set_highlighted(
+        &mut self,
+        text_system: &mut TextSystem,
+        text: &str,
+        highlights: &[usize],
+        color: Color,
+        family: &str,
+        metrics: Metrics,
+    ) {
         if self.buffer.is_some()
             && self.text == text
+            && self.highlights == highlights
+            && self.highlight_color == color
             && self.family == family
             && self.metrics == metrics
         {
@@ -61,7 +82,32 @@ impl Label {
         let mut buffer = Buffer::new(text_system.font_system(), metrics);
         buffer.set_wrap(Wrap::None);
         buffer.set_size(None, Some(metrics.line_height));
-        buffer.set_text(text, &attrs(family), Shaping::Advanced, None);
+        let base = attrs(family);
+        if highlights.is_empty() {
+            buffer.set_text(text, &base, Shaping::Advanced, None);
+        } else {
+            let accent = base
+                .clone()
+                .color(cupride_render::text::cosmic_text::Color::rgba(
+                    color.r, color.g, color.b, color.a,
+                ));
+            let mut spans = Vec::new();
+            let mut start = 0;
+            for (i, c) in text.char_indices() {
+                if highlights.contains(&i) {
+                    let end = i + c.len_utf8();
+                    if start < i {
+                        spans.push((&text[start..i], base.clone()));
+                    }
+                    spans.push((&text[i..end], accent.clone()));
+                    start = end;
+                }
+            }
+            if start < text.len() {
+                spans.push((&text[start..], base.clone()));
+            }
+            buffer.set_rich_text(spans, &base, Shaping::Advanced, None);
+        }
         buffer.shape_until_scroll(text_system.font_system(), false);
         self.width = buffer
             .layout_runs()
@@ -69,6 +115,8 @@ impl Label {
             .fold(0.0, f32::max);
         self.buffer = Some(buffer);
         self.text = text.to_owned();
+        self.highlights = highlights.to_vec();
+        self.highlight_color = color;
         self.family = family.to_owned();
         self.metrics = metrics;
     }

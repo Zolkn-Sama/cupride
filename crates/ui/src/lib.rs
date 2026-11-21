@@ -23,17 +23,21 @@
 //! - [`StatusBar`] : barre d'état, faite d'éléments nommés ([`StatusElements`]) choisis par la
 //!   configuration.
 //! - [`Toasts`] : notifications affichées quelques secondes en bas à droite.
+//! - [`Picker`] : recherche floue ([`Fuzzy`], moteur `nucleo`) dans une liste, pour la palette de
+//!   commandes et l'ouverture rapide.
 //! - [`CursorBlink`] : clignotement du curseur, arrêté au repos.
 
 mod blink;
 mod command_line;
 mod editor_view;
 mod focus;
+mod fuzzy;
 mod gutter;
 mod history;
 mod label;
 pub mod layout;
 mod mouse;
+mod picker;
 mod scroll;
 mod status_bar;
 mod style;
@@ -45,10 +49,12 @@ pub use blink::{BLINK_IDLE_STOP, CursorBlink};
 pub use command_line::{CommandLine, MessageKind};
 pub use editor_view::{EditorView, Pointer, Preedit, ViewSettings, WHEEL_LINES};
 pub use focus::Focus;
+pub use fuzzy::{Found, Fuzzy};
 pub use gutter::GutterMarker;
 pub use history::{CommandHistory, HISTORY_LIMIT};
 pub use label::Label;
 pub use mouse::{ClickCounter, ClickModifiers, MULTI_CLICK_DELAY, MouseSelection};
+pub use picker::{MAX_ROWS, Picker, PickerItem};
 pub use status_bar::{StatusBar, StatusContext, StatusElement, StatusElements};
 pub use style::Style;
 pub use text_input::{InputEvent, TextInput};
