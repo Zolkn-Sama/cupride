@@ -195,7 +195,8 @@ impl Editor {
     /// pas.
     pub fn capture_session(&self) -> Session {
         let mut workspace = self.workspace().clone();
-        for panel in self.workspace().tree().panels() {
+        let panels: Vec<PanelId> = self.workspace().panels().map(|p| p.id()).collect();
+        for panel in panels {
             let Some(id) = self.panel_document(panel) else {
                 continue;
             };
@@ -230,7 +231,8 @@ impl Editor {
         let mut workspace = session.workspace;
         let mut problems = Vec::new();
         let mut bindings = Vec::new();
-        for panel in workspace.tree().panels() {
+        let panels: Vec<PanelId> = workspace.panels().map(|p| p.id()).collect();
+        for panel in panels {
             let Some(model) = workspace.panel(panel) else {
                 continue;
             };
@@ -268,7 +270,7 @@ impl Editor {
             }
         }
         self.panel_scrolls.clear();
-        let renamed = self.workspace_mut().replace(workspace);
+        let (renamed, _) = self.workspace_mut().replace(workspace);
         for (old, document, state) in bindings {
             let Some(&panel) = renamed.get(&old) else {
                 continue;

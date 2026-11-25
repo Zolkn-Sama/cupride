@@ -46,7 +46,7 @@ impl App {
                     self.open_quick_open();
                 }
                 UiRequest::Reveal(path) => {
-                    if let Some(state) = &mut self.window {
+                    for state in self.windows.values_mut() {
                         for view in state.views.views_mut() {
                             view.reveal(&path);
                         }

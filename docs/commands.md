@@ -203,12 +203,20 @@ erreur aussi (erreur), comme les avertissements de configuration et de fermeture
 
 ## `window` — fenêtres
 
-| Commande | Description | Issue |
-|---|---|---|
-| `window new [--monitor N]` | Ouvre une nouvelle fenêtre, éventuellement sur l'écran `N` | WIN |
-| `window close` | Ferme la fenêtre active | WIN |
-| `window move --monitor N` | Déplace la fenêtre active sur l'écran `N` | WIN |
-| `window list-monitors` | Liste les écrans : nom, résolution, échelle | WIN |
+Toutes les fenêtres partagent les mêmes documents ; chacune a son propre layout (zones, onglets).
+Les fenêtres sont numérotées à partir de 1, dans l'ordre de leur ouverture ; un numéro ne sert
+qu'une fois par session. La ligne de commande, la palette et les notifications s'affichent dans
+la fenêtre qui a le focus.
+
+| Commande | Description |
+|---|---|
+| `window new` | Ouvre une nouvelle fenêtre, avec un document vide (`mod+shift+n`). |
+| `window close [N] [--force]` | Ferme la fenêtre active, ou la fenêtre `N` (`mod+shift+w`). Ses documents qui ne sont affichés dans aucune autre fenêtre sont fermés : s'ils ont des modifications non enregistrées, la commande échoue, sauf avec `--force`. Fermer la dernière fenêtre quitte CuprIDE (option `[window] quit_on_last_close`). |
+| `window focus <N>` | Donne le focus à la fenêtre `N`. |
+| `window list` | Liste les fenêtres : numéro, document actif, nombre de panneaux ; `>` marque la fenêtre active. |
+
+Le bouton de fermeture d'une fenêtre fait comme `window close` ; avec des modifications non
+enregistrées, il faut fermer une seconde fois pour confirmer.
 
 ## `split` — diviser l'espace
 

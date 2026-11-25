@@ -1,17 +1,23 @@
-//! Application : boucle d'événements `winit` et fenêtre de l'éditeur.
+//! Application : boucle d'événements `winit` et fenêtres de l'éditeur.
+//!
+//! Une seule boucle d'événements et un seul device GPU pour toutes les fenêtres ; chaque fenêtre a
+//! sa surface, ses vues et sa barre d'état. Le noyau tient le modèle des fenêtres (chacune avec son
+//! layout) : après chaque lot d'événements, les fenêtres du système sont ouvertes ou fermées pour
+//! lui correspondre.
 //!
 //! La boucle attend les événements (`ControlFlow::Wait`) : sans saisie, sans redimensionnement et
 //! sans minuterie, le processus dort et ne consomme pas de CPU. Rien n'est redessiné tant que rien
 //! n'a changé. Les seules minuteries sont le clignotement du curseur, qui s'arrête de lui-même
 //! quelques secondes après la dernière saisie, et l'expiration d'un avertissement.
 
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Instant;
 
 use cupride_core::clipboard::ClipboardKind;
 use cupride_core::command::CommandOutput;
 use cupride_core::keymap::{KeyResolver, Resolution};
-use cupride_core::layout::{Axis, Divider, DropTarget, PanelId};
+use cupride_core::layout::{Axis, Divider, DropTarget, PanelId, WindowId as LayoutWindowId};
 use cupride_core::notifications::Level;
 use cupride_core::text::{Selections, TextBuffer};
 use cupride_core::{DocumentId, Editor};
@@ -47,13 +53,17 @@ use crate::watcher::DiskWatcher;
 /// Taille initiale de la fenêtre, en pixels logiques.
 const INITIAL_SIZE: LogicalSize<f64> = LogicalSize::new(1_100.0, 720.0);
 
+/// Décalage d'une nouvelle fenêtre par rapport à la fenêtre courante, en pixels logiques.
+const CASCADE: f64 = 32.0;
+
 /// Fenêtre ouverte et ses ressources de rendu.
 struct WindowState {
     // Ordre des champs : la surface doit être libérée avant la fenêtre.
     surface: WindowSurface,
     renderer: Renderer,
-    /// Vues des panneaux, et place de chaque zone.
+    /// Vues des panneaux de cette fenêtre, et place de chaque zone.
     views: PanelViews,
+    status_bar: StatusBar,
     window: Arc<Window>,
 }
 
@@ -86,7 +96,15 @@ pub(crate) struct App {
     theme: Theme,
     theme_id: String,
     gpu: Option<Gpu>,
-    window: Option<WindowState>,
+    /// Fenêtres ouvertes, par identifiant du noyau.
+    windows: BTreeMap<LayoutWindowId, WindowState>,
+    /// Identifiant du noyau de chaque fenêtre du système.
+    os_windows: HashMap<WindowId, LayoutWindowId>,
+    /// Fenêtre courante : celle qui a le focus, où s'affichent les couches (ligne de commande,
+    /// palette, notifications).
+    current: LayoutWindowId,
+    /// La boucle a démarré (la première fenêtre a pu être ouverte).
+    started: bool,
     close_guard: CloseGuard,
     blink: CursorBlink,
     /// La fenêtre a-t-elle le focus clavier ? Sans focus, les curseurs sont masqués et ne
@@ -133,7 +151,6 @@ pub(crate) struct App {
     disk: DiskWatcher,
     /// Pour réveiller la boucle d'événements depuis les autres threads.
     proxy: EventLoopProxy<AppEvent>,
-    status_bar: StatusBar,
     status_elements: StatusElements,
     /// Configuration de la barre d'état déjà vérifiée (noms inconnus signalés une fois).
     checked_status_config: Option<cupride_core::config::StatusBarConfig>,
@@ -208,7 +225,6 @@ impl App {
             file_index: FileIndex::default(),
             disk: DiskWatcher::new(proxy.clone()),
             proxy,
-            status_bar: StatusBar::default(),
             status_elements: StatusElements::default(),
             checked_status_config: None,
             text,
@@ -216,7 +232,10 @@ impl App {
             theme: Theme::default(),
             theme_id: cupride_ui::DEFAULT_THEME.to_owned(),
             gpu: None,
-            window: None,
+            windows: BTreeMap::new(),
+            os_windows: HashMap::new(),
+            current: LayoutWindowId::new(1),
+            started: false,
             close_guard: CloseGuard::default(),
             toasts: Toasts::default(),
             fatal: None,
@@ -228,9 +247,16 @@ impl App {
         self.fatal.as_deref()
     }
 
-    /// Titre de la fenêtre : document actif, état modifié et projet.
-    fn title(&self) -> String {
-        let mut title = match self.editor.active_document() {
+    /// Titre de la fenêtre `window` : son document actif, état modifié et projet.
+    fn title(&self, window: LayoutWindowId) -> String {
+        let document = self
+            .editor
+            .workspace()
+            .window(window)
+            .and_then(|w| w.active())
+            .and_then(|p| self.editor.panel_document(p))
+            .and_then(|d| self.editor.document(d));
+        let mut title = match document {
             Some(doc) => {
                 let modified = if doc.is_modified() { " •" } else { "" };
                 format!("{}{modified} — ", doc.display_name())
@@ -274,7 +300,7 @@ impl App {
                 &event.key_without_modifiers(),
                 self.modifiers,
             );
-            let action = match (combo, self.window.as_mut()) {
+            let action = match (combo, self.windows.get_mut(&self.current)) {
                 (Some(combo), Some(state)) => state
                     .views
                     .view_mut(panel)
@@ -322,7 +348,7 @@ impl App {
     /// Panneau actif, s'il prend le clavier lui-même (explorateur).
     fn keyboard_panel(&self) -> Option<PanelId> {
         let panel = self.editor.active_panel()?;
-        let view = self.window.as_ref()?.views.view(panel)?;
+        let view = self.windows.get(&self.current)?.views.view(panel)?;
         view.takes_keyboard().then_some(panel)
     }
 
@@ -351,7 +377,11 @@ impl App {
                     cursor: cursor.map(|(start, _)| start),
                 });
                 let panel = self.editor.active_panel();
-                if let Some(view) = self.window.as_mut().and_then(|s| s.editor_view_mut(panel)) {
+                if let Some(view) = self
+                    .windows
+                    .get_mut(&self.current)
+                    .and_then(|s| s.editor_view_mut(panel))
+                {
                     view.set_preedit(preedit);
                 }
                 self.blink.reset(Instant::now());
@@ -375,7 +405,7 @@ impl App {
 
     /// Retire le texte en composition de toutes les vues.
     fn clear_preedit(&mut self) {
-        let Some(state) = &mut self.window else {
+        let Some(state) = self.windows.get_mut(&self.current) else {
             return;
         };
         let panels: Vec<PanelId> = self.editor.workspace().tree().panels();
@@ -452,7 +482,7 @@ impl App {
             config.view.cursor_blink,
             config.view.cursor_blink_interval(),
         );
-        if let Some(state) = &mut self.window {
+        for state in self.windows.values_mut() {
             state.views.set_settings(ViewSettings::from_config(config));
             // Zoom de l'interface (view zoom-in…) : appliqué à chaud, comme un changement d'écran.
             state
@@ -505,7 +535,11 @@ impl App {
         }
         // Un clic dans l'éditeur ferme les couches et lui rend le focus.
         self.close_overlays();
-        if let Some(divider) = self.window.as_ref().and_then(|s| s.views.divider_at(x, y)) {
+        if let Some(divider) = self
+            .windows
+            .get(&self.current)
+            .and_then(|s| s.views.divider_at(x, y))
+        {
             self.divider_drag = Some(divider.clone());
             return;
         }
@@ -513,7 +547,10 @@ impl App {
             return;
         }
         // Un clic dans une autre zone lui donne le focus ; le clic y place ensuite le curseur.
-        if let Some(panel) = self.window.as_ref().and_then(|s| s.views.panel_at(x, y))
+        if let Some(panel) = self
+            .windows
+            .get(&self.current)
+            .and_then(|s| s.views.panel_at(x, y))
             && self.editor.active_panel() != Some(panel)
         {
             self.editor.focus_panel(panel);
@@ -522,7 +559,7 @@ impl App {
         // Un panneau qui gère sa souris (explorateur) reçoit le clic.
         if let Some(panel) = self.keyboard_panel() {
             let now = Instant::now();
-            let action = match &mut self.window {
+            let action = match self.windows.get_mut(&self.current) {
                 Some(state) => {
                     let clicks = self
                         .clicks
@@ -538,8 +575,10 @@ impl App {
             return;
         }
         let panel = self.editor.active_panel();
-        let (Some(state), Some(document)) = (&self.window, self.editor.active_document_mut())
-        else {
+        let (Some(state), Some(document)) = (
+            self.windows.get(&self.current),
+            self.editor.active_document_mut(),
+        ) else {
             return;
         };
         let Some(view) = state.editor_view(panel) else {
@@ -570,7 +609,7 @@ impl App {
     /// Clic dans une barre d'onglets : l'onglet cliqué est affiché et prend le focus ; un double
     /// clic garde un onglet d'aperçu. Renvoie vrai si le clic était dans une barre d'onglets.
     fn tab_pressed(&mut self, x: f32, y: f32) -> bool {
-        let Some(state) = &self.window else {
+        let Some(state) = self.windows.get(&self.current) else {
             return false;
         };
         let Some(zone) = state.views.tab_bar_at(x, y) else {
@@ -618,7 +657,11 @@ impl App {
 
     /// Clic du milieu sur un onglet : le ferme, comme `panel close`.
     fn close_tab_at(&mut self, x: f32, y: f32) -> bool {
-        let Some(panel) = self.window.as_ref().and_then(|s| s.views.tab_at(x, y)) else {
+        let Some(panel) = self
+            .windows
+            .get(&self.current)
+            .and_then(|s| s.views.tab_at(x, y))
+        else {
             return false;
         };
         let result = self
@@ -670,8 +713,10 @@ impl App {
             return;
         }
         let panel = self.editor.active_panel();
-        let (Some(state), Some(document)) = (&self.window, self.editor.active_document_mut())
-        else {
+        let (Some(state), Some(document)) = (
+            self.windows.get(&self.current),
+            self.editor.active_document_mut(),
+        ) else {
             return;
         };
         let Some(view) = state.editor_view(panel) else {
@@ -687,7 +732,7 @@ impl App {
     /// vue, la sélection continue sur les lignes au-delà, que la vue fait défiler pour suivre.
     fn mouse_moved(&mut self, x: f32, y: f32) {
         self.mouse_position = (x, y);
-        let Some(state) = &self.window else {
+        let Some(state) = self.windows.get(&self.current) else {
             return;
         };
         if let Some(divider) = &self.divider_drag {
@@ -751,13 +796,18 @@ impl App {
 
     /// Défilement à la molette (crans, animés) ou au pavé tactile (pixels, immédiats). Avec Maj,
     /// la molette fait défiler horizontalement.
-    fn scroll(&mut self, delta: MouseScrollDelta) {
-        let Some(state) = &mut self.window else {
+    fn scroll(&mut self, window: LayoutWindowId, delta: MouseScrollDelta) {
+        let active = self
+            .editor
+            .workspace()
+            .window(window)
+            .and_then(|w| w.active());
+        let Some(state) = self.windows.get_mut(&window) else {
             return;
         };
         // La molette fait défiler le panneau sous la souris.
         let (x, y) = self.mouse_position;
-        let Some(panel) = state.views.panel_at(x, y).or(self.editor.active_panel()) else {
+        let Some(panel) = state.views.panel_at(x, y).or(active) else {
             return;
         };
         let (dx, dy, smooth) = match delta {
@@ -778,15 +828,16 @@ impl App {
         state.window.request_redraw();
     }
 
+    /// Redessine toutes les fenêtres.
     fn request_redraw(&self) {
-        if let Some(state) = &self.window {
+        for state in self.windows.values() {
             state.window.request_redraw();
         }
     }
 
     fn refresh_title(&self) {
-        if let Some(state) = &self.window {
-            state.window.set_title(&self.title());
+        for (id, state) in &self.windows {
+            state.window.set_title(&self.title(*id));
         }
     }
 
@@ -798,14 +849,35 @@ impl App {
             .collect()
     }
 
-    fn request_close(&mut self, event_loop: &ActiveEventLoop) {
-        match self
-            .close_guard
-            .request(&self.modified_documents(), Instant::now())
-        {
-            CloseDecision::Close => {
-                tracing::info!("fermeture de la fenêtre");
+    /// Bouton de fermeture d'une fenêtre. La dernière fenêtre quitte l'application (option
+    /// `[window] quit_on_last_close`) ; une autre est fermée avec ses documents qui ne sont
+    /// affichés nulle part ailleurs. Des modifications non enregistrées demandent de confirmer en
+    /// fermant une seconde fois.
+    fn request_close(&mut self, event_loop: &ActiveEventLoop, window: LayoutWindowId) {
+        let last = self.editor.workspace().windows().len() <= 1;
+        let quit = last && self.editor.config().window.quit_on_last_close;
+        let modified: Vec<String> = if quit {
+            self.modified_documents()
+        } else {
+            self.editor
+                .documents_only_in(window)
+                .into_iter()
+                .filter_map(|id| self.editor.document(id))
+                .filter(|d| d.is_modified())
+                .map(|d| d.display_name())
+                .collect()
+        };
+        match self.close_guard.request(&modified, Instant::now()) {
+            CloseDecision::Close if quit => {
+                tracing::info!("fermeture de la dernière fenêtre");
                 event_loop.exit();
+            }
+            CloseDecision::Close => {
+                tracing::info!(fenetre = %window, "fermeture d'une fenêtre");
+                if let Err(error) = self.editor.close_window(window, true) {
+                    tracing::warn!("{error}");
+                }
+                self.sync_windows(event_loop);
             }
             CloseDecision::Warn(message) => {
                 tracing::warn!("{message}");
@@ -821,7 +893,7 @@ impl App {
         if self.fatal.is_some() {
             return;
         }
-        if let Some(state) = &self.window {
+        for state in self.windows.values() {
             for (panel, scroll) in state.views.scroll_positions() {
                 self.editor.set_panel_scroll(panel, scroll);
             }
@@ -847,50 +919,174 @@ impl App {
         event_loop.exit();
     }
 
-    /// Ouvre la fenêtre et initialise le GPU.
-    fn open_window(&mut self, event_loop: &ActiveEventLoop) -> Result<(), String> {
-        let attributes = Window::default_attributes()
-            .with_title(self.title())
+    /// Ouvre la fenêtre du système de la fenêtre `id` du noyau ; la première initialise le GPU.
+    fn open_window(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        id: LayoutWindowId,
+    ) -> Result<(), String> {
+        let mut attributes = Window::default_attributes()
+            .with_title(self.title(id))
             .with_inner_size(INITIAL_SIZE);
+        // Une nouvelle fenêtre s'ouvre en décalé de la fenêtre courante, pour ne pas la cacher.
+        if let Some(position) = self
+            .windows
+            .get(&self.current)
+            .and_then(|s| {
+                s.window
+                    .outer_position()
+                    .ok()
+                    .map(|p| (p, s.window.scale_factor()))
+            })
+            .map(|(p, scale)| {
+                let step = (CASCADE * scale).round() as i32;
+                PhysicalPosition::new(p.x + step, p.y + step)
+            })
+        {
+            attributes = attributes.with_position(position);
+        }
         let window = event_loop
             .create_window(attributes)
             .map(Arc::new)
             .map_err(|error| format!("impossible d'ouvrir une fenêtre : {error}"))?;
-        tracing::info!(id = ?window.id(), "fenêtre ouverte");
-        // Lancée depuis un terminal, l'application passe au premier plan avec le focus clavier.
-        window.focus_window();
+        tracing::info!(fenetre = %id, os = ?window.id(), "fenêtre ouverte");
         // Méthodes de saisie (IME) et touches mortes composées par le système.
         window.set_ime_allowed(true);
-        let (gpu, surface) = Gpu::for_window(Arc::clone(&window)).map_err(|e| e.to_string())?;
+        let surface = match &self.gpu {
+            // Un seul device GPU : les fenêtres suivantes n'ont besoin que d'une surface.
+            Some(gpu) => gpu
+                .instance
+                .create_surface(Arc::clone(&window))
+                .map_err(|e| format!("pas de surface pour la fenêtre : {e}"))?,
+            None => {
+                let (gpu, surface) =
+                    Gpu::for_window(Arc::clone(&window)).map_err(|e| e.to_string())?;
+                tracing::info!(gpu = %gpu.describe(), "GPU prêt");
+                self.gpu = Some(gpu);
+                surface
+            }
+        };
+        let gpu = self.gpu.as_ref().expect("GPU initialisé");
         let size = window.inner_size();
         let surface =
-            WindowSurface::new(&gpu, surface, Arc::clone(&window), size.width, size.height)
+            WindowSurface::new(gpu, surface, Arc::clone(&window), size.width, size.height)
                 .map_err(|e| e.to_string())?;
-        tracing::info!(gpu = %gpu.describe(), format = ?surface.format(), "rendu prêt");
-        let renderer = Renderer::new(&gpu, surface.format());
+        let renderer = Renderer::new(gpu, surface.format());
         let settings = ViewSettings::from_config(self.editor.config());
         let views = PanelViews::new(
             ViewRegistry::default(),
             settings,
             window.scale_factor() as f32 * self.editor.zoom(),
+        )
+        .for_window(id);
+        if self.editor.active_window() == Some(id) {
+            // Lancée depuis un terminal, l'application passe au premier plan avec le focus.
+            window.focus_window();
+            self.current = id;
+        }
+        self.os_windows.insert(window.id(), id);
+        self.windows.insert(
+            id,
+            WindowState {
+                surface,
+                renderer,
+                views,
+                status_bar: StatusBar::default(),
+                window,
+            },
         );
-        self.gpu = Some(gpu);
-        self.window = Some(WindowState {
-            surface,
-            renderer,
-            views,
-            window,
-        });
-        // Thème et barre d'état de la configuration, dès la première image.
-        self.sync_config();
-        // Fichiers du projet indexés en arrière-plan, prêts pour l'ouverture rapide.
-        self.refresh_file_index();
         Ok(())
     }
 
-    /// Dessine la fenêtre.
-    fn redraw(&mut self) {
-        let (Some(gpu), Some(state)) = (&self.gpu, &mut self.window) else {
+    /// Ouvre et ferme les fenêtres du système pour qu'elles correspondent à celles du noyau.
+    /// Sans plus aucune fenêtre, l'application quitte (sauf `[window] quit_on_last_close =
+    /// false`).
+    fn sync_windows(&mut self, event_loop: &ActiveEventLoop) {
+        let wanted: Vec<LayoutWindowId> = self
+            .editor
+            .workspace()
+            .windows()
+            .iter()
+            .map(|w| w.id())
+            .collect();
+        let gone: Vec<LayoutWindowId> = self
+            .windows
+            .keys()
+            .filter(|id| !wanted.contains(id))
+            .copied()
+            .collect();
+        for id in gone {
+            if let Some(state) = self.windows.remove(&id) {
+                self.os_windows.remove(&state.window.id());
+                tracing::info!(fenetre = %id, "fenêtre fermée");
+            }
+        }
+        let mut opened = false;
+        for id in wanted {
+            if self.windows.contains_key(&id) {
+                continue;
+            }
+            if let Err(message) = self.open_window(event_loop, id) {
+                if self.gpu.is_none() {
+                    self.fail(event_loop, message);
+                    return;
+                }
+                tracing::warn!("{message}");
+                self.editor.notify(Level::Error, message);
+                let _ = self.editor.close_window(id, true);
+            }
+            opened = true;
+        }
+        if opened && !self.started {
+            self.started = true;
+            // Thème et barre d'état de la configuration, dès la première image.
+            self.sync_config();
+            // Fichiers du projet indexés en arrière-plan, prêts pour l'ouverture rapide.
+            self.refresh_file_index();
+        }
+        if opened {
+            self.sync_config();
+        }
+        if let Some(active) = self.editor.active_window()
+            && active != self.current
+            && let Some(state) = self.windows.get(&active)
+        {
+            // Une fenêtre qui reçoit le focus par une commande passe au premier plan.
+            state.window.focus_window();
+            self.current = active;
+        }
+        if self.started && self.windows.is_empty() && self.editor.config().window.quit_on_last_close
+        {
+            tracing::info!("plus aucune fenêtre");
+            event_loop.exit();
+        }
+        if opened {
+            self.refresh_title();
+        }
+    }
+
+    /// Une fenêtre reçoit le clavier ou la souris : elle devient la fenêtre courante, et la
+    /// fenêtre active du noyau.
+    fn enter_window(&mut self, window: LayoutWindowId) {
+        if window == self.current && self.editor.active_window() == Some(window) {
+            return;
+        }
+        // Les couches restent dans la fenêtre où elles ont été ouvertes : elles se ferment.
+        if window != self.current {
+            self.close_overlays();
+            self.tab_drag = None;
+            self.divider_drag = None;
+        }
+        self.current = window;
+        self.editor.focus_window(window);
+        self.after_any_command(Instant::now());
+    }
+
+    /// Dessine la fenêtre `id`. Les couches (ligne de commande, palette, notifications) ne sont
+    /// dessinées que dans la fenêtre courante.
+    fn redraw(&mut self, id: LayoutWindowId) {
+        let current = id == self.current;
+        let (Some(gpu), Some(state)) = (&self.gpu, self.windows.get_mut(&id)) else {
             return;
         };
         let frame = match state.surface.acquire(gpu) {
@@ -915,7 +1111,9 @@ impl App {
             ],
         );
         state.views.layout(&mut self.text, &self.editor, parts[0]);
-        self.editor.set_layout_metrics(state.views.metrics());
+        if current {
+            self.editor.set_layout_metrics(state.views.metrics());
+        }
         let pending_keys: Vec<String> = self
             .resolver
             .pending()
@@ -924,7 +1122,7 @@ impl App {
             .collect();
         let pending_keys = pending_keys.join(" ");
         let status_config = &self.editor.config().status_bar;
-        self.status_bar.prepare(
+        state.status_bar.prepare(
             &mut self.text,
             &style,
             window_rect,
@@ -935,23 +1133,24 @@ impl App {
             },
             (&status_config.left, &status_config.right),
         );
-        let panel = self.editor.active_panel();
-        if let Some(view) = state.editor_view(panel) {
+        let panel = self.editor.workspace().window(id).and_then(|w| w.active());
+        if current && let Some(view) = state.editor_view(panel) {
             self.editor.set_page_lines(view.page_lines());
         }
         let now = Instant::now();
-        let blink_on = self.focused && self.blink.visible(now);
-        let editor_focused = self.focus.is_focused(Element::Editor);
+        let blink_on = current && self.focused && self.blink.visible(now);
+        let editor_focused = current && self.focus.is_focused(Element::Editor);
         let animating = state.views.tick(now);
         let mut scene = Frame::new(self.theme.background);
         // La vue du panneau actif suit son curseur quand il bouge, ou quand le panneau change.
         let cursor = panel
             .zip(self.editor.active_document())
+            .filter(|_| current)
             .and_then(|(panel, document)| {
                 let id = self.editor.panel_document(panel)?;
                 Some((panel, id, document.selections().primary().head))
             });
-        if cursor != self.last_cursor {
+        if current && cursor != self.last_cursor {
             self.last_cursor = cursor;
             if let Some(view) = state.editor_view_mut(panel) {
                 view.follow_cursor();
@@ -964,8 +1163,6 @@ impl App {
             self.focused && editor_focused,
             blink_on,
         );
-        // Dossiers affichés par l'explorateur : surveillés sur le disque.
-        self.disk.sync(state.views.watched_dirs());
         // Défilement de chaque vue, pour la session et les layouts nommés.
         for (panel, scroll) in state.views.scroll_positions() {
             self.editor.set_panel_scroll(panel, scroll);
@@ -977,25 +1174,30 @@ impl App {
             self.focused && editor_focused,
             blink_on,
         );
-        if let Some(target) = self.tab_drag.as_ref().and_then(|d| d.target.as_ref()) {
+        if let Some(target) = self
+            .tab_drag
+            .as_ref()
+            .filter(|_| current)
+            .and_then(|d| d.target.as_ref())
+        {
             state
                 .views
                 .draw_drop_preview(scene.push_layer(), target, &self.theme);
         }
-        self.status_bar.draw(scene.base(), &style, &self.theme);
+        state.status_bar.draw(scene.base(), &style, &self.theme);
         let mut ime_area = None;
-        if let Some(line) = &mut self.command_line {
+        if let Some(line) = self.command_line.as_mut().filter(|_| current) {
             line.prepare(&mut self.text, &style, window_rect, status_height);
             ime_area = Some(line.cursor_rect(&style));
         }
-        if let Some(line) = &self.command_line {
+        if let Some(line) = self.command_line.as_ref().filter(|_| current) {
             line.draw(scene.push_layer(), &style, &self.theme, blink_on);
         }
-        if let Some((_, picker)) = &mut self.picker {
+        if let Some((_, picker)) = self.picker.as_mut().filter(|_| current) {
             picker.prepare(&mut self.text, &style, &self.theme, parts[0]);
             ime_area = Some(picker.cursor_rect(&style));
         }
-        if let Some((_, picker)) = &self.picker {
+        if let Some((_, picker)) = self.picker.as_ref().filter(|_| current) {
             picker.draw(scene.push_layer(), &style, &self.theme, blink_on);
         }
         // Notifications, au-dessus de tout, dans la zone de l'éditeur.
@@ -1005,7 +1207,7 @@ impl App {
             now,
         );
         self.toasts.expire(now);
-        if !self.toasts.is_empty() {
+        if current && !self.toasts.is_empty() {
             let above = self.command_line.as_ref().map_or(parts[0], |line| {
                 Rect::new(0.0, 0.0, window_rect.width, line.area().y)
             });
@@ -1018,8 +1220,8 @@ impl App {
         {
             tracing::error!("{error}");
         }
-        if let Some(cursor) = ime_area.or_else(|| {
-            let document = self.editor.active_document()?;
+        if let Some(cursor) = ime_area.filter(|_| current).or_else(|| {
+            let document = self.editor.active_document().filter(|_| current)?;
             state.editor_view(panel)?.primary_cursor_rect(document)
         }) {
             // La fenêtre de l'IME s'ouvre sous le curseur.
@@ -1047,9 +1249,10 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::FilesIndexed => self.files_indexed(),
             AppEvent::FilesChanged => {
                 let changed = self.disk.take_changed();
-                if let Some(state) = &mut self.window
-                    && !changed.is_empty()
-                {
+                if changed.is_empty() {
+                    return;
+                }
+                for state in self.windows.values_mut() {
                     for view in state.views.views_mut() {
                         view.files_changed(&changed);
                     }
@@ -1060,31 +1263,44 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() {
+        if !self.windows.is_empty() {
             return;
         }
-        if let Err(message) = self.open_window(event_loop) {
-            self.fail(event_loop, message);
-        }
+        self.sync_windows(event_loop);
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, os_id: WindowId, event: WindowEvent) {
         tracing::trace!(?event, "événement de fenêtre");
+        let Some(&id) = self.os_windows.get(&os_id) else {
+            return;
+        };
+        // Clavier et clics : la fenêtre visée devient la fenêtre courante.
+        let input = matches!(
+            event,
+            WindowEvent::KeyboardInput { .. }
+                | WindowEvent::Ime(_)
+                | WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    ..
+                }
+        );
+        if input {
+            self.enter_window(id);
+        }
         match event {
-            WindowEvent::CloseRequested => self.request_close(event_loop),
-            WindowEvent::Destroyed => event_loop.exit(),
+            WindowEvent::CloseRequested => self.request_close(event_loop, id),
             WindowEvent::Resized(size) => {
-                if let (Some(gpu), Some(state)) = (&self.gpu, &mut self.window) {
+                if let (Some(gpu), Some(state)) = (&self.gpu, self.windows.get_mut(&id)) {
                     state.surface.resize(gpu, size.width, size.height);
                 }
                 // Dessin immédiat : pendant un redimensionnement à la souris, l'image suit la
                 // fenêtre au lieu d'être étirée.
-                self.redraw();
+                self.redraw(id);
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 // Fenêtre déplacée vers un écran d'une autre densité : le texte est remis en
                 // forme à la nouvelle échelle. `Resized` suit avec la nouvelle taille physique.
-                if let Some(state) = &mut self.window {
+                if let Some(state) = self.windows.get_mut(&id) {
                     state
                         .views
                         .set_scale(scale_factor as f32 * self.editor.zoom());
@@ -1098,9 +1314,14 @@ impl ApplicationHandler<AppEvent> for App {
                 ..
             } => self.key(&event),
             WindowEvent::Ime(ime) => self.ime(ime),
-            WindowEvent::MouseWheel { delta, .. } => self.scroll(delta),
-            WindowEvent::CursorMoved { position, .. } => {
+            WindowEvent::MouseWheel { delta, .. } => self.scroll(id, delta),
+            // La souris au-dessus d'une autre fenêtre que la courante n'y change rien, tant
+            // qu'on n'y clique pas.
+            WindowEvent::CursorMoved { position, .. } if id == self.current => {
                 self.mouse_moved(position.x as f32, position.y as f32);
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.mouse_position = (position.x as f32, position.y as f32);
             }
             WindowEvent::MouseInput {
                 state,
@@ -1120,12 +1341,19 @@ impl ApplicationHandler<AppEvent> for App {
                 button: MouseButton::Middle,
                 ..
             } => self.paste_primary(),
-            WindowEvent::Focused(focused) => {
-                self.focused = focused;
+            WindowEvent::Focused(true) => {
+                self.focused = true;
+                self.enter_window(id);
                 self.blink.reset(Instant::now());
                 self.request_redraw();
             }
-            WindowEvent::RedrawRequested | WindowEvent::Occluded(false) => self.redraw(),
+            WindowEvent::Focused(false) => {
+                if id == self.current {
+                    self.focused = false;
+                }
+                self.request_redraw();
+            }
+            WindowEvent::RedrawRequested | WindowEvent::Occluded(false) => self.redraw(id),
             _ => {}
         }
     }
@@ -1145,6 +1373,17 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Fenêtres ouvertes ou fermées par les commandes du lot d'événements.
+        if self.started {
+            self.sync_windows(event_loop);
+        }
+        // Dossiers affichés par les explorateurs de toutes les fenêtres : surveillés.
+        let watched: BTreeSet<std::path::PathBuf> = self
+            .windows
+            .values()
+            .flat_map(|s| s.views.watched_dirs())
+            .collect();
+        self.disk.sync(watched);
         // Prochain réveil : fin du délai de confirmation de fermeture, changement d'état du
         // curseur ou expiration d'une notification. Sans rien de tout cela, la boucle dort
         // jusqu'au prochain événement.
@@ -1175,8 +1414,9 @@ impl ApplicationHandler<AppEvent> for App {
             );
         }
         self.save_session();
-        // Les ressources de la fenêtre sont libérées avant le GPU et la sortie de la boucle.
-        self.window = None;
+        // Les ressources des fenêtres sont libérées avant le GPU et la sortie de la boucle.
+        self.windows.clear();
+        self.os_windows.clear();
         self.gpu = None;
     }
 }
