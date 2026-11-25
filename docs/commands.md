@@ -214,6 +214,19 @@ nouvelle ligne commence par les mêmes espaces et tabulations, jusqu'au curseur.
 Toutes les commandes d'édition (frappe, effacement, déplacements, couper, copier, coller)
 agissent à chaque curseur.
 
+## `recovery` — récupération après plantage
+
+Les documents qui ont des modifications non enregistrées sont copiés toutes les 15 secondes (s'ils
+ont changé) dans le dossier `recovery/` des données de l'OS — jamais dans les fichiers du projet.
+À la fermeture normale, ces copies sont effacées. Si CuprIDE s'est arrêté brutalement, une
+notification le signale au lancement suivant.
+
+| Commande | Description |
+|---|---|
+| `recovery list` | Liste les documents retrouvés. |
+| `recovery restore` | Restaure chaque document : le texte retrouvé remplace celui du fichier, en une modification annulable, non enregistrée (à vérifier, puis à enregistrer). Un document sans fichier devient un nouveau document. |
+| `recovery discard` | Oublie les modifications retrouvées. |
+
 ## `config` — configuration
 
 Voir [`configuration.md`](configuration.md) pour les options.

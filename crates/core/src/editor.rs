@@ -96,6 +96,10 @@ pub struct Editor {
     pub(crate) search: crate::search::SearchState,
     /// Recherche dans le projet.
     pub(crate) project_search: Option<crate::project_search::ProjectSearch>,
+    /// Copies des documents non enregistrés.
+    pub(crate) recovery: crate::recovery::Recovery,
+    /// Copies d'une session interrompue, trouvées au lancement.
+    pub(crate) recovery_found: Vec<crate::recovery::Backup>,
     /// Écrans, dans l'ordre de leur numérotation (fournis par l'interface).
     monitors: Vec<crate::monitors::MonitorInfo>,
     /// Thème en cours, et thèmes disponibles (fournis par l'interface).
@@ -164,6 +168,8 @@ impl Editor {
             monitors: Vec::new(),
             search: crate::search::SearchState::default(),
             project_search: None,
+            recovery: crate::recovery::Recovery::default(),
+            recovery_found: Vec::new(),
             theme: crate::config::ViewConfig::default().theme,
             themes: Vec::new(),
         }
