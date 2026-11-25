@@ -360,13 +360,22 @@ impl ExplorerTree {
     }
 
     /// Chemin à afficher dans une commande : relatif à la racine quand il est dedans.
+    ///
+    /// Un chemin relatif s'écrit avec `/`, sur tous les OS (Windows l'accepte) : la commande reste
+    /// lisible, sans `\` doublés par les guillemets.
     pub fn display_path(&self, path: &Path) -> String {
-        path.strip_prefix(&self.root)
+        match path
+            .strip_prefix(&self.root)
             .ok()
             .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(path)
-            .to_string_lossy()
-            .into_owned()
+        {
+            Some(relative) => relative
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/"),
+            None => path.to_string_lossy().into_owned(),
+        }
     }
 
     /// Dossier où créer une entrée : le dossier sélectionné, sinon celui de l'entrée
