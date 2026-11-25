@@ -221,6 +221,11 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `edit delete-lines` | `Ctrl+Maj+K` | `Cmd+Maj+K` |
 | `edit join-lines` | `Ctrl+J` | `Cmd+J` |
 | `edit toggle-comment` | `Ctrl+/` | `Cmd+/` |
+| `fold close` | `Ctrl+Maj+[` | `Option+Cmd+[` |
+| `fold open` | `Ctrl+Maj+]` | `Option+Cmd+]` |
+| `fold toggle` | `Ctrl+K Ctrl+L` | `Cmd+K Cmd+L` |
+| `fold close-all` | `Ctrl+K Ctrl+0` | `Cmd+K Cmd+0` |
+| `fold open-all` | `Ctrl+K Ctrl+J` | `Cmd+K Cmd+J` |
 | `edit goto-bracket` | `Ctrl+Maj+\` | `Cmd+Maj+\` |
 | `edit expand-selection` | `Alt+Maj+→` | `Ctrl+Maj+Cmd+→` |
 | `edit shrink-selection` | `Alt+Maj+←` | `Ctrl+Maj+Cmd+←` |

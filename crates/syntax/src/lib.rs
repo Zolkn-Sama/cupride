@@ -7,12 +7,14 @@
 //! - [`Highlight`] : catégories de coloration d'une plage ([`Syntax::highlights`]), langages
 //!   imbriqués compris (blocs de code dans du Markdown).
 //! - Structure du code : nœud parent ou enfant d'une sélection ([`Syntax::expand`],
-//!   [`Syntax::shrink`]), fonctions ([`Syntax::functions`]).
+//!   [`Syntax::shrink`]), fonctions ([`Syntax::functions`]), zones repliables
+//!   ([`Syntax::fold_regions`]).
 //!
 //! Cette crate ne dépend que de `cupride-text` : elle ignore tout des documents, des vues et du
 //! thème.
 
 mod edits;
+mod folds;
 mod highlight;
 pub mod languages;
 mod source;
@@ -20,6 +22,7 @@ mod structure;
 mod syntax;
 
 pub use edits::{MAX_INCREMENTAL_EDITS, input_edits};
+pub use folds::FoldRegion;
 pub use highlight::{Highlight, MAX_HIGHLIGHT_BYTES};
 pub use languages::{LanguageConfig, config_for};
 pub use structure::partner;

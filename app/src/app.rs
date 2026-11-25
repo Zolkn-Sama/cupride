@@ -680,6 +680,12 @@ impl App {
         };
         let (x, y) = self.mouse_position;
         let now = Instant::now();
+        // Clic sur le marqueur ou le « … » d'un pli : il est basculé.
+        if let Some(line) = view.fold_line_at(x, y) {
+            let line = format!("fold toggle --line {}", line + 1);
+            self.execute(&line, now);
+            return;
+        }
         let clicks = self
             .clicks
             .click(now, x, y, state.window.scale_factor() as f32);

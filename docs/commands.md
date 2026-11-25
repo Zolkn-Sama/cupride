@@ -266,6 +266,26 @@ notification le signale au lancement suivant.
 | `recovery restore` | Restaure chaque document : le texte retrouvé remplace celui du fichier, en une modification annulable, non enregistrée (à vérifier, puis à enregistrer). Un document sans fichier devient un nouveau document. |
 | `recovery discard` | Oublie les modifications retrouvées. |
 
+## `fold` — repliage
+
+Les blocs repliables viennent de l'arbre syntaxique : blocs, listes d'arguments ou de champs,
+commentaires sur plusieurs lignes, directives `#if` en C, sections, blocs de code, listes et
+citations en Markdown. La ligne d'en-tête reste visible, suivie de « … » ; la ligne d'une
+accolade fermante seule aussi. Un carré dans la gouttière marque un bloc replié ; un clic dessus,
+sur le « … » ou dans la gouttière d'un bloc repliable le bascule.
+
+Les curseurs sautent les lignes masquées (↑, ↓, ←, →) ; un curseur placé dans un bloc replié
+(recherche, aller à la ligne…) le déplie. Les plis suivent les modifications du texte.
+
+| Commande | Description |
+|---|---|
+| `fold close [--line N]` | Replie le plus petit bloc qui contient la ligne du curseur (ou la ligne `N`) et n'est pas encore replié : répétée, elle replie les blocs englobants (`Ctrl+Maj+[` ; `Option+Cmd+[`). |
+| `fold open [--line N]` | Déplie le bloc replié sur cette ligne, ou qui la contient (`Ctrl+Maj+]` ; `Option+Cmd+]`). |
+| `fold toggle [--line N]` | Déplie le bloc replié sur cette ligne, sinon replie le bloc qui la contient (`mod+k mod+l`). |
+| `fold close-all` | Replie tous les blocs du document (`mod+k mod+0`). |
+| `fold open-all` | Déplie tout (`mod+k mod+j`). |
+| `fold list` | Blocs repliés : ligne d'en-tête et lignes masquées. |
+
 ## `syntax` — arbre syntaxique
 
 Le langage d'un document est détecté d'après l'extension ou le nom de son fichier, sinon d'après
