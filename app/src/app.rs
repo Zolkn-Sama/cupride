@@ -217,6 +217,11 @@ impl App {
         remote: Arc<Mutex<Vec<cupride_ipc::Incoming>>>,
     ) -> Self {
         let text = TextSystem::new();
+        // Les analyses syntaxiques longues se font dans un thread, qui réveille la boucle.
+        let waker = proxy.clone();
+        editor.set_syntax_waker(cupride_core::syntax::Waker::new(move || {
+            let _ = waker.send_event(AppEvent::SyntaxParsed);
+        }));
         // Thèmes intégrés, puis ceux du dossier themes/ de la configuration.
         let mut themes = Themes::default();
         if let Some(dir) = editor
@@ -1600,6 +1605,11 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::Remote => self.remote_requests(event_loop),
             AppEvent::SearchDone => self.search_done(),
             AppEvent::ProjectResults => self.project_results(),
+            AppEvent::SyntaxParsed => {
+                if self.editor.poll_syntax() {
+                    self.redraw_all();
+                }
+            }
             AppEvent::FilesChanged => {
                 let changed = self.disk.take_changed();
                 if changed.is_empty() {

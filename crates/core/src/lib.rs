@@ -12,6 +12,7 @@
 //! - [`keymap`] : raccourcis clavier, simples ou en séquence, sans aucune logique.
 //! - [`Document`] : un texte, son fichier, son historique et ses sélections.
 //! - [`session`] : espace de travail enregistré à la fermeture et restauré au lancement.
+//! - [`syntax`] : la crate `cupride-syntax` (Tree-sitter), dont le document tient l'arbre.
 //!
 //! Ne dépend jamais de `render`, `ui` ou `app` : tout le noyau se teste avec `cargo test` et se
 //! pilote depuis le REPL console.
@@ -37,6 +38,7 @@ mod ui_request;
 mod windows;
 
 pub use cupride_layout as layout;
+pub use cupride_syntax as syntax;
 pub use cupride_text as text;
 pub use document::{DiskState, Document, DocumentError, LineEnding};
 pub use editor::{DocumentId, Editor, TrashFn};
