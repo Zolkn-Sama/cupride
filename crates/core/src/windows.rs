@@ -33,6 +33,18 @@ impl Editor {
         true
     }
 
+    /// Envoie le panneau `panel` dans la fenêtre `window`, à côté de son panneau actif, et lui
+    /// donne le focus. Il garde son document, ses curseurs et son défilement.
+    pub fn move_panel_to_window(
+        &mut self,
+        panel: PanelId,
+        window: WindowId,
+    ) -> Result<(), CommandError> {
+        self.workspace_mut().move_to_window(panel, window)?;
+        self.focus_panel(panel);
+        Ok(())
+    }
+
     /// Panneaux de la fenêtre `window`.
     pub fn window_panels(&self, window: WindowId) -> Vec<PanelId> {
         self.workspace()

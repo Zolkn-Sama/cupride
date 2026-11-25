@@ -172,8 +172,13 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
         CommandDef::new(
             "panel",
             "move",
-            "Déplace le panneau actif dans la zone voisine, ou dans une nouvelle zone de ce côté",
+            "Déplace le panneau actif dans la zone voisine, dans une nouvelle zone de ce côté, ou dans une autre fenêtre",
             |editor, args| {
+                if let Some(&window) = args.get_one::<u64>("window") {
+                    let panel = editor.active_panel().ok_or(CommandError::NoActivePanel)?;
+                    editor.move_panel_to_window(panel, crate::layout::WindowId::new(window))?;
+                    return Ok(CommandOutput::None);
+                }
                 let direction = direction(args, "direction").expect("argument requis");
                 editor
                     .move_active_panel(direction, args.get_flag("split"))
@@ -191,7 +196,7 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
         )
         .arg(
             Arg::new("direction")
-                .required(true)
+                .required_unless_present("window")
                 .value_parser(PossibleValuesParser::new(DIRECTIONS))
                 .help("left, right, up ou down"),
         )
@@ -199,7 +204,16 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
             Arg::new("split")
                 .long("split")
                 .action(ArgAction::SetTrue)
+                .conflicts_with("window")
                 .help("Toujours dans une nouvelle zone, de ce côté de la zone active"),
+        )
+        .arg(
+            Arg::new("window")
+                .long("window")
+                .value_name("N")
+                .value_parser(clap::value_parser!(u64))
+                .conflicts_with("direction")
+                .help("Dans la fenêtre N (voir « window list »), à côté de son panneau actif"),
         ),
     )?;
 
@@ -470,6 +484,42 @@ mod tests {
         assert_eq!(groups(&e), vec![vec![1, 2]]);
         e.execute("panel move up --split").unwrap();
         assert_eq!(groups(&e), vec![vec![2], vec![1]]);
+        assert!(e.workspace().is_valid());
+    }
+
+    #[test]
+    fn envoyer_dans_une_autre_fenetre() {
+        use crate::text::Selections;
+        let mut e = Editor::new();
+        let doc = e.new_document();
+        e.execute("edit insert 'abc'").unwrap();
+        let panel = e.active_panel().unwrap();
+        e.new_window();
+        e.execute("window focus 1").unwrap();
+        e.active_document_mut()
+            .unwrap()
+            .set_selections(Selections::cursor(1));
+        e.execute("panel move --window 2").unwrap();
+        assert_eq!(
+            e.active_window().unwrap().get(),
+            2,
+            "le focus suit le panneau"
+        );
+        assert_eq!(e.active_panel(), Some(panel), "même panneau");
+        assert_eq!(e.active_id(), Some(doc));
+        assert_eq!(
+            e.active_document().unwrap().selections(),
+            &Selections::cursor(1),
+            "curseurs gardés"
+        );
+        assert!(e.window_panels(crate::layout::WindowId::new(1)).is_empty());
+        let error = e.execute("panel move --window 7").unwrap_err().to_string();
+        assert_eq!(error, "fenêtre 7 introuvable");
+        assert!(
+            e.execute("panel move left --window 1").is_err(),
+            "l'un ou l'autre"
+        );
+        assert!(e.execute("panel move").is_err());
         assert!(e.workspace().is_valid());
     }
 }

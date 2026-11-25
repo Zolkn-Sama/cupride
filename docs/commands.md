@@ -277,6 +277,7 @@ par un plugin.
 | `panel close [--force]` | Ferme le panneau actif (`mod+w`) ; sa zone disparaît si elle est vide, et sa place revient aux zones voisines. Son document est fermé s'il n'est plus affiché ailleurs : s'il a des modifications non enregistrées, la commande échoue, sauf avec `--force`. |
 | `panel focus <direction>` | Donne le focus à la zone voisine : `left`, `right`, `up` ou `down` (`mod+k` puis `mod+←`, `mod+→`, `mod+↑`, `mod+↓`). Parmi les zones de ce côté, celle qui touche et recouvre le plus la zone active. |
 | `panel move <direction> [--split]` | Déplace le panneau actif (avec son document, ses curseurs et son défilement) dans la zone voisine de ce côté, en onglet ; s'il n'y en a pas, ou avec `--split`, dans une nouvelle zone de ce côté de la zone active. Une zone vidée disparaît. Raccourcis : `mod+k` puis `alt+←`, `→`, `↑`, `↓`. |
+| `panel move --window N` | Envoie le panneau actif dans la fenêtre `N` (voir `window list`), en onglet à côté de son panneau actif, par exemple pour le mettre sur un autre écran. Il garde son document, ses curseurs et son défilement, et le focus le suit. |
 | `panel resize <sens>` | Agrandit ou réduit la zone active de 5 % de la fenêtre : `wider`, `narrower` (largeur), `taller`, `shorter` (hauteur). La place est prise à la zone voisine (la suivante, ou la précédente pour la dernière) ; chaque zone garde une taille minimale (sa barre d'onglets et trois lignes). Raccourcis : `mod+k` puis `mod+shift+→`, `←`, `↓`, `↑`. |
 | `panel list` | Liste les panneaux, zone par zone : `>` marque le panneau actif. |
 
