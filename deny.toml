@@ -23,6 +23,9 @@ confidence-threshold = 0.93
 allow = [
     "MIT",
     "MIT-0",
+    # Équivalent au domaine public, plus permissif encore que MIT-0 : dépendances de
+    # `interprocess` (instance unique), doctest-file et recvmsg.
+    "0BSD",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
