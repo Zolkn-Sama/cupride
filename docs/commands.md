@@ -248,7 +248,11 @@ par un plugin.
 |---|---|
 | `panel open <type> [--split <direction>]` | Ouvre un panneau du type indiqué : en onglet dans la zone active, ou dans une nouvelle zone du côté `left`, `right`, `up` ou `down`. `editor` ouvre le document actif. Un type inconnu est refusé, avec le nom le plus proche. |
 | `panel close [--force]` | Ferme le panneau actif (`mod+w`) ; sa zone disparaît si elle est vide, et sa place revient aux zones voisines. Son document est fermé s'il n'est plus affiché ailleurs : s'il a des modifications non enregistrées, la commande échoue, sauf avec `--force`. |
+| `panel focus <direction>` | Donne le focus à la zone voisine : `left`, `right`, `up` ou `down` (`mod+k` puis `mod+←`, `mod+→`, `mod+↑`, `mod+↓`). Parmi les zones de ce côté, celle qui touche et recouvre le plus la zone active. |
 | `panel list` | Liste les panneaux, zone par zone : `>` marque le panneau actif. |
+
+Le panneau actif se reconnaît à son onglet, souligné en haut de la couleur d'accent ; les titres
+des autres zones sont en gris. Un clic dans une zone lui donne le focus.
 
 Exemples :
 

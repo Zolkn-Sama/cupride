@@ -568,8 +568,10 @@ impl PanelViews {
                 None => layer.quads.push(Quad::new(zone.content, theme.panel)),
             }
         }
+        let active = editor.active_panel();
         for zone in &self.zones {
-            self.draw_tabs(layer, zone, theme);
+            let has_active = active.is_some() && zone.active == active;
+            self.draw_tabs(layer, zone, theme, has_active, has_active && focused);
         }
         for divider in &self.dividers {
             layer
@@ -579,8 +581,17 @@ impl PanelViews {
     }
 
     /// Barre d'onglets d'une zone : onglet affiché sur le fond du contenu, les autres sur celui
-    /// des panneaux, séparés par un trait ; aperçu en gris et en italique.
-    fn draw_tabs<'a>(&'a self, layer: &mut Layer<'a>, zone: &Zone, theme: &Theme) {
+    /// des panneaux, séparés par un trait ; aperçu en gris et en italique. La zone du panneau
+    /// actif se reconnaît à son onglet affiché, souligné en haut de la couleur d'accent (en
+    /// gris si le clavier est ailleurs) ; dans les autres zones, les titres sont en gris.
+    fn draw_tabs<'a>(
+        &'a self,
+        layer: &mut Layer<'a>,
+        zone: &Zone,
+        theme: &Theme,
+        active_zone: bool,
+        focused: bool,
+    ) {
         let style = self.style();
         let line = style.px(1.0).max(1.0);
         let bar = zone.tab_bar;
@@ -602,12 +613,17 @@ impl PanelViews {
             let shown = zone.active == Some(tab.panel);
             if shown {
                 layer.quads.push(Quad::new(clip, theme.background));
+                if active_zone {
+                    let marker = Rect::new(clip.x, clip.y, clip.width, style.px(2.0).max(1.0));
+                    let color = if focused { theme.accent } else { theme.muted };
+                    layer.quads.push(Quad::new(marker, color));
+                }
             }
             let separator = Rect::new(tab.bounds.right() - line, bar.y, line, bar.height);
             layer
                 .quads
                 .push(Quad::new(separator.intersect(&bar), theme.border));
-            let color = if tab.preview {
+            let color = if tab.preview || !active_zone {
                 theme.muted
             } else {
                 theme.foreground
