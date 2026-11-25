@@ -10,11 +10,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::time::Instant;
 
-use cupride_core::Editor;
 use cupride_core::layout::{Bounds, Divider, PanelId, PanelKind};
+use cupride_core::{DocumentId, Editor};
 use cupride_render::{Layer, Quad, Rect, TextSystem};
 
 use crate::editor_view::{EditorView, Pointer, ViewSettings};
+use crate::label::Label;
 use crate::style::Style;
 use crate::theme::Theme;
 
@@ -206,6 +207,17 @@ impl ViewRegistry {
     }
 }
 
+/// Onglet d'une zone, placé dans sa barre.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tab {
+    /// Panneau de l'onglet.
+    pub panel: PanelId,
+    /// Place de l'onglet (il peut dépasser de la barre : il est alors découpé).
+    pub bounds: Rect,
+    /// Onglet d'aperçu.
+    pub preview: bool,
+}
+
 /// Zone d'onglets, placée dans la fenêtre.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Zone {
@@ -215,14 +227,40 @@ pub struct Zone {
     pub active: Option<PanelId>,
     /// Place de la zone.
     pub bounds: Rect,
+    /// Barre des onglets, en haut de la zone.
+    pub tab_bar: Rect,
+    /// Onglets, de gauche à droite.
+    pub tabs: Vec<Tab>,
     /// Place du contenu du panneau affiché.
     pub content: Rect,
+}
+
+/// Titre de l'onglet du panneau `panel` : nom du document (● s'il est modifié), ou nom du type
+/// de panneau.
+pub fn panel_title(editor: &Editor, panel: PanelId) -> String {
+    if let Some(document) = editor
+        .panel_document(panel)
+        .and_then(|id| editor.document(id))
+    {
+        let modified = if document.is_modified() { " ●" } else { "" };
+        return format!("{}{modified}", document.display_name());
+    }
+    match editor.workspace().panel(panel).map(|p| p.kind().as_str()) {
+        Some(PanelKind::EXPLORER) => "Explorateur".to_owned(),
+        Some(kind) => kind.to_owned(),
+        None => String::new(),
+    }
 }
 
 /// Vues de tous les panneaux, et disposition des zones dans la fenêtre.
 pub struct PanelViews {
     registry: ViewRegistry,
     views: HashMap<PanelId, Box<dyn PanelView>>,
+    /// Document affiché par chaque vue à sa création : un panneau qui change de document (onglet
+    /// d'aperçu) reçoit une vue neuve.
+    documents: HashMap<PanelId, Option<DocumentId>>,
+    /// Titres des onglets.
+    labels: HashMap<PanelId, Label>,
     settings: ViewSettings,
     scale: f32,
     area: Rect,
@@ -256,6 +294,8 @@ impl PanelViews {
         Self {
             registry,
             views: HashMap::new(),
+            documents: HashMap::new(),
+            labels: HashMap::new(),
             settings,
             scale,
             area: Rect::default(),
@@ -294,6 +334,11 @@ impl PanelViews {
         self.settings.style(self.scale)
     }
 
+    /// Hauteur de la barre des onglets.
+    pub fn tab_bar_height(style: &Style) -> f32 {
+        style.line_height + 2.0 * style.px(5.0)
+    }
+
     /// Épaisseur des séparations entre les zones.
     pub fn gap(&self) -> f32 {
         self.style().px(1.0).max(1.0)
@@ -304,49 +349,111 @@ impl PanelViews {
         self.area
     }
 
-    /// Crée les vues des nouveaux panneaux, oublie celles des panneaux fermés, et place chaque
-    /// zone dans `area`.
-    pub fn layout(&mut self, editor: &Editor, area: Rect) {
+    /// Crée les vues des nouveaux panneaux, oublie celles des panneaux fermés, met en forme les
+    /// titres des onglets, et place chaque zone dans `area`.
+    pub fn layout(&mut self, text: &mut TextSystem, editor: &Editor, area: Rect) {
         let workspace = editor.workspace();
-        self.views
-            .retain(|panel, _| workspace.panel(*panel).is_some());
+        let exists = |panel: &PanelId| workspace.panel(*panel).is_some();
+        self.views.retain(|panel, _| exists(panel));
+        self.labels.retain(|panel, _| exists(panel));
+        self.documents.retain(|panel, _| exists(panel));
         for panel in workspace.panels() {
-            if self.views.contains_key(&panel.id()) {
+            let id = panel.id();
+            let document = editor.panel_document(id);
+            if self.views.contains_key(&id) && self.documents.get(&id) == Some(&document) {
                 continue;
             }
+            self.documents.insert(id, document);
             match self
                 .registry
-                .create(panel.kind(), panel.id(), &self.settings, self.scale)
+                .create(panel.kind(), id, &self.settings, self.scale)
             {
                 Some(view) => {
-                    self.views.insert(panel.id(), view);
+                    self.views.insert(id, view);
                 }
-                None => tracing::warn!(
-                    panneau = %panel.id(),
-                    type_ = %panel.kind(),
-                    "type de panneau sans vue"
-                ),
+                None => {
+                    self.views.remove(&id);
+                    tracing::warn!(panneau = %id, type_ = %panel.kind(), "type de panneau sans vue");
+                }
             }
         }
         self.area = area;
+        let style = self.style();
         let gap = self.gap();
+        let bar_height = Self::tab_bar_height(&style);
+        let padding = style.px(12.0);
         let tree = workspace.tree();
-        self.zones = tree
-            .areas(bounds(area), gap)
-            .into_iter()
-            .map(|a| Zone {
-                panels: a.group.panels().to_vec(),
-                active: a.group.active(),
-                bounds: rect(a.bounds),
-                content: rect(a.bounds),
-            })
-            .collect();
+        let mut zones = Vec::new();
+        for group_area in tree.areas(bounds(area), gap) {
+            let group = group_area.group;
+            let zone = rect(group_area.bounds);
+            let bar_height = bar_height.min(zone.height);
+            let tab_bar = Rect::new(zone.x, zone.y, zone.width, bar_height);
+            let content = Rect::new(
+                zone.x,
+                zone.y + bar_height,
+                zone.width,
+                zone.height - bar_height,
+            );
+            let mut tabs = Vec::with_capacity(group.len());
+            let mut x = zone.x;
+            for &panel in group.panels() {
+                let preview = group.preview() == Some(panel);
+                let label = self.labels.entry(panel).or_default();
+                label.set_italic(
+                    text,
+                    &panel_title(editor, panel),
+                    preview,
+                    &style.family,
+                    style.metrics(),
+                );
+                let width = (label.width() + 2.0 * padding).round();
+                tabs.push(Tab {
+                    panel,
+                    bounds: Rect::new(x, tab_bar.y, width, bar_height),
+                    preview,
+                });
+                x += width;
+            }
+            // Trop d'onglets : la barre défile pour montrer l'onglet affiché.
+            if let Some(active) = tabs.iter().find(|t| Some(t.panel) == group.active()) {
+                let overflow = active.bounds.right() - tab_bar.right();
+                if overflow > 0.0 {
+                    for tab in &mut tabs {
+                        tab.bounds.x -= overflow;
+                    }
+                }
+            }
+            zones.push(Zone {
+                panels: group.panels().to_vec(),
+                active: group.active(),
+                bounds: zone,
+                tab_bar,
+                tabs,
+                content,
+            });
+        }
+        self.zones = zones;
         self.dividers = tree.dividers(bounds(area), gap);
         for zone in &self.zones {
             if let Some(view) = zone.active.and_then(|p| self.views.get_mut(&p)) {
                 view.set_bounds(zone.content);
             }
         }
+    }
+
+    /// Onglet sous le point (`x`, `y`).
+    pub fn tab_at(&self, x: f32, y: f32) -> Option<PanelId> {
+        let zone = self.zones.iter().find(|z| z.tab_bar.contains(x, y))?;
+        zone.tabs
+            .iter()
+            .find(|t| t.bounds.contains(x, y))
+            .map(|t| t.panel)
+    }
+
+    /// Zone dont la barre d'onglets est sous le point (`x`, `y`).
+    pub fn tab_bar_at(&self, x: f32, y: f32) -> Option<&Zone> {
+        self.zones.iter().find(|z| z.tab_bar.contains(x, y))
     }
 
     /// Zones, à la dernière disposition.
@@ -461,10 +568,55 @@ impl PanelViews {
                 None => layer.quads.push(Quad::new(zone.content, theme.panel)),
             }
         }
+        for zone in &self.zones {
+            self.draw_tabs(layer, zone, theme);
+        }
         for divider in &self.dividers {
             layer
                 .quads
                 .push(Quad::new(rect(divider.bounds), theme.border));
+        }
+    }
+
+    /// Barre d'onglets d'une zone : onglet affiché sur le fond du contenu, les autres sur celui
+    /// des panneaux, séparés par un trait ; aperçu en gris et en italique.
+    fn draw_tabs<'a>(&'a self, layer: &mut Layer<'a>, zone: &Zone, theme: &Theme) {
+        let style = self.style();
+        let line = style.px(1.0).max(1.0);
+        let bar = zone.tab_bar;
+        if bar.height <= 0.0 {
+            return;
+        }
+        layer.quads.push(Quad::new(bar, theme.panel));
+        layer.quads.push(Quad::new(
+            Rect::new(bar.x, bar.bottom() - line, bar.width, line),
+            theme.border,
+        ));
+        let padding = style.px(12.0);
+        let top = bar.y + ((bar.height - style.line_height) / 2.0).round();
+        for tab in &zone.tabs {
+            let clip = tab.bounds.intersect(&bar);
+            if clip.width <= 0.0 {
+                continue;
+            }
+            let shown = zone.active == Some(tab.panel);
+            if shown {
+                layer.quads.push(Quad::new(clip, theme.background));
+            }
+            let separator = Rect::new(tab.bounds.right() - line, bar.y, line, bar.height);
+            layer
+                .quads
+                .push(Quad::new(separator.intersect(&bar), theme.border));
+            let color = if tab.preview {
+                theme.muted
+            } else {
+                theme.foreground
+            };
+            if let Some(label) = self.labels.get(&tab.panel) {
+                layer
+                    .texts
+                    .extend(label.item(tab.bounds.x + padding, top, clip, color));
+            }
         }
     }
 }
@@ -501,13 +653,20 @@ mod tests {
         let right = editor
             .open_editor_panel(doc, NewPanel::Split(Direction::Right))
             .unwrap();
+        let mut text = TextSystem::new();
         let mut views = PanelViews::new(ViewRegistry::default(), ViewSettings::default(), 1.0);
-        views.layout(&editor, Rect::new(0.0, 0.0, 801.0, 600.0));
+        views.layout(&mut text, &editor, Rect::new(0.0, 0.0, 801.0, 600.0));
         assert_eq!(views.zones().len(), 2);
-        assert_eq!(views.editor_view(left).unwrap().bounds().width, 400.0);
+        let bar = PanelViews::tab_bar_height(&views.style());
+        let left_view = views.editor_view(left).unwrap().bounds();
+        assert_eq!(
+            left_view,
+            Rect::new(0.0, bar, 400.0, 600.0 - bar),
+            "sous les onglets"
+        );
         assert_eq!(views.editor_view(right).unwrap().bounds().x, 401.0);
         assert_eq!(views.dividers().len(), 1);
-        assert_eq!(views.panel_at(600.0, 10.0), Some(right));
+        assert_eq!(views.panel_at(600.0, 100.0), Some(right));
         // Chaque vue affiche les sélections de son panneau.
         editor
             .active_document_mut()
@@ -520,8 +679,60 @@ mod tests {
         );
         // Panneau fermé : sa vue est oubliée.
         editor.close_panel(right, false).unwrap();
-        views.layout(&editor, Rect::new(0.0, 0.0, 800.0, 600.0));
+        views.layout(&mut text, &editor, Rect::new(0.0, 0.0, 800.0, 600.0));
         assert!(views.view(right).is_none());
         assert_eq!(views.editor_view(left).unwrap().bounds().width, 800.0);
+    }
+
+    #[test]
+    fn onglets() {
+        let mut editor = Editor::new();
+        let mut config = editor.config().clone();
+        config.tabs.preview = true;
+        editor.apply_config(config);
+        let a = editor.new_document();
+        let pa = editor.active_panel().unwrap();
+        editor.execute("edit insert 'x'").unwrap();
+        let b = editor.insert_document(cupride_core::Document::from_text(""));
+        let pb = editor.active_panel().unwrap();
+        editor
+            .workspace_mut()
+            .tree_mut()
+            .set_preview(pb, true)
+            .unwrap();
+        assert_eq!(panel_title(&editor, pa), "sans titre ●", "modifié");
+        let mut text = TextSystem::new();
+        let mut views = PanelViews::new(ViewRegistry::default(), ViewSettings::default(), 1.0);
+        views.layout(&mut text, &editor, Rect::new(0.0, 0.0, 800.0, 600.0));
+        let zone = &views.zones()[0];
+        assert_eq!(zone.tabs.len(), 2);
+        assert!(zone.tabs[1].preview);
+        assert_eq!(zone.tabs[0].bounds.right(), zone.tabs[1].bounds.x);
+        let tab = zone.tabs[0].bounds;
+        let (x, y) = (tab.x + tab.width / 2.0, tab.y + tab.height / 2.0);
+        assert_eq!(views.tab_at(x, y), Some(pa));
+        assert_eq!(views.tab_at(x, 300.0), None, "hors de la barre");
+
+        // L'aperçu suivant remplace l'onglet d'aperçu (et sa vue).
+        let c = editor.create_document();
+        editor.show_document_preview(c);
+        assert_eq!(editor.panel_document(pb), Some(c), "aperçu remplacé");
+        assert!(editor.document(b).is_none());
+        views.layout(&mut text, &editor, Rect::new(0.0, 0.0, 800.0, 600.0));
+        assert!(editor.document(a).is_some());
+
+        // Beaucoup d'onglets : l'onglet affiché reste visible.
+        for _ in 0..30 {
+            editor.new_document();
+        }
+        views.layout(&mut text, &editor, Rect::new(0.0, 0.0, 800.0, 600.0));
+        let zone = &views.zones()[0];
+        let shown = zone
+            .tabs
+            .iter()
+            .find(|t| Some(t.panel) == zone.active)
+            .unwrap();
+        assert!(shown.bounds.right() <= zone.tab_bar.right());
+        assert!(shown.bounds.x >= zone.tab_bar.x);
     }
 }

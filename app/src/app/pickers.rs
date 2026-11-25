@@ -195,9 +195,10 @@ impl App {
                     return;
                 };
                 let path = root.join(&item.label);
-                let result = self
-                    .editor
-                    .run("file open", &[path.to_string_lossy().into_owned()]);
+                let result = self.editor.run(
+                    "file open",
+                    &["--preview".to_owned(), path.to_string_lossy().into_owned()],
+                );
                 self.after_command(result, Instant::now());
             }
         }

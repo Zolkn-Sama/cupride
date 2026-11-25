@@ -265,3 +265,58 @@ fn palette() {
     let pixels = target.read_rgba(&gpu).expect("relecture de l'image");
     save_png("palette", (width, height), &pixels);
 }
+
+/// Fenêtre divisée : deux zones sur le même document (curseurs propres à chacune), des onglets,
+/// un onglet modifié et un onglet d'aperçu.
+#[test]
+fn zones_et_onglets() {
+    use cupride_core::NewPanel;
+    use cupride_core::layout::Direction;
+    use cupride_render::Frame;
+    use cupride_ui::{PanelViews, ViewRegistry};
+
+    let gpu = match Gpu::headless() {
+        Ok(gpu) => gpu,
+        Err(error) => {
+            eprintln!("test ignoré, pas de GPU : {error}");
+            return;
+        }
+    };
+    let (width, height) = (900_u32, 300_u32);
+    let target = OffscreenTarget::new(&gpu, width, height);
+    let mut renderer = Renderer::new(&gpu, OFFSCREEN_FORMAT);
+    let mut text = TextSystem::new();
+    let mut editor = Editor::new();
+    let mut config = editor.config().clone();
+    config.tabs.preview = true;
+    editor.apply_config(config);
+    let doc = editor.insert_document(Document::from_text(
+        "fn main() {\n    let message = \"bonjour\";\n    println!(\"{message}\");\n}\n",
+    ));
+    editor.execute("edit move doc-end").unwrap();
+    editor
+        .open_editor_panel(doc, NewPanel::Split(Direction::Right))
+        .unwrap();
+    editor.execute("edit insert '// modifié'").unwrap();
+    let other = editor.create_document();
+    editor.show_document_preview(other);
+    editor.show_document(doc);
+
+    let mut views = PanelViews::new(ViewRegistry::default(), ViewSettings::default(), 1.0);
+    let theme = Theme::default();
+    views.layout(
+        &mut text,
+        &editor,
+        Rect::new(0.0, 0.0, width as f32, height as f32),
+    );
+    views.prepare(&mut text, &editor, &theme, true, true);
+    let mut frame = Frame::new(theme.background);
+    views.draw(frame.base(), &editor, &theme, true, true);
+    renderer
+        .render(&gpu, &mut text, &target.view, target.size(), &frame)
+        .expect("rendu");
+    let pixels = target.read_rgba(&gpu).expect("relecture de l'image");
+    save_png("zones_et_onglets", (width, height), &pixels);
+    assert_eq!(views.zones().len(), 2);
+    assert_eq!(views.zones()[1].tabs.len(), 2);
+}

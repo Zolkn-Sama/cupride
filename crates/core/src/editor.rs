@@ -123,8 +123,23 @@ impl Editor {
     /// fichier est déjà ouvert (même sous un autre chemin menant au même fichier), le document
     /// existant est réutilisé.
     pub fn open(&mut self, path: impl AsRef<Path>) -> Result<DocumentId, DocumentError> {
-        let path = normalize(path.as_ref()).map_err(|source| DocumentError::Io {
-            path: path.as_ref().to_owned(),
+        let id = self.load(path.as_ref())?;
+        self.show_document(id);
+        Ok(id)
+    }
+
+    /// Comme [`Editor::open`], dans l'onglet d'aperçu de la zone active si l'option
+    /// `[tabs] preview` est activée (voir [`Editor::show_document_preview`]).
+    pub fn open_preview(&mut self, path: impl AsRef<Path>) -> Result<DocumentId, DocumentError> {
+        let id = self.load(path.as_ref())?;
+        self.show_document_preview(id);
+        Ok(id)
+    }
+
+    /// Document du fichier `path` : celui déjà ouvert, ou un nouveau, sans l'afficher.
+    pub(crate) fn load(&mut self, path: &Path) -> Result<DocumentId, DocumentError> {
+        let path = normalize(path).map_err(|source| DocumentError::Io {
+            path: path.to_owned(),
             source,
         })?;
         let id = match self.find_by_path(&path) {
@@ -135,7 +150,6 @@ impl Editor {
                 self.documents.insert(document)
             }
         };
-        self.show_document(id);
         Ok(id)
     }
 
@@ -146,8 +160,9 @@ impl Editor {
         id
     }
 
-    /// Crée un document vide sans fichier, sans l'afficher.
-    pub(crate) fn create_document(&mut self) -> DocumentId {
+    /// Crée un document vide sans fichier, sans l'afficher (le montrer ensuite avec
+    /// [`Editor::show_document`] ou dans un panneau choisi).
+    pub fn create_document(&mut self) -> DocumentId {
         let mut document = Document::new();
         document.set_line_ending(self.config.editor.line_ending.for_new_document());
         self.configure(&mut document);
@@ -305,6 +320,7 @@ impl Editor {
     /// modifiés, enregistrés, fermés, puis changement de document actif. Appelé automatiquement
     /// après chaque commande et chaque ouverture, fermeture ou activation.
     pub fn flush_events(&mut self) {
+        self.keep_modified_previews();
         let mut events = Vec::new();
         for (id, document) in &self.documents {
             let now = (document.revision(), document.save_count());

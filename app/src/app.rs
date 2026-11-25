@@ -437,6 +437,9 @@ impl App {
         }
         // Un clic dans l'éditeur ferme les couches et lui rend le focus.
         self.close_overlays();
+        if self.tab_pressed(x, y) {
+            return;
+        }
         let panel = self.editor.active_panel();
         let (Some(state), Some(document)) = (&self.window, self.editor.active_document_mut())
         else {
@@ -465,6 +468,46 @@ impl App {
         document.set_selections(selections);
         self.blink.reset(now);
         self.request_redraw();
+    }
+
+    /// Clic dans une barre d'onglets : l'onglet cliqué est affiché et prend le focus ; un double
+    /// clic garde un onglet d'aperçu. Renvoie vrai si le clic était dans une barre d'onglets.
+    fn tab_pressed(&mut self, x: f32, y: f32) -> bool {
+        let Some(state) = &self.window else {
+            return false;
+        };
+        let Some(zone) = state.views.tab_bar_at(x, y) else {
+            return false;
+        };
+        let panel = state.views.tab_at(x, y).or(zone.active);
+        let clicks = self
+            .clicks
+            .click(Instant::now(), x, y, state.window.scale_factor() as f32);
+        if let Some(panel) = panel {
+            self.editor.focus_panel(panel);
+            if clicks >= 2 {
+                let _ = self
+                    .editor
+                    .workspace_mut()
+                    .tree_mut()
+                    .set_preview(panel, false);
+            }
+        }
+        self.after_any_command(Instant::now());
+        true
+    }
+
+    /// Clic du milieu sur un onglet : le ferme, comme `panel close`.
+    fn close_tab_at(&mut self, x: f32, y: f32) -> bool {
+        let Some(panel) = self.window.as_ref().and_then(|s| s.views.tab_at(x, y)) else {
+            return false;
+        };
+        let result = self
+            .editor
+            .close_panel(panel, false)
+            .map(|()| CommandOutput::None);
+        self.after_command(result, Instant::now());
+        true
     }
 
     /// Sélection primaire (X11, Wayland, si activée) : le texte sélectionné y est copié.
@@ -500,6 +543,10 @@ impl App {
     /// Clic du milieu (sélection primaire activée) : place le curseur sous la souris et y colle
     /// la sélection primaire.
     fn paste_primary(&mut self) {
+        let (x, y) = self.mouse_position;
+        if self.close_tab_at(x, y) {
+            return;
+        }
         if !self.editor.config().editor.primary_selection {
             return;
         }
@@ -700,7 +747,7 @@ impl App {
                 cupride_ui::layout::Size::Fixed(status_height),
             ],
         );
-        state.views.layout(&self.editor, parts[0]);
+        state.views.layout(&mut self.text, &self.editor, parts[0]);
         let pending_keys: Vec<String> = self
             .resolver
             .pending()

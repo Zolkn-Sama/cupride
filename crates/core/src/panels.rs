@@ -55,9 +55,21 @@ impl Editor {
     }
 
     /// Affiche le document `document` dans la zone active et lui donne le focus : l'onglet qui
-    /// l'affiche déjà dans cette zone, sinon un nouvel onglet (à la place de l'onglet d'aperçu
-    /// s'il y en a un). Renvoie le panneau, ou `None` si le document n'existe pas.
+    /// l'affiche déjà dans cette zone, sinon un nouvel onglet. Renvoie le panneau, ou `None` si
+    /// le document n'existe pas.
     pub fn show_document(&mut self, document: DocumentId) -> Option<PanelId> {
+        self.show_document_as(document, false)
+    }
+
+    /// Comme [`Editor::show_document`], en aperçu si l'option `[tabs] preview` est activée : le
+    /// document remplace l'onglet d'aperçu de la zone active, ou s'ouvre dans un nouvel onglet
+    /// d'aperçu. Le document que l'aperçu affichait est fermé s'il n'est affiché nulle part
+    /// ailleurs.
+    pub fn show_document_preview(&mut self, document: DocumentId) -> Option<PanelId> {
+        self.show_document_as(document, self.config().tabs.preview)
+    }
+
+    fn show_document_as(&mut self, document: DocumentId, preview: bool) -> Option<PanelId> {
         self.document(document)?;
         let active = self.active_panel();
         let group = active.and_then(|p| self.workspace().tree().group_of(p));
@@ -67,12 +79,66 @@ impl Editor {
                 .copied()
                 .find(|p| self.panel_document(*p) == Some(document))
         });
-        let panel = match existing {
-            Some(panel) => panel,
-            None => self.place_editor(document, NewPanel::Tab),
+        let preview_panel = group.and_then(|g| g.preview());
+        let panel = match (existing, preview_panel) {
+            (Some(panel), _) => {
+                // Ouvert normalement, un onglet d'aperçu est gardé.
+                if !preview {
+                    let _ = self.workspace_mut().tree_mut().set_preview(panel, false);
+                }
+                panel
+            }
+            (None, Some(panel)) if preview => {
+                self.rebind(panel, document);
+                panel
+            }
+            (None, _) => {
+                let panel = self.place_editor(document, NewPanel::Tab);
+                if preview {
+                    let _ = self.workspace_mut().tree_mut().set_preview(panel, true);
+                }
+                panel
+            }
         };
         self.focus_panel(panel);
         Some(panel)
+    }
+
+    /// Le panneau éditeur `panel` affiche désormais `document` ; l'ancien document est fermé
+    /// s'il n'est plus affiché nulle part et n'a pas de modifications.
+    fn rebind(&mut self, panel: PanelId, document: DocumentId) {
+        let Some(old) = self.panel_documents.insert(panel, document) else {
+            return;
+        };
+        if let Some(previous) = self.document_mut(old) {
+            previous.remove_view(panel);
+        }
+        if old != document
+            && self.panels_showing(old).is_empty()
+            && self.document(old).is_some_and(|d| !d.is_modified())
+        {
+            self.remove_document(old);
+        }
+    }
+
+    /// Garde les onglets d'aperçu dont le document a été modifié.
+    pub(crate) fn keep_modified_previews(&mut self) {
+        let previews: Vec<PanelId> = self
+            .workspace()
+            .tree()
+            .groups()
+            .iter()
+            .filter_map(|g| g.preview())
+            .collect();
+        for panel in previews {
+            let modified = self
+                .panel_document(panel)
+                .and_then(|doc| self.document(doc))
+                .is_some_and(|d| d.is_modified());
+            if modified {
+                let _ = self.workspace_mut().tree_mut().set_preview(panel, false);
+            }
+        }
     }
 
     /// Ouvre un nouveau panneau éditeur sur `document`, placé selon `place`, et lui donne le
@@ -282,6 +348,42 @@ mod tests {
         assert_eq!(editor.workspace().tree().panels(), vec![pb]);
         assert_eq!(editor.active_id(), Some(b));
         assert!(editor.workspace().is_valid());
+    }
+
+    #[test]
+    fn onglet_d_apercu() {
+        let mut editor = Editor::new();
+        let mut config = editor.config().clone();
+        config.tabs.preview = true;
+        editor.apply_config(config);
+        let first = editor.new_document();
+        let a = editor.create_document();
+        let b = editor.create_document();
+        let preview = editor.show_document_preview(a).unwrap();
+        let group = |editor: &Editor| editor.workspace().tree().groups()[0].clone();
+        assert_eq!(group(&editor).preview(), Some(preview));
+        // L'aperçu suivant remplace le premier, qui est fermé.
+        assert_eq!(editor.show_document_preview(b), Some(preview));
+        assert_eq!(editor.panel_document(preview), Some(b));
+        assert!(editor.document(a).is_none());
+        assert_eq!(group(&editor).len(), 2);
+        // Modifié, l'onglet est gardé : l'aperçu suivant ouvre un nouvel onglet.
+        editor.execute("edit insert 'x'").unwrap();
+        assert_eq!(group(&editor).preview(), None);
+        let c = editor.create_document();
+        let next = editor.show_document_preview(c).unwrap();
+        assert_ne!(next, preview);
+        assert_eq!(group(&editor).len(), 3);
+        // Ouvert normalement, l'aperçu est gardé.
+        editor.show_document(c);
+        assert_eq!(group(&editor).preview(), None);
+        assert!(editor.document(first).is_some());
+
+        // Option désactivée : jamais d'aperçu.
+        let mut editor = Editor::new();
+        let doc = editor.new_document();
+        editor.show_document_preview(doc);
+        assert_eq!(group(&editor).preview(), None);
     }
 
     #[test]
