@@ -24,7 +24,7 @@
 //! Cette crate n'a aucune dépendance interne.
 
 use std::io::{self, BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::thread::JoinHandle;
 
 use interprocess::local_socket::prelude::*;
@@ -179,7 +179,7 @@ impl Endpoint {
 
     /// Chemin du socket (Unix).
     #[cfg(unix)]
-    pub fn path(&self) -> &Path {
+    pub fn path(&self) -> &std::path::Path {
         &self.path
     }
 }
@@ -398,6 +398,7 @@ fn read_request(stream: Stream) -> Option<Incoming> {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
     use std::sync::mpsc;
 
     fn endpoint(dir: &Path) -> Endpoint {
