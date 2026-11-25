@@ -23,6 +23,8 @@ pub struct LanguageConfig {
     pub(crate) injections: Option<Query>,
     /// Requête des fonctions (`@function`), pour aller de l'une à l'autre.
     pub(crate) functions: Option<Query>,
+    /// Requête des zones repliables (`@fold`).
+    pub(crate) folds: Option<Query>,
 }
 
 impl std::fmt::Debug for LanguageConfig {
@@ -103,23 +105,23 @@ impl LanguageConfig {
         highlights: &[&str],
         injections: Option<&str>,
         functions: &[&str],
+        folds: &[&str],
     ) -> Self {
         let highlights = query(name, "coloration", &language, &highlights.concat());
         let paints = highlights.as_ref().map_or_else(Vec::new, |q| {
             q.capture_names().iter().map(|n| Paint::of(n)).collect()
         });
         let injections = injections.and_then(|source| query(name, "injections", &language, source));
-        let functions = (!functions.is_empty())
-            .then(|| {
-                let kinds: String = functions.iter().map(|k| format!("({k}) ")).collect();
-                query(
-                    name,
-                    "fonctions",
-                    &language,
-                    &format!("[{kinds}] @function"),
-                )
-            })
-            .flatten();
+        let kinds_query = |kinds: &[&str], capture: &str, kind: &str| {
+            (!kinds.is_empty())
+                .then(|| {
+                    let kinds: String = kinds.iter().map(|k| format!("({k}) ")).collect();
+                    query(name, kind, &language, &format!("[{kinds}] @{capture}"))
+                })
+                .flatten()
+        };
+        let functions = kinds_query(functions, "function", "fonctions");
+        let folds = kinds_query(folds, "fold", "repliage");
         Self {
             name,
             language,
@@ -127,6 +129,7 @@ impl LanguageConfig {
             paints,
             injections,
             functions,
+            folds,
         }
     }
 }
@@ -171,6 +174,23 @@ fn rust() -> LanguageConfig {
             "function_signature_item",
             "macro_definition",
         ],
+        &[
+            "block",
+            "declaration_list",
+            "field_declaration_list",
+            "ordered_field_declaration_list",
+            "enum_variant_list",
+            "field_initializer_list",
+            "match_block",
+            "use_list",
+            "token_tree",
+            "arguments",
+            "parameters",
+            "array_expression",
+            "tuple_expression",
+            "block_comment",
+            "macro_definition",
+        ],
     )
 }
 
@@ -181,6 +201,18 @@ fn c() -> LanguageConfig {
         &[C_HIGHLIGHTS, tree_sitter_c::HIGHLIGHT_QUERY],
         None,
         &["function_definition"],
+        &[
+            "compound_statement",
+            "field_declaration_list",
+            "enumerator_list",
+            "initializer_list",
+            "parameter_list",
+            "argument_list",
+            "comment",
+            "preproc_if",
+            "preproc_ifdef",
+            "preproc_function_def",
+        ],
     )
 }
 
@@ -191,6 +223,14 @@ fn markdown() -> LanguageConfig {
         &[tree_sitter_md::HIGHLIGHT_QUERY_BLOCK],
         Some(tree_sitter_md::INJECTION_QUERY_BLOCK),
         &["atx_heading", "setext_heading"],
+        &[
+            "section",
+            "fenced_code_block",
+            "indented_code_block",
+            "list",
+            "block_quote",
+            "html_block",
+        ],
     )
 }
 
@@ -200,6 +240,7 @@ fn markdown_inline() -> LanguageConfig {
         tree_sitter_md::INLINE_LANGUAGE.into(),
         &[tree_sitter_md::HIGHLIGHT_QUERY_INLINE],
         Some(tree_sitter_md::INJECTION_QUERY_INLINE),
+        &[],
         &[],
     )
 }
@@ -245,6 +286,7 @@ mod tests {
         assert!(config_for("Markdown").unwrap().injections.is_some());
         for name in ["Rust", "C", "Markdown"] {
             assert!(config_for(name).unwrap().functions.is_some(), "{name}");
+            assert!(config_for(name).unwrap().folds.is_some(), "{name}");
         }
     }
 }

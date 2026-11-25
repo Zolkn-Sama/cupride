@@ -4,6 +4,7 @@ mod config;
 mod edit;
 mod explorer;
 mod file;
+mod folds;
 mod keys;
 mod layout;
 mod lines;
@@ -47,6 +48,7 @@ pub(crate) fn register_all(registry: &mut CommandRegistry) -> Result<(), Command
     syntax::register(registry)?;
     structure::register(registry)?;
     pairs::register(registry)?;
+    folds::register(registry)?;
     Ok(())
 }
 

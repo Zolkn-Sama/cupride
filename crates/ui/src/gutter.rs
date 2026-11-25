@@ -68,21 +68,22 @@ impl Gutter {
         self.numbers.clear();
     }
 
-    /// Met en forme les numéros des lignes `visible`.
+    /// Met en forme les numéros des lignes `visible` (triées).
     pub(crate) fn prepare(
         &mut self,
         text: &mut TextSystem,
         metrics: Metrics,
         attrs: &Attrs<'_>,
-        visible: std::ops::Range<usize>,
+        visible: &[usize],
         cursor_line: usize,
         mode: LineNumbers,
     ) {
         if self.digit_width == 0.0 {
             self.digit_width = shape(text, metrics, attrs, "0").1;
         }
-        self.numbers.retain(|line, _| visible.contains(line));
-        for line in visible {
+        self.numbers
+            .retain(|line, _| visible.binary_search(line).is_ok());
+        for &line in visible {
             let Some(label) = label(line, cursor_line, mode) else {
                 self.numbers.remove(&line);
                 continue;
