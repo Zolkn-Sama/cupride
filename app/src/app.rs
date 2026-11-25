@@ -1599,6 +1599,9 @@ impl ApplicationHandler<AppEvent> for App {
                 if changed.is_empty() {
                     return;
                 }
+                // Documents dont le fichier a changé : rechargés, ou conflit signalé.
+                self.editor.check_disk(Some(&changed));
+                self.after_any_command(Instant::now());
                 for state in self.windows.values_mut() {
                     for view in state.views.views_mut() {
                         view.files_changed(&changed);
@@ -1695,6 +1698,9 @@ impl ApplicationHandler<AppEvent> for App {
             } => self.paste_primary(),
             WindowEvent::Focused(true) => {
                 self.focused = true;
+                // Au retour dans l'IDE, les fichiers ont pu changer sans que rien ne le signale.
+                self.editor.check_disk(None);
+                self.after_any_command(Instant::now());
                 self.enter_window(id);
                 self.blink.reset(Instant::now());
                 self.redraw_all();
@@ -1733,12 +1739,19 @@ impl ApplicationHandler<AppEvent> for App {
             self.refresh_monitors(event_loop, false);
             self.sync_windows(event_loop);
         }
-        // Dossiers affichés par les explorateurs de toutes les fenêtres : surveillés.
-        let watched: BTreeSet<std::path::PathBuf> = self
+        // Dossiers affichés par les explorateurs de toutes les fenêtres, et dossiers des
+        // documents ouverts (fichiers modifiés hors de l'IDE) : surveillés.
+        let mut watched: BTreeSet<std::path::PathBuf> = self
             .windows
             .values()
             .flat_map(|s| s.views.watched_dirs())
             .collect();
+        watched.extend(
+            self.editor
+                .documents()
+                .filter_map(|(_, d)| d.path()?.parent().map(std::path::Path::to_path_buf))
+                .filter(|dir| dir.is_dir()),
+        );
         self.disk.sync(watched);
         // Prochain réveil : fin du délai de confirmation de fermeture, changement d'état du
         // curseur ou expiration d'une notification. Sans rien de tout cela, la boucle dort

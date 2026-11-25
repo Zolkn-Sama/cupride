@@ -19,6 +19,7 @@
 pub mod clipboard;
 pub mod command;
 pub mod config;
+pub mod disk;
 mod document;
 mod editor;
 pub mod events;
@@ -36,7 +37,7 @@ mod windows;
 
 pub use cupride_layout as layout;
 pub use cupride_text as text;
-pub use document::{Document, DocumentError, LineEnding};
+pub use document::{DiskState, Document, DocumentError, LineEnding};
 pub use editor::{DocumentId, Editor, TrashFn};
 pub use panels::{LayoutMetrics, NewPanel};
 pub use ui_request::UiRequest;
