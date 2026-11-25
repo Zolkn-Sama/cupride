@@ -268,7 +268,7 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
                 direction,
                 extend,
                 page,
-                hidden: &hidden,
+                hidden,
             };
             let selections = move_selections(document.buffer(), document.selections(), &moved)?;
             document.set_selections(selections);
@@ -336,7 +336,7 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
                 let (_, document) = active(editor)?;
                 let head = document.selections().primary().head;
                 let hidden = document.hidden_lines();
-                let target = vertical(document.buffer(), head, direction == "up", 1, &hidden)?;
+                let target = vertical(document.buffer(), head, direction == "up", 1, hidden)?;
                 if target != head {
                     let mut selections = document.selections().clone();
                     selections.push(Selection::cursor(target));
