@@ -22,5 +22,6 @@ mod syntax;
 pub use edits::{MAX_INCREMENTAL_EDITS, input_edits};
 pub use highlight::{Highlight, MAX_HIGHLIGHT_BYTES};
 pub use languages::{LanguageConfig, config_for};
+pub use structure::partner;
 pub use syntax::{SYNC_BUDGET, Syntax, Waker};
 pub use tree_sitter::{Node, Tree};

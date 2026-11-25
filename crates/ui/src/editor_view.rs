@@ -195,6 +195,8 @@ pub struct EditorView {
     /// Coloration des lignes visibles, gardée tant que le texte, l'arbre et la plage ne changent
     /// pas.
     colored: Option<Colored>,
+    /// Parenthèse à côté du curseur principal et sa correspondante, à surligner.
+    brackets: Option<(usize, usize)>,
 }
 
 /// Coloration syntaxique d'une plage du document.
@@ -241,6 +243,7 @@ impl EditorView {
             column_width: 0.0,
             syntax_colors: Theme::default().syntax,
             colored: None,
+            brackets: None,
         }
     }
 
@@ -572,6 +575,8 @@ impl EditorView {
                 .map_or(buffer.len_bytes(), |r| r.end);
             self.color_visible(document, start..end);
         }
+
+        self.brackets = cupride_core::brackets::bracket_pair(document, head);
 
         let metrics = self.metrics();
         let family = self.settings.font_family.clone();
@@ -946,6 +951,13 @@ impl EditorView {
                 .take_while(|m| m.start <= to)
             {
                 self.push_range(frame, buffer, found.clone(), theme.search_match());
+            }
+        }
+
+        // Parenthèse à côté du curseur principal et sa correspondante.
+        if let Some(pair) = self.brackets {
+            for at in [pair.0, pair.1] {
+                self.push_range(frame, buffer, at..at + 1, theme.bracket_match());
             }
         }
 
@@ -1714,6 +1726,28 @@ mod tests {
         colors.keyword = cupride_render::Color::from_hex("#00ff00").unwrap();
         view.set_syntax_colors(&colors);
         assert_eq!(view.cached_lines(), 0);
+    }
+
+    #[test]
+    fn parentheses_correspondantes_surlignees() {
+        let mut text = TextSystem::new();
+        let mut document = Document::from_text("f(a, (b))\n");
+        document.set_selections(Selections::cursor(1));
+        let mut view = EditorView::new(ViewSettings::default(), 1.0);
+        view.set_bounds(Rect::new(0.0, 0.0, 400.0, 200.0));
+        view.prepare(&mut text, &document);
+        assert_eq!(view.brackets, Some((1, 8)));
+        let theme = Theme::default();
+        let frame = view.frame(&theme, &document, false);
+        let marks = frame.layers[0]
+            .quads
+            .iter()
+            .filter(|q| q.color == theme.bracket_match())
+            .count();
+        assert_eq!(marks, 2);
+        document.set_selections(Selections::cursor(3));
+        view.prepare(&mut text, &document);
+        assert_eq!(view.brackets, None);
     }
 
     #[test]

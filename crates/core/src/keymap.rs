@@ -573,6 +573,7 @@ pub fn default_bindings(platform: Platform) -> Vec<(&'static str, &'static str)>
         ("mod+shift+k", "edit delete-lines"),
         ("mod+j", "edit join-lines"),
         ("mod+/", "edit toggle-comment"),
+        ("mod+shift+\\", "edit goto-bracket"),
         ("ctrl+shift+down", "edit next-function"),
         ("ctrl+shift+up", "edit previous-function"),
         ("mod+shift+n", "window new"),

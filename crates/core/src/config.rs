@@ -46,6 +46,11 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # indent_style = "auto"
 # indent_width = 4
 
+# Paires fermées automatiquement : taper « ( » insère « () », taper « ) » devant un « ) » passe
+# par-dessus, retour arrière entre les deux les efface, et une sélection tapée « ( » est
+# entourée.
+# auto_close = true
+
 [font]
 # Famille de police : "monospace" (police à chasse fixe du système) ou un nom de famille
 # installée, par exemple "JetBrains Mono" ou "Fira Code" (ligatures).
@@ -178,6 +183,8 @@ pub struct EditorConfig {
     pub indent_style: crate::indent::IndentStyle,
     /// Largeur d'un niveau d'indentation.
     pub indent_width: usize,
+    /// Paires (parenthèses, guillemets…) fermées automatiquement.
+    pub auto_close: bool,
 }
 
 impl Default for EditorConfig {
@@ -188,6 +195,7 @@ impl Default for EditorConfig {
             primary_selection: false,
             indent_style: crate::indent::IndentStyle::Auto,
             indent_width: 4,
+            auto_close: true,
         }
     }
 }
@@ -368,6 +376,14 @@ impl Config {
         )
     }
 
+    /// Fermeture automatique des paires pour le langage `language`.
+    pub fn auto_close_for(&self, language: Option<&str>) -> bool {
+        language
+            .and_then(|l| self.languages.get(l))
+            .and_then(|l| l.auto_close)
+            .unwrap_or(self.editor.auto_close)
+    }
+
     /// Indentation réglée pour le langage `language` : celle de `[languages.<Nom>]`, sinon celle
     /// de `[editor]`.
     pub fn indent_for(&self, language: Option<&str>) -> (crate::indent::IndentStyle, usize) {
@@ -443,10 +459,19 @@ pub struct LanguageConfig {
     pub wrap: Option<bool>,
     /// Règles verticales, à la place de `[view] rulers`.
     pub rulers: Option<Vec<usize>>,
+    /// Paires fermées automatiquement, à la place de `[editor] auto_close`.
+    pub auto_close: Option<bool>,
 }
 
 /// Clés connues d'une section `[languages.<Nom>]`.
-const LANGUAGE_KEYS: [&str; 5] = ["indent_style", "indent_width", "comment", "wrap", "rulers"];
+const LANGUAGE_KEYS: [&str; 6] = [
+    "indent_style",
+    "indent_width",
+    "comment",
+    "wrap",
+    "rulers",
+    "auto_close",
+];
 
 /// Configuration complète.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -486,6 +511,7 @@ const KNOWN_KEYS: [(&str, &[&str]); 11] = [
             "primary_selection",
             "indent_style",
             "indent_width",
+            "auto_close",
         ],
     ),
     ("languages", &[]),

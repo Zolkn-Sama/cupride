@@ -491,9 +491,9 @@ impl App {
         }
     }
 
-    /// Insère du texte à chaque curseur.
+    /// Tape du texte à chaque curseur (les paires se ferment toutes seules).
     fn insert(&mut self, text: &str, start: Instant) {
-        let result = self.editor.run("edit insert", &[text.to_owned()]);
+        let result = self.editor.run("edit type", &[text.to_owned()]);
         self.after_command(result, start);
     }
 
