@@ -45,6 +45,9 @@ impl App {
                     self.close_overlays();
                     self.open_quick_open();
                 }
+                UiRequest::PlaceWindow { window, monitor } => {
+                    self.place_window(window, monitor);
+                }
                 UiRequest::Reveal(path) => {
                     for state in self.windows.values_mut() {
                         for view in state.views.views_mut() {

@@ -87,6 +87,8 @@ pub struct Editor {
     /// Demandes à l'interface, pas encore lues.
     ui_requests: Vec<UiRequest>,
     notifications: Notifications,
+    /// Écrans, dans l'ordre de leur numérotation (fournis par l'interface).
+    monitors: Vec<crate::monitors::MonitorInfo>,
     /// Thème en cours, et thèmes disponibles (fournis par l'interface).
     theme: String,
     themes: Vec<String>,
@@ -146,6 +148,7 @@ impl Editor {
             project: None,
             ui_requests: Vec::new(),
             notifications: Notifications::default(),
+            monitors: Vec::new(),
             theme: crate::config::ViewConfig::default().theme,
             themes: Vec::new(),
         }
@@ -492,6 +495,19 @@ impl Editor {
     /// Identifiant du thème en cours.
     pub fn theme(&self) -> &str {
         &self.theme
+    }
+
+    /// Écrans, numérotés à partir de 1 dans l'ordre de la liste (de gauche à droite, puis de
+    /// haut en bas) ; vide tant que l'interface ne les a pas donnés.
+    pub fn monitors(&self) -> &[crate::monitors::MonitorInfo] {
+        &self.monitors
+    }
+
+    /// Donne la liste des écrans (l'interface les énumère) ; elle est triée pour la
+    /// numérotation.
+    pub fn set_monitors(&mut self, mut monitors: Vec<crate::monitors::MonitorInfo>) {
+        crate::monitors::sort_monitors(&mut monitors);
+        self.monitors = monitors;
     }
 
     /// Thèmes disponibles, fournis par l'interface ; vide tant qu'elle ne les a pas donnés.

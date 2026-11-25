@@ -24,6 +24,7 @@ mod editor;
 pub mod events;
 pub mod keymap;
 pub mod language;
+pub mod monitors;
 pub mod notifications;
 mod panels;
 pub mod session;

@@ -18,6 +18,7 @@ use cupride_core::clipboard::ClipboardKind;
 use cupride_core::command::CommandOutput;
 use cupride_core::keymap::{KeyResolver, Resolution};
 use cupride_core::layout::{Axis, Divider, DropTarget, PanelId, WindowId as LayoutWindowId};
+use cupride_core::monitors::{MonitorInfo, Placement};
 use cupride_core::notifications::Level;
 use cupride_core::text::{Selections, TextBuffer};
 use cupride_core::{DocumentId, Editor};
@@ -35,6 +36,7 @@ use winit::event::{
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::ModifiersState;
+use winit::monitor::MonitorHandle;
 use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::window::{CursorIcon, Window, WindowId};
 
@@ -113,6 +115,11 @@ pub(crate) struct App {
     look: u64,
     /// Réglages d'affichage et zoom déjà appliqués.
     applied_look: Option<(ViewSettings, f32)>,
+    /// Écrans, dans l'ordre de leur numérotation, et dernière énumération.
+    monitors: Vec<(MonitorInfo, MonitorHandle)>,
+    monitors_checked: Option<Instant>,
+    /// Écran demandé pour une fenêtre pas encore ouverte.
+    pending_placement: HashMap<LayoutWindowId, usize>,
     close_guard: CloseGuard,
     blink: CursorBlink,
     /// La fenêtre a-t-elle le focus clavier ? Sans focus, les curseurs sont masqués et ne
@@ -246,6 +253,9 @@ impl App {
             started: false,
             look: 0,
             applied_look: None,
+            monitors: Vec::new(),
+            monitors_checked: None,
+            pending_placement: HashMap::new(),
             close_guard: CloseGuard::default(),
             toasts: Toasts::default(),
             fatal: None,
@@ -958,8 +968,16 @@ impl App {
         let mut attributes = Window::default_attributes()
             .with_title(self.title(id))
             .with_inner_size(INITIAL_SIZE);
-        // Une nouvelle fenêtre s'ouvre en décalé de la fenêtre courante, pour ne pas la cacher.
-        if let Some(position) = self
+        if let Some(placement) = self
+            .pending_placement
+            .remove(&id)
+            .and_then(|monitor| self.placement_on(monitor, None))
+        {
+            // Écran demandé (window new --monitor N) : centrée dessus.
+            attributes = attributes
+                .with_position(PhysicalPosition::new(placement.x, placement.y))
+                .with_inner_size(PhysicalSize::new(placement.width, placement.height));
+        } else if let Some(position) = self
             .windows
             .get(&self.current)
             .and_then(|s| {
@@ -1094,6 +1112,79 @@ impl App {
         if opened {
             self.refresh_title();
         }
+    }
+
+    /// Énumère les écrans (au plus une fois par seconde, ou tout de suite avec `force`) et les
+    /// donne au noyau, qui les numérote.
+    fn refresh_monitors(&mut self, event_loop: &ActiveEventLoop, force: bool) {
+        let now = Instant::now();
+        if !force
+            && self
+                .monitors_checked
+                .is_some_and(|t| now.duration_since(t).as_secs() < 1)
+        {
+            return;
+        }
+        self.monitors_checked = Some(now);
+        let primary = event_loop.primary_monitor();
+        let mut monitors: Vec<(MonitorInfo, MonitorHandle)> = event_loop
+            .available_monitors()
+            .map(|handle| {
+                let position = handle.position();
+                let size = handle.size();
+                let info = MonitorInfo {
+                    name: handle.name().unwrap_or_default(),
+                    x: position.x,
+                    y: position.y,
+                    width: size.width,
+                    height: size.height,
+                    scale: handle.scale_factor(),
+                    primary: primary.as_ref() == Some(&handle),
+                };
+                (info, handle)
+            })
+            .collect();
+        let mut infos: Vec<MonitorInfo> = monitors.iter().map(|(i, _)| i.clone()).collect();
+        cupride_core::monitors::sort_monitors(&mut infos);
+        // Même ordre que la numérotation du noyau.
+        monitors.sort_by_key(|(info, _)| infos.iter().position(|i| i == info));
+        if infos.as_slice() != self.editor.monitors() {
+            tracing::debug!(ecrans = infos.len(), "écrans énumérés");
+            self.editor.set_monitors(infos);
+        }
+        self.monitors = monitors;
+    }
+
+    /// Place d'une fenêtre centrée sur l'écran `monitor` (numéro à partir de 1), en gardant la
+    /// taille `size` si elle tient.
+    fn placement_on(&self, monitor: usize, size: Option<PhysicalSize<u32>>) -> Option<Placement> {
+        let (info, _) = self.monitors.get(monitor.checked_sub(1)?)?;
+        let size = size.unwrap_or_else(|| INITIAL_SIZE.to_physical(info.scale));
+        Some(info.center(size.width, size.height))
+    }
+
+    /// Place la fenêtre `window` sur l'écran `monitor` : centrée, réduite pour y tenir. Une
+    /// fenêtre pas encore ouverte le sera directement dessus.
+    fn place_window(&mut self, window: LayoutWindowId, monitor: usize) {
+        let Some(state) = self.windows.get(&window) else {
+            self.pending_placement.insert(window, monitor);
+            return;
+        };
+        let size = state.window.inner_size();
+        let Some(placement) = self.placement_on(monitor, Some(size)) else {
+            let message = format!("écran {monitor} introuvable");
+            tracing::warn!("{message}");
+            self.editor.notify(Level::Warning, message);
+            return;
+        };
+        let os = &state.window;
+        os.set_fullscreen(None);
+        os.set_maximized(false);
+        os.set_outer_position(PhysicalPosition::new(placement.x, placement.y));
+        if (placement.width, placement.height) != (size.width, size.height) {
+            let _ = os.request_inner_size(PhysicalSize::new(placement.width, placement.height));
+        }
+        tracing::info!(fenetre = %window, ecran = monitor, "fenêtre placée");
     }
 
     /// Une fenêtre reçoit le clavier ou la souris : elle devient la fenêtre courante, et la
@@ -1300,6 +1391,7 @@ impl ApplicationHandler<AppEvent> for App {
         if !self.windows.is_empty() {
             return;
         }
+        self.refresh_monitors(event_loop, true);
         self.sync_windows(event_loop);
     }
 
@@ -1407,8 +1499,10 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        // Fenêtres ouvertes ou fermées par les commandes du lot d'événements.
+        // Écrans branchés ou débranchés, puis fenêtres ouvertes ou fermées par les commandes du
+        // lot d'événements.
         if self.started {
+            self.refresh_monitors(event_loop, false);
             self.sync_windows(event_loop);
         }
         // Dossiers affichés par les explorateurs de toutes les fenêtres : surveillés.
