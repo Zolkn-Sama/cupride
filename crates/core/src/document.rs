@@ -198,6 +198,8 @@ pub struct Document {
     language: Option<&'static str>,
     /// Arbre syntaxique, si le langage a une grammaire et que l'analyse est activée.
     syntax: Option<cupride_syntax::Syntax>,
+    /// Réveil de l'application quand une analyse en arrière-plan est finie.
+    syntax_waker: Option<cupride_syntax::Waker>,
 }
 
 impl Default for Document {
@@ -233,6 +235,7 @@ impl Document {
             saves: 0,
             language: None,
             syntax: None,
+            syntax_waker: None,
         }
     }
 
@@ -271,7 +274,9 @@ impl Document {
         let delay = self.history.group_delay();
         let (view, other_views) = (self.view, std::mem::take(&mut self.other_views));
         let (indent, indent_set) = (self.indent, self.indent_set);
+        let waker = self.syntax_waker.take();
         *self = reloaded;
+        self.syntax_waker = waker;
         self.start_syntax();
         self.revision = revision;
         self.saves = saves;
@@ -434,10 +439,29 @@ impl Document {
 
     /// Analyse le document avec la grammaire de son langage, s'il en a une.
     pub fn start_syntax(&mut self) {
+        let waker = self.syntax_waker.clone();
         self.syntax = self
             .language
             .and_then(cupride_syntax::config_for)
-            .map(|config| cupride_syntax::Syntax::new(config, &self.buffer));
+            .map(|config| cupride_syntax::Syntax::new(config, &self.buffer, waker));
+    }
+
+    /// Fonction appelée (depuis un autre thread) quand une analyse en arrière-plan est finie :
+    /// l'application y réveille sa boucle, qui appelle [`Document::poll_syntax`]. Sans elle,
+    /// l'analyse est toujours faite sur place.
+    pub fn set_syntax_waker(&mut self, waker: Option<cupride_syntax::Waker>) {
+        if let Some(syntax) = &mut self.syntax {
+            syntax.set_waker(waker.clone());
+        }
+        self.syntax_waker = waker;
+    }
+
+    /// Récupère le résultat d'une analyse en arrière-plan. Renvoie `true` si l'arbre a changé.
+    pub fn poll_syntax(&mut self) -> bool {
+        match &mut self.syntax {
+            Some(syntax) => syntax.poll(&self.buffer),
+            None => false,
+        }
     }
 
     /// Arrête l'analyse syntaxique.
@@ -558,10 +582,9 @@ impl Document {
         for selections in self.other_views.values_mut() {
             selections.map_all(edits);
         }
-        if !edits.is_empty()
-            && let Some(syntax) = &mut self.syntax
-        {
-            syntax.reparse(&self.buffer);
+        // Tree-sitter reçoit les modifications : seule la zone modifiée est réanalysée.
+        if let Some(syntax) = &mut self.syntax {
+            syntax.edited(&mut self.buffer, edits);
         }
     }
 

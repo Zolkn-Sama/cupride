@@ -80,6 +80,8 @@ pub struct Editor {
     clipboard: Box<dyn Clipboard>,
     /// Corbeille de l'OS, fournie par l'application.
     trash: Trash,
+    /// Réveil de l'interface quand une analyse syntaxique en arrière-plan est finie.
+    syntax_waker: Option<cupride_syntax::Waker>,
     /// Dernière copie faite dans l'IDE, pour redistribuer ses fragments entre les curseurs.
     last_copy: Option<LastCopy>,
     /// Zoom de l'interface (1 : taille normale), multiplié par l'échelle de l'écran.
@@ -161,6 +163,7 @@ impl Editor {
                     "corbeille indisponible",
                 ))
             })),
+            syntax_waker: None,
             last_copy: None,
             zoom: 1.0,
             wrap_override: None,
@@ -540,7 +543,28 @@ impl Editor {
         let (style, width) = self.config.indent_for(document.language());
         let sample = document_sample(document);
         document.set_indent(crate::indent::resolve(style, width, &sample), false);
+        document.set_syntax_waker(self.syntax_waker.clone());
         document.start_syntax();
+    }
+
+    /// Fonction appelée depuis un autre thread quand une analyse syntaxique en arrière-plan est
+    /// finie : l'interface y réveille sa boucle d'événements, puis appelle
+    /// [`Editor::poll_syntax`]. Sans elle (tests, console), l'analyse est faite sur place.
+    pub fn set_syntax_waker(&mut self, waker: cupride_syntax::Waker) {
+        for (_, document) in &mut self.documents {
+            document.set_syntax_waker(Some(waker.clone()));
+        }
+        self.syntax_waker = Some(waker);
+    }
+
+    /// Récupère les analyses syntaxiques finies en arrière-plan. Renvoie `true` si un arbre a
+    /// changé (les vues sont à redessiner).
+    pub fn poll_syntax(&mut self) -> bool {
+        let mut changed = false;
+        for (_, document) in &mut self.documents {
+            changed |= document.poll_syntax();
+        }
+        changed
     }
 
     /// Identifiant du thème en cours.

@@ -33,9 +33,13 @@ fn tree(editor: &mut Editor, args: &clap::ArgMatches) -> CommandResult {
             None => "langage du document inconnu : pas d'arbre syntaxique".to_owned(),
         })
     })?;
-    let tree = syntax
-        .tree()
-        .ok_or_else(|| CommandError::Failed("analyse syntaxique impossible".to_owned()))?;
+    let tree = syntax.tree().ok_or_else(|| {
+        CommandError::Failed(if syntax.is_parsing() {
+            "analyse syntaxique en cours".to_owned()
+        } else {
+            "analyse syntaxique impossible".to_owned()
+        })
+    })?;
     if args.get_flag("full") {
         return Ok(CommandOutput::message(tree.root_node().to_sexp()));
     }
@@ -81,6 +85,36 @@ mod tests {
             panic!("message attendu");
         };
         assert!(full.starts_with("(source_file (function_item"), "{full}");
+    }
+
+    #[test]
+    fn gros_fichier_analyse_en_arriere_plan() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gros.c");
+        let text: String = (0..30_000).map(|i| format!("int v{i} = {i};\n")).collect();
+        std::fs::write(&path, text).unwrap();
+        let mut editor = Editor::new();
+        let woken = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&woken);
+        editor.set_syntax_waker(cupride_syntax::Waker::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        }));
+        editor.open(&path).unwrap();
+        let error = editor.execute("syntax tree").unwrap_err();
+        assert_eq!(error.to_string(), "analyse syntaxique en cours");
+        let started = std::time::Instant::now();
+        while woken.load(Ordering::SeqCst) == 0 {
+            assert!(started.elapsed().as_secs() < 30, "analyse trop longue");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(editor.poll_syntax());
+        let CommandOutput::Message(path) = editor.execute("syntax tree").unwrap() else {
+            panic!("message attendu");
+        };
+        assert!(path.starts_with("translation_unit"), "{path}");
     }
 
     #[test]

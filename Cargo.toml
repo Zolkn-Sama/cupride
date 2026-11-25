@@ -106,6 +106,17 @@ dbg_macro = "warn"
 todo = "warn"
 unwrap_used = "warn"
 
+# Tree-sitter et ses grammaires sont du C : optimisés même en développement, pour que la frappe
+# reste fluide dans les gros fichiers.
+[profile.dev.package.tree-sitter]
+opt-level = 3
+[profile.dev.package.tree-sitter-c]
+opt-level = 3
+[profile.dev.package.tree-sitter-rust]
+opt-level = 3
+[profile.dev.package.tree-sitter-md]
+opt-level = 3
+
 # Profil de release : binaire le plus petit et le plus rapide possible.
 [profile.release]
 lto = true

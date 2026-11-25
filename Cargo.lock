@@ -735,6 +735,7 @@ dependencies = [
 name = "cupride-syntax"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "cupride-text",
  "streaming-iterator",
  "tracing",
