@@ -53,6 +53,8 @@ pub struct Editor {
     keymap: Keymap,
     config: Config,
     config_path: Option<PathBuf>,
+    /// Dossier des layouts nommés (un sous-dossier par projet).
+    layouts_dir: Option<PathBuf>,
     events: EventBus,
     /// État déjà publié : (révision, enregistrements) de chaque document, et document actif.
     published: SecondaryMap<DocumentId, (u64, u64)>,
@@ -90,6 +92,8 @@ impl Editor {
             .expect("les commandes intégrées ont des noms uniques");
         editor.keymap = Keymap::with_defaults(Platform::current());
         editor.config_path = config::default_path();
+        editor.layouts_dir = directories::ProjectDirs::from("", "", "cupride")
+            .map(|dirs| dirs.data_dir().join("layouts"));
         editor
     }
 
@@ -110,6 +114,7 @@ impl Editor {
             keymap: Keymap::new(),
             config: Config::default(),
             config_path: None,
+            layouts_dir: None,
             events: EventBus::new(),
             published: SecondaryMap::new(),
             published_active: None,
@@ -388,6 +393,16 @@ impl Editor {
     /// Change l'emplacement du fichier de configuration.
     pub fn set_config_path(&mut self, path: Option<PathBuf>) {
         self.config_path = path;
+    }
+
+    /// Dossier des layouts nommés (par défaut, `layouts/` dans le dossier de données de l'OS).
+    pub fn layouts_dir(&self) -> Option<&Path> {
+        self.layouts_dir.as_deref()
+    }
+
+    /// Change le dossier des layouts nommés.
+    pub fn set_layouts_dir(&mut self, dir: Option<PathBuf>) {
+        self.layouts_dir = dir;
     }
 
     /// Applique une configuration : raccourcis par défaut complétés par ceux de l'utilisateur,

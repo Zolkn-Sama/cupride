@@ -892,6 +892,10 @@ impl App {
             self.focused && editor_focused,
             blink_on,
         );
+        // Défilement de chaque vue, pour la session et les layouts nommés.
+        for (panel, scroll) in state.views.scroll_positions() {
+            self.editor.set_panel_scroll(panel, scroll);
+        }
         state.views.draw(
             scene.base(),
             &self.editor,
