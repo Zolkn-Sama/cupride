@@ -290,6 +290,11 @@ impl Document {
         self.path.as_deref()
     }
 
+    /// Change le fichier du document, sans rien écrire : le fichier a été renommé ou déplacé.
+    pub(crate) fn set_path(&mut self, path: PathBuf) {
+        self.path = Some(path);
+    }
+
     /// Nom affiché : nom du fichier, ou « sans titre ».
     pub fn display_name(&self) -> String {
         self.path.as_deref().and_then(Path::file_name).map_or_else(

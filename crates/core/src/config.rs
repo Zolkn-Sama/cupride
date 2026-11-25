@@ -96,6 +96,11 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # est restauré tel qu'il était à la fermeture. « cupride --no-restore » démarre sans le restaurer.
 # restore = true
 
+[explorer]
+# Fichiers ignorés (.gitignore, .ignore) : "dim" (affichés en gris), "hide" (masqués) ou
+# "show" (affichés comme les autres). Le dossier .git n'est jamais affiché.
+# ignored = "dim"
+
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les
 # remplacent pour les mêmes touches. Une chaîne vide retire un raccourci par défaut.
@@ -307,6 +312,27 @@ impl Default for SessionConfig {
     }
 }
 
+/// Affichage des fichiers ignorés dans l'explorateur.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IgnoredFiles {
+    /// Affichés en gris.
+    #[default]
+    Dim,
+    /// Masqués.
+    Hide,
+    /// Affichés comme les autres.
+    Show,
+}
+
+/// Section `[explorer]` : explorateur de fichiers.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct ExplorerConfig {
+    /// Fichiers ignorés par `.gitignore` et `.ignore`.
+    pub ignored: IgnoredFiles,
+}
+
 /// Configuration complète.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
@@ -325,12 +351,14 @@ pub struct Config {
     pub tabs: TabsConfig,
     /// Section `[session]`.
     pub session: SessionConfig,
+    /// Section `[explorer]`.
+    pub explorer: ExplorerConfig,
     /// Section `[keys]` : touches → ligne de commande (vide pour retirer un raccourci).
     pub keys: BTreeMap<String, String>,
 }
 
 /// Clés connues, pour signaler les fautes de frappe.
-const KNOWN_KEYS: [(&str, &[&str]); 8] = [
+const KNOWN_KEYS: [(&str, &[&str]); 9] = [
     (
         "editor",
         &["line_ending", "undo_group_delay_ms", "primary_selection"],
@@ -350,6 +378,7 @@ const KNOWN_KEYS: [(&str, &[&str]); 8] = [
     ("status_bar", &["left", "right"]),
     ("tabs", &["preview"]),
     ("session", &["restore"]),
+    ("explorer", &["ignored"]),
     ("keys", &[]),
 ];
 

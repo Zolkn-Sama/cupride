@@ -275,6 +275,41 @@ panel open explorer --split left
 panel open editor --split down
 ```
 
+## `explorer` — explorateur de fichiers
+
+L'explorateur affiche l'arborescence du projet (le dossier ouvert avec `cupride <dossier>`, sinon
+le dossier courant). Chaque dossier n'est lu qu'au moment où on le déplie, et l'arborescence se met
+à jour d'elle-même quand le disque change (dossiers affichés surveillés avec `notify`). Les fichiers
+ignorés par `.gitignore` et `.ignore` sont en gris, ou masqués (option `[explorer] ignored`) ; le
+dossier `.git` n'est jamais affiché.
+
+| Commande | Description |
+|---|---|
+| `explorer show` | Affiche l'explorateur et lui donne le focus ; s'il n'est pas ouvert, il s'ouvre à gauche, sur une colonne étroite (`mod+shift+e`). |
+| `explorer reveal` | Montre le document actif dans l'explorateur : dossiers parents dépliés, fichier sélectionné. |
+| `explorer new-file <chemin>` | Crée un fichier vide (jamais par-dessus un fichier existant) et l'ouvre. |
+| `explorer new-folder <chemin>` | Crée un dossier. |
+| `explorer rename <source> <cible>` | Renomme un fichier ou un dossier, jamais par-dessus un fichier existant ; les documents ouverts suivent leur fichier. |
+| `explorer move <source> <cible>` | Déplace un fichier ou un dossier ; une cible qui est un dossier existant le reçoit. Les documents ouverts suivent. |
+| `explorer delete <chemin>` | Met un fichier ou un dossier à la corbeille de l'OS. Les documents de ces fichiers sont fermés, sauf ceux qui ont des modifications non enregistrées. |
+
+Un chemin relatif part du dossier du projet. Dans l'explorateur, tout se fait au clavier :
+
+| Touche | Effet |
+|---|---|
+| `↑`, `↓`, `Page préc.`, `Page suiv.`, `Début`, `Fin` | Déplace la sélection. |
+| `→` | Déplie le dossier, ou descend sur son premier enfant. |
+| `←` | Replie le dossier, ou remonte sur le dossier parent. |
+| `Entrée` | Ouvre le fichier, ou plie et déplie le dossier. |
+| `Espace` | Ouvre le fichier dans l'onglet d'aperçu (option `[tabs] preview`). |
+| `F2` | `explorer rename`, prérempli dans la ligne de commande. |
+| `Suppr` (`Cmd+Retour arrière` sous macOS) | `explorer delete`, prérempli : Entrée confirme. |
+| `n`, `Maj+N` | `explorer new-file` ou `new-folder`, dans le dossier sélectionné. |
+| `m` | `explorer move`, prérempli. |
+
+Les autres raccourcis (`mod+p`, `mod+shift+p`…) restent actifs. À la souris : un clic plie ou
+déplie un dossier, et ouvre un fichier en aperçu ; un double clic l'ouvre dans un onglet gardé.
+
 ## `layout` — layouts nommés
 
 Un layout nommé garde une disposition complète — zones et proportions, onglets, fichiers,

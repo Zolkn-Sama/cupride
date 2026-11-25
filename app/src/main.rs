@@ -8,6 +8,7 @@ mod file_index;
 mod input;
 mod latency;
 mod logging;
+mod watcher;
 
 use anyhow::Context;
 use cupride_core::Editor;
@@ -33,6 +34,10 @@ fn main() -> anyhow::Result<()> {
 
     let mut editor = Editor::new();
     editor.set_clipboard(clipboard::SystemClipboard::new_or_memory());
+    // Supprimer depuis l'explorateur met à la corbeille de l'OS.
+    editor.set_trash(Box::new(|path| {
+        trash::delete(path).map_err(std::io::Error::other)
+    }));
     for message in editor.reload_config() {
         tracing::warn!("configuration : {message}");
         editor.notify(Level::Warning, format!("configuration : {message}"));

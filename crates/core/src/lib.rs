@@ -32,6 +32,6 @@ mod ui_request;
 pub use cupride_layout as layout;
 pub use cupride_text as text;
 pub use document::{Document, DocumentError, LineEnding};
-pub use editor::{DocumentId, Editor};
+pub use editor::{DocumentId, Editor, TrashFn};
 pub use panels::{LayoutMetrics, NewPanel};
 pub use ui_request::UiRequest;

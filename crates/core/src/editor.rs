@@ -24,6 +24,18 @@ slotmap::new_key_type! {
     pub struct DocumentId;
 }
 
+/// Met un fichier ou un dossier à la corbeille de l'OS.
+pub type TrashFn = Box<dyn FnMut(&Path) -> io::Result<()> + Send>;
+
+/// Corbeille fournie par l'application.
+struct Trash(TrashFn);
+
+impl std::fmt::Debug for Trash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Trash")
+    }
+}
+
 /// Crans de zoom de l'interface, de 50 % à 300 %.
 pub(crate) const ZOOM_STEPS: [f32; 13] = [
     0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0,
@@ -64,6 +76,8 @@ pub struct Editor {
     /// Géométrie des zones : fournie par l'interface.
     pub(crate) layout_metrics: crate::panels::LayoutMetrics,
     clipboard: Box<dyn Clipboard>,
+    /// Corbeille de l'OS, fournie par l'application.
+    trash: Trash,
     /// Dernière copie faite dans l'IDE, pour redistribuer ses fragments entre les curseurs.
     last_copy: Option<LastCopy>,
     /// Zoom de l'interface (1 : taille normale), multiplié par l'échelle de l'écran.
@@ -121,6 +135,12 @@ impl Editor {
             page_lines: DEFAULT_PAGE_LINES,
             layout_metrics: crate::panels::LayoutMetrics::default(),
             clipboard: Box::new(MemoryClipboard::default()),
+            trash: Trash(Box::new(|_| {
+                Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "corbeille indisponible",
+                ))
+            })),
             last_copy: None,
             zoom: 1.0,
             project: None,
@@ -572,6 +592,16 @@ impl Editor {
     /// Remplace le presse-papiers : l'application y met celui de l'OS.
     pub fn set_clipboard(&mut self, clipboard: Box<dyn Clipboard>) {
         self.clipboard = clipboard;
+    }
+
+    /// Met `path` à la corbeille de l'OS.
+    pub fn trash(&mut self, path: &Path) -> io::Result<()> {
+        (self.trash.0)(path)
+    }
+
+    /// Fournit la corbeille : l'application y met celle de l'OS. Sans elle, supprimer est refusé.
+    pub fn set_trash(&mut self, trash: TrashFn) {
+        self.trash = Trash(trash);
     }
 
     pub(crate) fn last_copy(&self) -> Option<&LastCopy> {

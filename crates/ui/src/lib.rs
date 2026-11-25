@@ -28,6 +28,8 @@
 //! - [`StatusBar`] : barre d'état, faite d'éléments nommés ([`StatusElements`]) choisis par la
 //!   configuration.
 //! - [`Toasts`] : notifications affichées quelques secondes en bas à droite.
+//! - [`ExplorerView`] : explorateur de fichiers ; [`ExplorerTree`] : son arborescence, chargée
+//!   à la demande, fichiers ignorés repérés, tenue à jour quand le disque change.
 //! - [`Picker`] : recherche floue ([`Fuzzy`], moteur `nucleo`) dans une liste, pour la palette de
 //!   commandes et l'ouverture rapide.
 //! - [`CursorBlink`] : clignotement du curseur, arrêté au repos.
@@ -35,6 +37,7 @@
 mod blink;
 mod command_line;
 mod editor_view;
+mod explorer;
 mod focus;
 mod fuzzy;
 mod gutter;
@@ -54,6 +57,7 @@ mod toasts;
 pub use blink::{BLINK_IDLE_STOP, CursorBlink};
 pub use command_line::{CommandLine, MessageKind};
 pub use editor_view::{EditorView, Pointer, Preedit, ViewSettings, WHEEL_LINES};
+pub use explorer::{Entry, ExplorerTree, ExplorerView, Row};
 pub use focus::Focus;
 pub use fuzzy::{Found, Fuzzy};
 pub use gutter::GutterMarker;
@@ -61,7 +65,8 @@ pub use history::{CommandHistory, HISTORY_LIMIT};
 pub use label::Label;
 pub use mouse::{ClickCounter, ClickModifiers, MULTI_CLICK_DELAY, MouseSelection};
 pub use panels::{
-    PanelContext, PanelView, PanelViews, Tab, ViewFactory, ViewRegistry, Zone, panel_title,
+    PanelContext, PanelView, PanelViews, Tab, ViewAction, ViewFactory, ViewRegistry, Zone,
+    panel_title,
 };
 pub use picker::{MAX_ROWS, Picker, PickerItem};
 pub use status_bar::{StatusBar, StatusContext, StatusElement, StatusElements};

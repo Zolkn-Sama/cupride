@@ -2,6 +2,7 @@
 
 mod config;
 mod edit;
+mod explorer;
 mod file;
 mod keys;
 mod layout;
@@ -29,6 +30,7 @@ pub(crate) fn register_all(registry: &mut CommandRegistry) -> Result<(), Command
     panel::register(registry)?;
     tab::register(registry)?;
     layout::register(registry)?;
+    explorer::register(registry)?;
     Ok(())
 }
 

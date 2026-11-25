@@ -6,10 +6,11 @@
 //! panneaux, oublie celles des panneaux fermés, et place chaque zone du layout dans la fenêtre.
 
 use std::any::Any;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::time::Instant;
 
+use cupride_core::keymap::KeyCombo;
 use cupride_core::layout::{Bounds, Divider, DropTarget, PanelId, PanelKind, Placement};
 use cupride_core::session::ScrollPosition;
 use cupride_core::{DocumentId, Editor};
@@ -34,6 +35,19 @@ pub struct PanelContext<'a> {
     /// Les curseurs sont-ils allumés (clignotement) ? Ils ne sont dessinés que dans le panneau
     /// qui a le focus.
     pub cursors_visible: bool,
+}
+
+/// Ce que la vue demande après une touche ou un clic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViewAction {
+    /// La vue n'en fait rien : la touche suit son chemin (raccourcis).
+    Ignored,
+    /// La vue l'a traitée ; il faut redessiner.
+    Handled,
+    /// Exécuter cette ligne de commande.
+    Run(String),
+    /// Ouvrir la ligne de commande, préremplie avec ce texte (à confirmer par Entrée).
+    CommandLine(String),
 }
 
 /// Vue d'un panneau : transforme l'état du noyau en dessin.
@@ -76,6 +90,33 @@ pub trait PanelView: Any {
 
     /// Reprend le défilement enregistré dans la session.
     fn set_scroll_position(&mut self, _position: ScrollPosition) {}
+
+    /// La vue reçoit-elle le clavier quand elle a le focus ? Sinon (éditeur), les touches vont
+    /// aux raccourcis et le texte au document.
+    fn takes_keyboard(&self) -> bool {
+        false
+    }
+
+    /// Touche, quand la vue a le focus et [`PanelView::takes_keyboard`].
+    fn key(&mut self, _combo: &KeyCombo) -> ViewAction {
+        ViewAction::Ignored
+    }
+
+    /// Clic au point (`x`, `y`) ; `clicks` : 1, 2 ou 3 (double, triple clic).
+    fn click(&mut self, _x: f32, _y: f32, _clicks: u8) -> ViewAction {
+        ViewAction::Ignored
+    }
+
+    /// Dossiers à surveiller sur le disque.
+    fn watched_dirs(&self) -> Vec<std::path::PathBuf> {
+        Vec::new()
+    }
+
+    /// Des fichiers ou dossiers ont changé sur le disque.
+    fn files_changed(&mut self, _paths: &[std::path::PathBuf]) {}
+
+    /// Montrer ce chemin (explorateur).
+    fn reveal(&mut self, _path: &std::path::Path) {}
 
     /// Pour retrouver le type concret de la vue.
     fn as_any(&self) -> &dyn Any;
@@ -181,6 +222,16 @@ impl Default for ViewRegistry {
             PanelKind::EDITOR,
             Box::new(|panel, settings, scale| {
                 Box::new(EditorView::for_panel(panel, settings.clone(), scale))
+            }),
+        );
+        registry.register(
+            PanelKind::EXPLORER,
+            Box::new(|panel, settings, scale| {
+                Box::new(crate::explorer::ExplorerView::new(
+                    panel,
+                    settings.clone(),
+                    scale,
+                ))
             }),
         );
         registry
@@ -556,6 +607,16 @@ impl PanelViews {
         }
     }
 
+    /// Toutes les vues, modifiables (fichiers changés sur le disque, chemin à montrer…).
+    pub fn views_mut(&mut self) -> impl Iterator<Item = &mut Box<dyn PanelView>> {
+        self.views.values_mut()
+    }
+
+    /// Dossiers que les vues demandent de surveiller.
+    pub fn watched_dirs(&self) -> BTreeSet<std::path::PathBuf> {
+        self.views.values().flat_map(|v| v.watched_dirs()).collect()
+    }
+
     /// Défilement de chaque vue, à garder dans la session.
     pub fn scroll_positions(&self) -> Vec<(PanelId, ScrollPosition)> {
         let mut positions: Vec<(PanelId, ScrollPosition)> = self
@@ -773,7 +834,10 @@ mod tests {
     fn registre_des_types() {
         let registry = ViewRegistry::default();
         assert!(registry.contains("editor"));
-        assert_eq!(registry.kinds().collect::<Vec<_>>(), vec!["editor"]);
+        assert_eq!(
+            registry.kinds().collect::<Vec<_>>(),
+            vec!["editor", "explorer"]
+        );
         let settings = ViewSettings::default();
         let view = registry
             .create(&PanelKind::new("editor"), PanelId::new(1), &settings, 1.0)
