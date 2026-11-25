@@ -11,6 +11,7 @@ mod notifications;
 mod panel;
 mod recovery;
 mod search;
+mod syntax;
 mod tab;
 mod theme;
 mod ui;
@@ -39,6 +40,7 @@ pub(crate) fn register_all(registry: &mut CommandRegistry) -> Result<(), Command
     search::register(registry)?;
     recovery::register(registry)?;
     lines::register(registry)?;
+    syntax::register(registry)?;
     Ok(())
 }
 

@@ -8,6 +8,7 @@ members = [
     "crates/render",
     "crates/ui",
     "crates/ipc",
+    "crates/syntax",
     "tools/repl",
 ]
 default-members = ["app"]
@@ -29,6 +30,7 @@ cupride-core = { path = "crates/core" }
 cupride-render = { path = "crates/render" }
 cupride-ui = { path = "crates/ui" }
 cupride-ipc = { path = "crates/ipc" }
+cupride-syntax = { path = "crates/syntax" }
 
 # Erreurs : thiserror dans les bibliothèques, anyhow dans les binaires.
 anyhow = "1.0.100"
@@ -70,6 +72,13 @@ similar = "2.7.0"
 # Recherche floue (palette, ouverture rapide) et parcours des fichiers du projet
 nucleo-matcher = "0.3.1"
 ignore = "0.4.23"
+
+# Analyse syntaxique : Tree-sitter et grammaires intégrées (en attendant les paquets)
+tree-sitter = "0.27.2"
+tree-sitter-c = "0.24.2"
+tree-sitter-md = "0.5.4"
+tree-sitter-rust = "0.24.2"
+streaming-iterator = "0.1.9"
 
 # Journalisation
 tracing = "0.1.41"

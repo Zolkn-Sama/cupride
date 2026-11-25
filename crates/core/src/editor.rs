@@ -507,8 +507,7 @@ impl Editor {
             document
                 .history_mut()
                 .set_group_delay(config.editor.undo_group_delay());
-            let language = document.path().and_then(crate::language::language_of);
-            let (style, width) = config.indent_for(language);
+            let (style, width) = config.indent_for(document.language());
             let sample = document_sample(document);
             document.set_indent(crate::indent::resolve(style, width, &sample), false);
         }
@@ -538,10 +537,10 @@ impl Editor {
         document
             .history_mut()
             .set_group_delay(self.config.editor.undo_group_delay());
-        let language = document.path().and_then(crate::language::language_of);
-        let (style, width) = self.config.indent_for(language);
+        let (style, width) = self.config.indent_for(document.language());
         let sample = document_sample(document);
         document.set_indent(crate::indent::resolve(style, width, &sample), false);
+        document.start_syntax();
     }
 
     /// Identifiant du thème en cours.
