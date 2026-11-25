@@ -397,8 +397,35 @@ impl Workspace {
     pub fn remove(&mut self, id: PanelId) -> Option<Panel> {
         let panel = self.panels.remove(&id)?;
         self.recent.retain(|p| *p != id);
+        self.detach(id);
+        Some(panel)
+    }
+
+    /// Envoie le panneau `id` dans la fenêtre `window`, en onglet à côté de son panneau actif
+    /// (dans une fenêtre vide, il occupe toute la place). Il en devient le panneau actif et garde
+    /// son modèle ; sa fenêtre d'origine passe à son panneau suivant.
+    pub fn move_to_window(&mut self, id: PanelId, window: WindowId) -> Result<(), LayoutError> {
+        let source = self.window_of(id).ok_or(LayoutError::UnknownPanel(id))?;
+        let target = self
+            .window(window)
+            .ok_or(LayoutError::UnknownWindow(window.get()))?;
+        if source == window {
+            return Ok(());
+        }
+        let beside = target.active;
+        self.detach(id);
+        let layout = self.window_mut(window).expect("fenêtre vérifiée");
+        layout.tree.add(id, beside)?;
+        layout.active = Some(id);
+        Ok(())
+    }
+
+    /// Retire le panneau `id` de son arbre, sans toucher à son modèle. S'il était le panneau actif
+    /// de sa fenêtre, l'onglet qui le remplace dans sa zone le devient, ou, si la zone disparaît,
+    /// le dernier panneau actif de la fenêtre.
+    fn detach(&mut self, id: PanelId) {
         let Some(window) = self.window_of(id) else {
-            return Some(panel);
+            return;
         };
         let recent = self.recent.clone();
         let layout = self.window_mut(window).expect("fenêtre trouvée");
@@ -427,7 +454,6 @@ impl Workspace {
                 }
             }
         }
-        Some(panel)
     }
 
     /// Remplace les fenêtres et les panneaux par ceux de `other` (layout chargé). Ses panneaux
@@ -754,5 +780,41 @@ mod tests {
         let back: Workspace = serde_json::from_str(&json).unwrap();
         assert_eq!(back.window(second).unwrap().geometry(), Some(&geometry));
         assert_eq!(back.window(WindowId::new(1)).unwrap().geometry(), None);
+    }
+
+    #[test]
+    fn envoyer_un_panneau_dans_une_autre_fenetre() {
+        let mut ws = Workspace::new();
+        let first = ws.active_window().unwrap();
+        let a = ws.create(editor());
+        ws.tree_mut().add(a, None).unwrap();
+        let b = ws.create(editor());
+        ws.tree_mut().add(b, Some(a)).unwrap();
+        ws.focus(b).unwrap();
+        let second = ws.create_window();
+        // Fenêtre vide : il y occupe toute la place, et en devient le panneau actif.
+        ws.move_to_window(b, second).unwrap();
+        assert_eq!(ws.window(second).unwrap().tree().panels(), vec![b]);
+        assert_eq!(ws.window(second).unwrap().active(), Some(b));
+        assert_eq!(
+            ws.window(first).unwrap().active(),
+            Some(a),
+            "l'origine passe au suivant"
+        );
+        assert!(ws.panel(b).is_some(), "le modèle est gardé");
+        // Retour à côté du panneau actif de la première fenêtre.
+        ws.move_to_window(b, first).unwrap();
+        assert_eq!(ws.window(first).unwrap().tree().panels(), vec![a, b]);
+        assert!(ws.window(second).unwrap().tree().is_empty());
+        assert!(ws.is_valid());
+        assert_eq!(
+            ws.move_to_window(b, WindowId::new(9)),
+            Err(LayoutError::UnknownWindow(9))
+        );
+        assert_eq!(
+            ws.move_to_window(PanelId::new(42), second),
+            Err(LayoutError::UnknownPanel(PanelId::new(42)))
+        );
+        ws.move_to_window(b, first).unwrap();
     }
 }
