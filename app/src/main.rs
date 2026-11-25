@@ -9,6 +9,7 @@ mod input;
 mod latency;
 mod logging;
 mod redraw;
+mod remote;
 mod watcher;
 
 use anyhow::Context;
@@ -28,6 +29,13 @@ fn main() -> anyhow::Result<()> {
             eprintln!("{message}");
             std::process::exit(2);
         }
+    };
+
+    // Instance unique : si CuprIDE tourne déjà, il reçoit la ligne de commande, et ce processus
+    // affiche sa réponse puis se termine. Sinon, ce processus devient l'instance principale.
+    let server = match single_instance() {
+        Instance::Forwarded(code) => std::process::exit(code),
+        Instance::Primary(server) => server,
     };
 
     let _log_guard = logging::init();
@@ -60,7 +68,26 @@ fn main() -> anyhow::Result<()> {
         .context("création de la boucle d'événements")?;
     // Attente passive : la boucle ne se réveille que sur un événement.
     event_loop.set_control_flow(ControlFlow::Wait);
-    let mut app = app::App::new(editor, event_loop.create_proxy());
+    let remote = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    match server {
+        Some(server) => {
+            tracing::info!(socket = %server.endpoint().describe(), "instance principale");
+            let queue = std::sync::Arc::clone(&remote);
+            let proxy = event_loop.create_proxy();
+            // Une demande attend dans la file ; la boucle d'événements est réveillée.
+            let spawned = server.spawn(move |incoming| {
+                if let Ok(mut pending) = queue.lock() {
+                    pending.push(incoming);
+                }
+                let _ = proxy.send_event(file_index::AppEvent::Remote);
+            });
+            if let Err(error) = spawned {
+                tracing::warn!("instance unique indisponible : {error}");
+            }
+        }
+        None => tracing::warn!("instance unique indisponible : cette instance reste seule"),
+    }
+    let mut app = app::App::new(editor, event_loop.create_proxy(), remote);
     event_loop
         .run_app(&mut app)
         .context("exécution de la boucle d'événements")?;
@@ -70,4 +97,57 @@ fn main() -> anyhow::Result<()> {
     }
     tracing::info!("arrêt de CuprIDE");
     Ok(())
+}
+
+/// Résultat de la recherche d'une instance.
+enum Instance {
+    /// Une instance a reçu la ligne de commande : sortir avec ce code.
+    Forwarded(i32),
+    /// Ce processus est l'instance principale (sans socket si l'IPC est indisponible).
+    Primary(Option<cupride_ipc::Server>),
+}
+
+/// Transmet la ligne de commande à l'instance en marche, ou devient l'instance principale.
+/// L'IPC indisponible (dossier non sûr…) n'empêche pas de démarrer : l'instance reste seule.
+fn single_instance() -> Instance {
+    let endpoint = match cupride_ipc::Endpoint::for_user() {
+        Ok(endpoint) => endpoint,
+        Err(error) => {
+            eprintln!("{error}");
+            return Instance::Primary(None);
+        }
+    };
+    match cupride_ipc::connect(&endpoint) {
+        Ok(Some(client)) => {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let args = std::env::args_os()
+                .skip(1)
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
+            let request = cupride_ipc::Request::new(cwd, args);
+            let sent = client.send(&request, |reply| match reply {
+                cupride_ipc::Reply::Output { text } => print!("{text}"),
+                cupride_ipc::Reply::Error { text } => eprintln!("{text}"),
+                cupride_ipc::Reply::Exit { .. } => {}
+            });
+            match sent {
+                Ok(code) => Instance::Forwarded(code),
+                Err(error) => {
+                    eprintln!("{error}");
+                    Instance::Forwarded(1)
+                }
+            }
+        }
+        Ok(None) => match cupride_ipc::Server::bind(&endpoint) {
+            Ok(server) => Instance::Primary(Some(server)),
+            Err(error) => {
+                eprintln!("{error}");
+                Instance::Primary(None)
+            }
+        },
+        Err(error) => {
+            eprintln!("{error}");
+            Instance::Primary(None)
+        }
+    }
 }

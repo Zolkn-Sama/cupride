@@ -11,7 +11,7 @@
 //! quelques secondes après la dernière saisie, et l'expiration d'un avertissement.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use cupride_core::clipboard::ClipboardKind;
@@ -124,6 +124,8 @@ pub(crate) struct App {
     pending_placement: HashMap<LayoutWindowId, usize>,
     /// Session Wayland : les fenêtres ne peuvent pas être positionnées.
     wayland: bool,
+    /// Demandes reçues d'autres `cupride` (instance unique), en attente.
+    remote: Arc<Mutex<Vec<cupride_ipc::Incoming>>>,
     close_guard: CloseGuard,
     blink: CursorBlink,
     /// La fenêtre a-t-elle le focus clavier ? Sans focus, les curseurs sont masqués et ne
@@ -180,7 +182,11 @@ pub(crate) struct App {
 }
 
 impl App {
-    pub(crate) fn new(mut editor: Editor, proxy: EventLoopProxy<AppEvent>) -> Self {
+    pub(crate) fn new(
+        mut editor: Editor,
+        proxy: EventLoopProxy<AppEvent>,
+        remote: Arc<Mutex<Vec<cupride_ipc::Incoming>>>,
+    ) -> Self {
         let text = TextSystem::new();
         // Thèmes intégrés, puis ceux du dossier themes/ de la configuration.
         let mut themes = Themes::default();
@@ -261,6 +267,7 @@ impl App {
             monitors_checked: None,
             pending_placement: HashMap::new(),
             wayland: false,
+            remote,
             close_guard: CloseGuard::default(),
             toasts: Toasts::default(),
             fatal: None,
@@ -1266,6 +1273,31 @@ impl App {
         }
     }
 
+    /// Exécute les lignes de commande reçues d'autres `cupride`, répond à chaque terminal, et
+    /// amène la fenêtre active au premier plan.
+    fn remote_requests(&mut self, event_loop: &ActiveEventLoop) {
+        let pending = self
+            .remote
+            .lock()
+            .map(|mut p| std::mem::take(&mut *p))
+            .unwrap_or_default();
+        if pending.is_empty() {
+            return;
+        }
+        for incoming in pending {
+            tracing::info!(arguments = ?incoming.request.args, "demande d'un terminal");
+            let answer = crate::remote::handle(&mut self.editor, &incoming.request);
+            if let Err(error) = incoming.responder.finish(&answer.replies, answer.code) {
+                tracing::debug!("terminal parti avant la réponse : {error}");
+            }
+        }
+        self.after_any_command(Instant::now());
+        self.sync_windows(event_loop);
+        if let Some(state) = self.windows.get(&self.current) {
+            state.window.focus_window();
+        }
+    }
+
     /// Une fenêtre reçoit le clavier ou la souris : elle devient la fenêtre courante, et la
     /// fenêtre active du noyau.
     fn enter_window(&mut self, window: LayoutWindowId) {
@@ -1468,9 +1500,10 @@ fn is_wayland(event_loop: &ActiveEventLoop) -> bool {
 }
 
 impl ApplicationHandler<AppEvent> for App {
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::FilesIndexed => self.files_indexed(),
+            AppEvent::Remote => self.remote_requests(event_loop),
             AppEvent::FilesChanged => {
                 let changed = self.disk.take_changed();
                 if changed.is_empty() {
