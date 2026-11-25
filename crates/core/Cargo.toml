@@ -13,6 +13,7 @@ clap.workspace = true
 cupride-layout.workspace = true
 cupride-text.workspace = true
 directories.workspace = true
+regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shlex.workspace = true

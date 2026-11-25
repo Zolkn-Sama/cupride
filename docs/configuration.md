@@ -178,6 +178,9 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `split right` | `Ctrl+\` | `Cmd+\` |
 | `split down` | `Ctrl+K Ctrl+\` | `Cmd+K Cmd+\` |
 | `explorer show` | `Ctrl+Maj+E` | `Cmd+Maj+E` |
+| `ui find` | `Ctrl+F` | `Cmd+F` |
+| `search next` | `F3`, `Ctrl+G` | `F3`, `Cmd+G` |
+| `search previous` | `Maj+F3`, `Ctrl+Maj+G` | `Maj+F3`, `Cmd+Maj+G` |
 | `window new` | `Ctrl+Maj+N` | `Cmd+Maj+N` |
 | `window close` | `Ctrl+Maj+W` | `Cmd+Maj+W` |
 | `panel focus left` | `Ctrl+K Ctrl+←` | `Cmd+K Cmd+←` |

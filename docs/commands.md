@@ -147,6 +147,25 @@ edit move word-right --extend
 edit add-cursor down
 ```
 
+## `search` — rechercher
+
+| Commande | Description |
+|---|---|
+| `search find <motif> [--case] [--word] [--regex]` | Cherche le motif dans le document actif et sélectionne l'occurrence suivante, à partir du début de la sélection ; affiche sa position (`3/12`). Par défaut, la casse est ignorée ; `--case` la respecte, `--word` ne garde que les mots entiers, `--regex` lit le motif comme une expression régulière (syntaxe de la crate `regex`). |
+| `search next` | Occurrence suivante ; après la dernière, la première (`F3`, `mod+g`). |
+| `search previous` | Occurrence précédente (`Maj+F3`, `mod+shift+g`). |
+| `search clear` | Arrête la recherche en cours. |
+| `ui find` | Ouvre la barre de recherche (`mod+f`), préremplie avec la sélection (sur une ligne) ou le motif en cours. |
+
+**Barre de recherche** : en haut à droite de la zone active. La recherche est incrémentale :
+chaque frappe sélectionne la première occurrence à partir du point de départ, et toutes les
+occurrences sont surlignées. Entrée (ou ↓) : suivante ; Maj+Entrée (ou ↑) : précédente ; Échap :
+fermer (le motif reste, `F3` continue). Options : `Alt+C` casse, `Alt+W` mot entier, `Alt+R`
+expression régulière, ou un clic sur `Aa`, `mot`, `.*`. Une expression invalide est signalée dans
+la barre. La recherche se fait dans un thread à part, sur une copie du document : l'interface ne
+bloque jamais, même sur un fichier de 100 Mo. Au-delà de 100 000 occurrences, seules les
+100 000 premières sont gardées (« limite »).
+
 ## `config` — configuration
 
 Voir [`configuration.md`](configuration.md) pour les options.

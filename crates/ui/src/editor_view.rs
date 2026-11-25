@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
+use std::sync::Arc;
 use std::time::Instant;
 
 use cupride_core::Document;
@@ -156,6 +157,8 @@ pub struct EditorView {
     gutter: Gutter,
     /// Marqueurs de la gouttière.
     markers: Vec<GutterMarker>,
+    /// Occurrences de la recherche, triées : surlignées dans le texte.
+    highlights: Arc<Vec<Range<usize>>>,
     /// Ligne du curseur principal, à la dernière préparation.
     cursor_line: usize,
     lines: HashMap<usize, CachedLine>,
@@ -189,6 +192,7 @@ impl EditorView {
             preedit: None,
             gutter: Gutter::default(),
             markers: Vec::new(),
+            highlights: Arc::default(),
             cursor_line: 0,
             lines: HashMap::new(),
             visible: 0..0,
@@ -378,6 +382,17 @@ impl EditorView {
         if reveal {
             self.reveal_column(buffer, head);
         }
+    }
+
+    /// Occurrences de la recherche à surligner (triées, sans chevauchement) ; vide pour n'en
+    /// surligner aucune.
+    pub fn set_highlights(&mut self, highlights: Arc<Vec<Range<usize>>>) {
+        self.highlights = highlights;
+    }
+
+    /// Occurrences surlignées.
+    pub fn highlights(&self) -> &[Range<usize>] {
+        &self.highlights
     }
 
     /// Remplace les marqueurs de la gouttière.
@@ -599,34 +614,26 @@ impl EditorView {
             }
         }
 
-        for selection in selections.iter().filter(|s| !s.is_empty()) {
-            let (first, last) = (line_of(selection.start()), line_of(selection.end()));
-            let lines = first.max(self.visible.start)..(last + 1).min(self.visible.end);
-            for line in lines {
-                let Some(cached) = self.lines.get(&line) else {
-                    continue;
-                };
-                let from = selection
-                    .start()
-                    .saturating_sub(cached.start)
-                    .min(cached.len);
-                let to = selection.end().saturating_sub(cached.start).min(cached.len);
-                let mut right = cached.x(to);
-                // La sélection continue après la fin de la ligne : le saut de ligne est inclus.
-                if selection.end() > cached.start + cached.len {
-                    right += self.newline_width();
-                }
-                let left = cached.x(from);
-                let rect = Rect::new(
-                    self.text_left() + left,
-                    self.line_top(line),
-                    right - left,
-                    line_height,
-                );
-                frame
-                    .quads
-                    .push(Quad::new(rect.intersect(&text_area), theme.selection));
+        // Occurrences de la recherche visibles : retrouvées par dichotomie.
+        if let (Some(first), Some(last)) = (
+            self.lines.get(&self.visible.start),
+            self.visible
+                .end
+                .checked_sub(1)
+                .and_then(|l| self.lines.get(&l)),
+        ) {
+            let (from, to) = (first.start, last.start + last.len + 1);
+            let start = self.highlights.partition_point(|m| m.end <= from);
+            for found in self.highlights[start..]
+                .iter()
+                .take_while(|m| m.start <= to)
+            {
+                self.push_range(frame, buffer, found.clone(), theme.search_match());
             }
+        }
+
+        for selection in selections.iter().filter(|s| !s.is_empty()) {
+            self.push_range(frame, buffer, selection.range(), theme.selection);
         }
 
         for line in self.visible.clone() {
@@ -673,6 +680,42 @@ impl EditorView {
                         .push(Quad::new(rect.intersect(&text_area), theme.cursor));
                 }
             }
+        }
+    }
+
+    /// Rectangles d'une plage du texte, ligne par ligne, sur les lignes visibles.
+    fn push_range(
+        &self,
+        frame: &mut Layer<'_>,
+        buffer: &impl TextBuffer,
+        range: Range<usize>,
+        color: cupride_render::Color,
+    ) {
+        let line_of = |offset: usize| buffer.byte_to_line(offset).unwrap_or_default();
+        let text_area = self.text_area();
+        let (first, last) = (line_of(range.start), line_of(range.end));
+        let lines = first.max(self.visible.start)..(last + 1).min(self.visible.end);
+        for line in lines {
+            let Some(cached) = self.lines.get(&line) else {
+                continue;
+            };
+            let from = range.start.saturating_sub(cached.start).min(cached.len);
+            let to = range.end.saturating_sub(cached.start).min(cached.len);
+            let mut right = cached.x(to);
+            // La plage continue après la fin de la ligne : le saut de ligne est inclus.
+            if range.end > cached.start + cached.len {
+                right += self.newline_width();
+            }
+            let left = cached.x(from);
+            let rect = Rect::new(
+                self.text_left() + left,
+                self.line_top(line),
+                right - left,
+                self.line_height(),
+            );
+            frame
+                .quads
+                .push(Quad::new(rect.intersect(&text_area), color));
         }
     }
 

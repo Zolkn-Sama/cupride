@@ -92,6 +92,8 @@ pub struct Editor {
     /// Demandes à l'interface, pas encore lues.
     ui_requests: Vec<UiRequest>,
     notifications: Notifications,
+    /// Recherche en cours.
+    pub(crate) search: crate::search::SearchState,
     /// Écrans, dans l'ordre de leur numérotation (fournis par l'interface).
     monitors: Vec<crate::monitors::MonitorInfo>,
     /// Thème en cours, et thèmes disponibles (fournis par l'interface).
@@ -158,6 +160,7 @@ impl Editor {
             ui_requests: Vec::new(),
             notifications: Notifications::default(),
             monitors: Vec::new(),
+            search: crate::search::SearchState::default(),
             theme: crate::config::ViewConfig::default().theme,
             themes: Vec::new(),
         }

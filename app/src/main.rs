@@ -10,6 +10,7 @@ mod latency;
 mod logging;
 mod redraw;
 mod remote;
+mod search_worker;
 mod watcher;
 
 use anyhow::Context;

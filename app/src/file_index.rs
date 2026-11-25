@@ -28,6 +28,8 @@ pub(crate) enum AppEvent {
     FilesChanged,
     /// Un autre `cupride` a transmis sa ligne de commande (instance unique).
     Remote,
+    /// Une recherche en arrière-plan est terminée.
+    SearchDone,
 }
 
 /// Ce que le thread d'indexation envoie.
