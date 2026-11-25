@@ -598,6 +598,7 @@ pub fn default_bindings(platform: Platform) -> Vec<(&'static str, &'static str)>
             ("cmd+down", "edit move doc-end"),
             ("alt+cmd+up", "edit add-cursor up"),
             ("alt+cmd+down", "edit add-cursor down"),
+            ("alt+cmd+f", "ui replace"),
         ]),
         Platform::Other => bindings.extend([
             ("ctrl+left", "edit move word-left"),
@@ -610,6 +611,7 @@ pub fn default_bindings(platform: Platform) -> Vec<(&'static str, &'static str)>
             ("shift+insert", "edit paste"),
             ("ctrl+alt+up", "edit add-cursor up"),
             ("ctrl+alt+down", "edit add-cursor down"),
+            ("ctrl+h", "ui replace"),
         ]),
     }
     bindings

@@ -3,6 +3,8 @@
 //!
 //! Elle s'affiche en haut à droite de la zone active, par-dessus le texte. La recherche est
 //! incrémentale : chaque frappe relance la recherche (l'application la fait dans un thread à part).
+//! Une seconde ligne, facultative, donne le texte de remplacement ; Tab passe d'un champ à
+//! l'autre.
 
 use cupride_core::search::SearchQuery;
 use cupride_render::{Layer, Quad, Rect, TextSystem};
@@ -44,6 +46,10 @@ impl FindOption {
 pub struct FindBar {
     /// Motif saisi.
     pub input: TextInput,
+    /// Texte de remplacement, quand la ligne de remplacement est affichée.
+    pub replace: Option<TextInput>,
+    /// Le clavier est dans le champ de remplacement.
+    replace_focused: bool,
     case_sensitive: bool,
     whole_word: bool,
     regex: bool,
@@ -53,6 +59,9 @@ pub struct FindBar {
     input_area: Rect,
     options: Vec<(FindOption, Rect)>,
     text: Label,
+    replace_area: Rect,
+    replace_prompt: Label,
+    replace_text: Label,
     option_labels: Vec<Label>,
     status_label: Label,
 }
@@ -100,6 +109,41 @@ impl FindBar {
         *flag = !*flag;
     }
 
+    /// Affiche la ligne de remplacement, avec `text`.
+    pub fn show_replace(&mut self, text: &str) {
+        if self.replace.is_none() {
+            self.replace = Some(TextInput::with_text(text));
+        }
+    }
+
+    /// Le clavier est-il dans le champ de remplacement ?
+    pub fn replace_focused(&self) -> bool {
+        self.replace_focused && self.replace.is_some()
+    }
+
+    /// Passe le clavier d'un champ à l'autre (s'il y a une ligne de remplacement).
+    pub fn switch_field(&mut self) {
+        self.replace_focused = self.replace.is_some() && !self.replace_focused;
+    }
+
+    /// Donne le clavier au champ de remplacement (`true`) ou de recherche.
+    pub fn focus_replace(&mut self, replace: bool) {
+        self.replace_focused = replace && self.replace.is_some();
+    }
+
+    /// Champ qui a le clavier.
+    pub fn focused_input(&mut self) -> &mut TextInput {
+        match &mut self.replace {
+            Some(replace) if self.replace_focused => replace,
+            _ => &mut self.input,
+        }
+    }
+
+    /// Texte de remplacement.
+    pub fn replacement(&self) -> Option<&str> {
+        self.replace.as_ref().map(TextInput::text)
+    }
+
     /// Texte à droite : « 3/12 », « aucun résultat », ou une erreur (`error`).
     pub fn set_status(&mut self, status: Option<String>, error: bool) {
         self.status = status.map(|s| (s, error));
@@ -121,7 +165,13 @@ impl FindBar {
         let pad = style.px(8.0);
         let width = style.px(WIDTH).min(zone.width - 2.0 * pad).max(0.0);
         let height = Self::height(style).min(zone.height);
-        self.area = Rect::new(zone.right() - width - pad, zone.y + pad, width, height);
+        let rows = if self.replace.is_some() { 2.0 } else { 1.0 };
+        self.area = Rect::new(
+            zone.right() - width - pad,
+            zone.y + pad,
+            width,
+            (rows * height).min(zone.height),
+        );
         self.text
             .set(text, self.input.text(), &style.family, metrics);
         let status = self.status.as_ref().map_or("", |(s, _)| s.as_str());
@@ -156,6 +206,18 @@ impl FindBar {
             (right - pad - self.area.x - pad).max(0.0),
             height,
         );
+        if let Some(replace) = &self.replace {
+            self.replace_prompt.set(text, "par", &style.family, metrics);
+            self.replace_text
+                .set(text, replace.text(), &style.family, metrics);
+            let left = self.area.x + pad + self.replace_prompt.width() + style.px(8.0);
+            self.replace_area = Rect::new(
+                left,
+                self.area.y + height,
+                (self.area.right() - pad - left).max(0.0),
+                height,
+            );
+        }
     }
 
     /// Zone occupée, après [`FindBar::prepare`].
@@ -177,13 +239,30 @@ impl FindBar {
 
     /// Rectangle du curseur de saisie (pour placer la fenêtre de l'IME).
     pub fn cursor_rect(&self, style: &Style) -> Rect {
-        let x = self.input_area.x + self.text.x_at(self.input.cursor());
+        let (area, label, cursor) = match &self.replace {
+            Some(replace) if self.replace_focused => {
+                (self.replace_area, &self.replace_text, replace.cursor())
+            }
+            _ => (self.input_area, &self.text, self.input.cursor()),
+        };
         Rect::new(
-            x.round(),
-            self.text_top(style),
+            (area.x + label.x_at(cursor)).round(),
+            area.y + style.px(6.0),
             style.px(2.0).max(1.0),
             style.line_height,
         )
+    }
+
+    /// Le point (`x`, `y`) est-il sur la ligne de remplacement ?
+    pub fn in_replace(&self, x: f32, y: f32) -> bool {
+        self.replace.is_some()
+            && Rect::new(
+                self.area.x,
+                self.replace_area.y,
+                self.area.width,
+                self.replace_area.height,
+            )
+            .contains(x, y)
     }
 
     /// Dessine la barre.
@@ -222,9 +301,34 @@ impl FindBar {
             self.input_area,
             theme.foreground,
         ));
+        if let Some(replace) = &self.replace {
+            let top = self.replace_area.y + style.px(6.0);
+            layer.texts.extend(self.replace_prompt.item(
+                area.x + style.px(8.0),
+                top,
+                area,
+                theme.muted,
+            ));
+            let selection = replace.selection();
+            if !selection.is_empty() {
+                let x0 = self.replace_text.x_at(selection.start);
+                let x1 = self.replace_text.x_at(selection.end);
+                layer.quads.push(Quad::new(
+                    Rect::new(self.replace_area.x + x0, top, x1 - x0, style.line_height)
+                        .intersect(&self.replace_area),
+                    theme.selection,
+                ));
+            }
+            layer.texts.extend(self.replace_text.item(
+                self.replace_area.x,
+                top,
+                self.replace_area,
+                theme.foreground,
+            ));
+        }
         if cursor_visible {
             layer.overlays.push(Quad::new(
-                self.cursor_rect(style).intersect(&self.input_area),
+                self.cursor_rect(style).intersect(&area),
                 theme.cursor,
             ));
         }
@@ -293,5 +397,29 @@ mod tests {
         // Zone étroite : la barre s'y réduit.
         bar.prepare(&mut text, &style(), Rect::new(0.0, 0.0, 200.0, 300.0));
         assert!(bar.area().width <= 184.0);
+    }
+
+    #[test]
+    fn ligne_de_remplacement() {
+        let mut bar = FindBar::new(&SearchQuery::new("a"));
+        bar.switch_field();
+        assert!(!bar.replace_focused(), "pas de champ de remplacement");
+        bar.show_replace("b");
+        bar.switch_field();
+        assert!(bar.replace_focused());
+        bar.focused_input().insert("c");
+        assert_eq!(bar.replacement(), Some("bc"));
+        assert_eq!(bar.input.text(), "a");
+        let mut text = TextSystem::new();
+        bar.prepare(&mut text, &style(), Rect::new(0.0, 0.0, 800.0, 600.0));
+        assert_eq!(
+            bar.area().height,
+            2.0 * FindBar::height(&style()),
+            "deux lignes"
+        );
+        let area = bar.area();
+        assert!(bar.in_replace(area.x + 5.0, area.bottom() - 5.0));
+        assert!(!bar.in_replace(area.x + 5.0, area.y + 5.0));
+        assert!(bar.cursor_rect(&style()).y > area.y + FindBar::height(&style()) - 1.0);
     }
 }

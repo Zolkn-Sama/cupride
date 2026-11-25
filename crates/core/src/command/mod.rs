@@ -19,6 +19,13 @@ pub fn quote(argument: &str) -> String {
     shlex::try_quote(argument).map_or_else(|_| argument.to_owned(), |q| q.into_owned())
 }
 
+/// Document actif et son identifiant, ou erreur s'il n'y en a pas.
+pub(crate) fn builtin_active(
+    editor: &mut crate::Editor,
+) -> Result<(crate::DocumentId, &mut crate::Document), CommandError> {
+    builtin::active(editor)
+}
+
 /// Registre des seules commandes intégrées : pour reconnaître une commande sans éditeur (CLI).
 pub fn builtin_registry() -> CommandRegistry {
     let mut registry = CommandRegistry::new();

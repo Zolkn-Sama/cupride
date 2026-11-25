@@ -68,6 +68,53 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
         |editor, _| Ok(position(editor.select_match(false, None)?)),
     ))?;
 
+    registry.register(
+        CommandDef::new(
+            "search",
+            "replace",
+            "Remplace l'occurrence sélectionnée, puis sélectionne la suivante ($1, ${nom} : groupes de capture avec --regex)",
+            |editor, args| {
+                let with = args.get_one::<String>("texte").cloned().unwrap_or_default();
+                Ok(match editor.replace_match(&with)? {
+                    Some(at) => position(at),
+                    None => CommandOutput::message("plus aucune occurrence"),
+                })
+            },
+        )
+        .arg(Arg::new("texte").required(true).help("Texte de remplacement")),
+    )?;
+
+    registry.register(
+        CommandDef::new(
+            "search",
+            "replace-all",
+            "Remplace toutes les occurrences, en une seule modification annulable",
+            |editor, args| {
+                let with = args.get_one::<String>("texte").cloned().unwrap_or_default();
+                let count = editor.replace_all(&with)?;
+                Ok(CommandOutput::message(format!(
+                    "{count} remplacement{}",
+                    if count > 1 { "s" } else { "" }
+                )))
+            },
+        )
+        .arg(
+            Arg::new("texte")
+                .required(true)
+                .help("Texte de remplacement"),
+        ),
+    )?;
+
+    registry.register(CommandDef::new(
+        "ui",
+        "replace",
+        "Ouvre la barre de recherche avec le champ de remplacement",
+        |editor, _| {
+            editor.request_ui(UiRequest::Replace(prefill(editor)));
+            Ok(CommandOutput::None)
+        },
+    ))?;
+
     registry.register(CommandDef::new(
         "search",
         "clear",

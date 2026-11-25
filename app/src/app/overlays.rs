@@ -44,6 +44,7 @@ impl App {
                     self.open_palette();
                 }
                 UiRequest::Find(pattern) => self.open_find(&pattern),
+                UiRequest::Replace(pattern) => self.open_replace(&pattern),
                 UiRequest::QuickOpen => {
                     self.close_overlays();
                     self.open_quick_open();
