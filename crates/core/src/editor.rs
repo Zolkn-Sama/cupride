@@ -493,9 +493,15 @@ impl Editor {
         self.keymap = keymap;
         self.theme = config.view.theme.clone();
         self.config = config;
-        let delay = self.config.editor.undo_group_delay();
+        let config = &self.config;
         for (_, document) in &mut self.documents {
-            document.history_mut().set_group_delay(delay);
+            document
+                .history_mut()
+                .set_group_delay(config.editor.undo_group_delay());
+            let language = document.path().and_then(crate::language::language_of);
+            let (style, width) = config.indent_for(language);
+            let sample = document_sample(document);
+            document.set_indent(crate::indent::resolve(style, width, &sample), false);
         }
         issues
     }
@@ -523,6 +529,10 @@ impl Editor {
         document
             .history_mut()
             .set_group_delay(self.config.editor.undo_group_delay());
+        let language = document.path().and_then(crate::language::language_of);
+        let (style, width) = self.config.indent_for(language);
+        let sample = document_sample(document);
+        document.set_indent(crate::indent::resolve(style, width, &sample), false);
     }
 
     /// Identifiant du thème en cours.
@@ -734,6 +744,19 @@ impl Editor {
     pub fn workspace_mut(&mut self) -> &mut Workspace {
         &mut self.workspace
     }
+}
+
+/// Début d'un document, assez pour détecter son indentation.
+fn document_sample(document: &Document) -> String {
+    use cupride_text::TextBuffer;
+    let buffer = document.buffer();
+    let end = buffer
+        .line_to_byte(buffer.len_lines().min(2_000).saturating_sub(1))
+        .unwrap_or(0);
+    let end = buffer
+        .line_content_range(buffer.byte_to_line(end).unwrap_or(0))
+        .map_or(end, |r| r.end);
+    buffer.slice(0..end).unwrap_or_default()
 }
 
 /// Chemin absolu et canonique : deux chemins menant au même fichier donnent le même résultat.
