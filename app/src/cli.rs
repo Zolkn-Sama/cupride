@@ -9,6 +9,8 @@
 //! cupride --window 2 a.rs      dans la fenêtre 2 de l'instance
 //! cupride --wait COMMIT_MSG    attend la fermeture du fichier (éditeur de Git)
 //! cupride panel focus left     commande interne, même syntaxe que la ligne de commande
+//! cupride --new-instance       instance indépendante, configuration vierge
+//! cupride --new-instance --config-dir ~/essai   instance indépendante, avec ce dossier
 //! cupride --version | --help
 //! ```
 //!
@@ -39,6 +41,10 @@ pub(crate) struct Launch {
     pub(crate) wait: bool,
     /// Commande interne (`groupe commande arguments…`), au lieu de fichiers.
     pub(crate) command: Option<Vec<String>>,
+    /// Instance indépendante : ni transmise à l'instance en marche, ni joignable (`--new-instance`).
+    pub(crate) new_instance: bool,
+    /// Dossier de configuration et de données de l'instance indépendante (`--config-dir`).
+    pub(crate) config_dir: Option<PathBuf>,
 }
 
 /// Ce que demande la ligne de commande.
@@ -94,6 +100,29 @@ fn command() -> Command {
                 .help_heading("Options"),
         )
         .arg(
+            Arg::new("new-instance")
+                .long("new-instance")
+                .action(ArgAction::SetTrue)
+                .help(
+                    "Lance une instance indépendante, avec son propre dossier de configuration \
+                     (vierge et temporaire, sauf --config-dir) : la session habituelle n'est pas \
+                     touchée",
+                )
+                .help_heading("Options"),
+        )
+        .arg(
+            Arg::new("config-dir")
+                .long("config-dir")
+                .value_name("dossier")
+                .value_parser(value_parser!(PathBuf))
+                .requires("new-instance")
+                .help(
+                    "Dossier de l'instance indépendante : config.toml, themes/, et ses données \
+                     (session, layouts, historique) dans data/",
+                )
+                .help_heading("Options"),
+        )
+        .arg(
             Arg::new("help")
                 .short('h')
                 .long("help")
@@ -112,7 +141,7 @@ fn command() -> Command {
 }
 
 /// Options qui prennent une valeur : leur valeur n'est pas un groupe de commandes.
-const OPTIONS_WITH_VALUE: [&str; 1] = ["--window"];
+const OPTIONS_WITH_VALUE: [&str; 2] = ["--window", "--config-dir"];
 
 /// Analyse les arguments (sans le nom du programme). `is_group` reconnaît les groupes de
 /// commandes (`file`, `panel`…) : le premier argument qui en est un, après les options, fait de
@@ -166,6 +195,8 @@ where
             window: matches.get_one::<u64>("window").copied(),
             wait: matches.get_flag("wait"),
             command: internal,
+            new_instance: matches.get_flag("new-instance"),
+            config_dir: matches.get_one::<PathBuf>("config-dir").cloned(),
         }),
         Err(error) => match error.kind() {
             clap::error::ErrorKind::DisplayHelp => Cli::Print(error.render().to_string()),
@@ -407,5 +438,23 @@ mod tests {
         };
         assert_eq!(launch.command, None);
         assert!(matches!(p(["--window", "x"]), Cli::Error(_)));
+    }
+
+    #[test]
+    fn instance_independante() {
+        let Cli::Run(launch) = p(["--new-instance", "--config-dir", "essai", "a.rs"]) else {
+            panic!("lancement attendu");
+        };
+        assert!(launch.new_instance);
+        assert_eq!(launch.config_dir, Some(PathBuf::from("essai")));
+        assert_eq!(launch.paths, vec![PathBuf::from("a.rs")]);
+        let Cli::Error(error) = p(["--config-dir", "essai"]) else {
+            panic!("--config-dir seul refusé");
+        };
+        assert!(error.contains("--new-instance"), "{error}");
+        let Cli::Run(launch) = p(["--new-instance", "--config-dir", "file"]) else {
+            panic!("lancement attendu");
+        };
+        assert_eq!(launch.command, None, "valeur d'option, pas un groupe");
     }
 }

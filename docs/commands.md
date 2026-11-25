@@ -25,6 +25,7 @@ cupride [--window N] <groupe> <commande> [arguments]
 | `cupride --window 2 a.rs` | Ouvre dans la fenêtre 2 de l'instance en marche. |
 | `cupride --wait COMMIT_EDITMSG` | Ouvre le fichier et attend qu'il soit fermé avant de rendre la main : CuprIDE peut servir d'éditeur à Git (`git config --global core.editor "cupride --wait"`). Sans instance en marche, CuprIDE s'arrête à la fermeture du fichier, comme un éditeur de terminal. |
 | `cupride panel focus left` | Exécute une commande dans l'instance en marche, avec la même syntaxe que la ligne de commande interne. |
+| `cupride --new-instance [--config-dir dossier]` | Lance une instance indépendante, pour essayer une configuration sans toucher à sa session : elle ne passe pas par l'instance en marche et ne lui répond pas. Son dossier : `config.toml`, `themes/`, et ses données (session, layouts, historique) dans `data/`. Sans `--config-dir`, un dossier temporaire vierge, supprimé à la sortie. |
 | `cupride --help`, `cupride --version` | Aide, version. |
 
 **Instance unique** : un seul CuprIDE tourne par utilisateur ; toutes ses fenêtres partagent les

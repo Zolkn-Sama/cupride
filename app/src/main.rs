@@ -33,16 +33,45 @@ fn main() -> anyhow::Result<()> {
     };
 
     // Instance unique : si CuprIDE tourne déjà, il reçoit la ligne de commande, et ce processus
-    // affiche sa réponse puis se termine. Sinon, ce processus devient l'instance principale.
-    let server = match single_instance() {
-        Instance::Forwarded(code) => std::process::exit(code),
-        Instance::Primary(server) => server,
+    // affiche sa réponse puis se termine. Sinon, ce processus devient l'instance principale. Une
+    // instance indépendante (--new-instance) ne cherche pas l'instance et n'écoute pas.
+    let server = if launch.new_instance {
+        None
+    } else {
+        match single_instance() {
+            Instance::Forwarded(code) => std::process::exit(code),
+            Instance::Primary(server) => server,
+        }
+    };
+    // Dossier de l'instance indépendante : celui demandé, sinon un dossier temporaire vierge,
+    // supprimé à la sortie.
+    let mut temporary = None;
+    let instance_dir = if launch.new_instance {
+        match &launch.config_dir {
+            Some(dir) => Some(std::path::absolute(dir).unwrap_or_else(|_| dir.clone())),
+            None => {
+                let dir = tempfile::Builder::new()
+                    .prefix("cupride-instance-")
+                    .tempdir()
+                    .context("dossier temporaire de l'instance indépendante")?;
+                let path = dir.path().to_path_buf();
+                temporary = Some(dir);
+                Some(path)
+            }
+        }
+    } else {
+        None
     };
 
     let _log_guard = logging::init();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "démarrage de CuprIDE");
 
     let mut editor = Editor::new();
+    if let Some(dir) = &instance_dir {
+        tracing::info!(dossier = %dir.display(), "instance indépendante");
+        editor.set_config_path(Some(dir.join("config.toml")));
+        editor.set_data_dir(Some(dir.join("data")));
+    }
     editor.set_clipboard(clipboard::SystemClipboard::new_or_memory());
     // Supprimer depuis l'explorateur met à la corbeille de l'OS.
     editor.set_trash(Box::new(|path| {
@@ -56,7 +85,7 @@ fn main() -> anyhow::Result<()> {
     // Un fichier ou un dossier illisible n'empêche pas de démarrer : il est signalé, comme un
     // fichier de la session supprimé entre-temps.
     let sessions = (launch.restore && editor.config().session.restore)
-        .then(cupride_core::session::sessions_dir)
+        .then(|| editor.sessions_dir())
         .flatten();
     let opened = cli::open(&mut editor, &launch.paths, sessions.as_deref());
     let mut problems = opened.problems;
@@ -105,6 +134,7 @@ fn main() -> anyhow::Result<()> {
                 tracing::warn!("instance unique indisponible : {error}");
             }
         }
+        None if launch.new_instance => {}
         None => tracing::warn!("instance unique indisponible : cette instance reste seule"),
     }
     let mut app = app::App::new(editor, event_loop.create_proxy(), remote);
@@ -120,6 +150,8 @@ fn main() -> anyhow::Result<()> {
     if let Some(message) = app.fatal_error() {
         anyhow::bail!("CuprIDE ne peut pas démarrer : {message}");
     }
+    // Le dossier temporaire d'une instance indépendante est supprimé maintenant.
+    drop(temporary);
     tracing::info!("arrêt de CuprIDE");
     Ok(())
 }

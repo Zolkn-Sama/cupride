@@ -65,6 +65,8 @@ pub struct Editor {
     keymap: Keymap,
     config: Config,
     config_path: Option<PathBuf>,
+    /// Dossier des données (sessions, layouts, historique des commandes).
+    data_dir: Option<PathBuf>,
     /// Dossier des layouts nommés (un sous-dossier par projet).
     layouts_dir: Option<PathBuf>,
     events: EventBus,
@@ -111,8 +113,10 @@ impl Editor {
             .expect("les commandes intégrées ont des noms uniques");
         editor.keymap = Keymap::with_defaults(Platform::current());
         editor.config_path = config::default_path();
-        editor.layouts_dir = directories::ProjectDirs::from("", "", "cupride")
-            .map(|dirs| dirs.data_dir().join("layouts"));
+        editor.set_data_dir(
+            directories::ProjectDirs::from("", "", "cupride")
+                .map(|dirs| dirs.data_dir().to_path_buf()),
+        );
         editor
     }
 
@@ -133,6 +137,7 @@ impl Editor {
             keymap: Keymap::new(),
             config: Config::default(),
             config_path: None,
+            data_dir: None,
             layouts_dir: None,
             events: EventBus::new(),
             published: SecondaryMap::new(),
@@ -420,6 +425,24 @@ impl Editor {
     /// Change l'emplacement du fichier de configuration.
     pub fn set_config_path(&mut self, path: Option<PathBuf>) {
         self.config_path = path;
+    }
+
+    /// Dossier des données : sessions, layouts nommés, historique des commandes (par défaut,
+    /// celui de l'OS).
+    pub fn data_dir(&self) -> Option<&Path> {
+        self.data_dir.as_deref()
+    }
+
+    /// Change le dossier des données (instance indépendante) ; les layouts nommés vont dans son
+    /// sous-dossier `layouts`.
+    pub fn set_data_dir(&mut self, dir: Option<PathBuf>) {
+        self.layouts_dir = dir.as_ref().map(|d| d.join("layouts"));
+        self.data_dir = dir;
+    }
+
+    /// Dossier des sessions, dans le dossier des données.
+    pub fn sessions_dir(&self) -> Option<PathBuf> {
+        self.data_dir.as_ref().map(|d| d.join("sessions"))
     }
 
     /// Dossier des layouts nommés (par défaut, `layouts/` dans le dossier de données de l'OS).
