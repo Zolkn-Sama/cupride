@@ -11,6 +11,7 @@ use std::fmt;
 use std::time::Instant;
 
 use cupride_core::layout::{Bounds, Divider, DropTarget, PanelId, PanelKind, Placement};
+use cupride_core::session::ScrollPosition;
 use cupride_core::{DocumentId, Editor};
 use cupride_render::{Color, Layer, Quad, Rect, TextSystem};
 
@@ -68,6 +69,14 @@ pub trait PanelView: Any {
         Pointer::Default
     }
 
+    /// Défilement à garder dans la session, pour les vues qui défilent.
+    fn scroll_position(&self) -> Option<ScrollPosition> {
+        None
+    }
+
+    /// Reprend le défilement enregistré dans la session.
+    fn set_scroll_position(&mut self, _position: ScrollPosition) {}
+
     /// Pour retrouver le type concret de la vue.
     fn as_any(&self) -> &dyn Any;
 
@@ -123,6 +132,14 @@ impl PanelView for EditorView {
 
     fn pointer_at(&self, x: f32, y: f32) -> Pointer {
         EditorView::pointer_at(self, x, y)
+    }
+
+    fn scroll_position(&self) -> Option<ScrollPosition> {
+        Some(EditorView::scroll_position(self))
+    }
+
+    fn set_scroll_position(&mut self, position: ScrollPosition) {
+        EditorView::set_scroll_position(self, position);
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -368,7 +385,11 @@ impl PanelViews {
                 .registry
                 .create(panel.kind(), id, &self.settings, self.scale)
             {
-                Some(view) => {
+                Some(mut view) => {
+                    // Vue d'un panneau restauré : elle reprend son défilement.
+                    if let Some(scroll) = editor.panel_scroll(id) {
+                        view.set_scroll_position(scroll);
+                    }
                     self.views.insert(id, view);
                 }
                 None => {
@@ -533,6 +554,17 @@ impl PanelViews {
         ] {
             layer.quads.push(Quad::new(edge, accent));
         }
+    }
+
+    /// Défilement de chaque vue, à garder dans la session.
+    pub fn scroll_positions(&self) -> Vec<(PanelId, ScrollPosition)> {
+        let mut positions: Vec<(PanelId, ScrollPosition)> = self
+            .views
+            .iter()
+            .filter_map(|(panel, view)| Some((*panel, view.scroll_position()?)))
+            .collect();
+        positions.sort_by_key(|(panel, _)| *panel);
+        positions
     }
 
     /// Onglet sous le point (`x`, `y`).
@@ -894,5 +926,37 @@ mod tests {
         views.layout(&mut text, &editor, Rect::new(0.0, 0.0, 801.0, 600.0));
         assert_eq!(views.zones().len(), 2);
         assert_eq!(views.zones()[1].active, Some(left));
+    }
+
+    #[test]
+    fn defilement_garde_et_repris() {
+        let mut editor = Editor::new();
+        editor.insert_document(cupride_core::Document::from_text(&"ligne\n".repeat(500)));
+        let panel = editor.active_panel().unwrap();
+        let mut text = TextSystem::new();
+        let mut views = PanelViews::new(ViewRegistry::default(), ViewSettings::default(), 2.0);
+        let area = Rect::new(0.0, 0.0, 800.0, 600.0);
+        views.layout(&mut text, &editor, area);
+        views.prepare(&mut text, &editor, &Theme::default(), true, true);
+        let line = views.editor_view(panel).unwrap().line_height();
+        views
+            .view_mut(panel)
+            .unwrap()
+            .scroll_by(0.0, 40.0 * line, false, Instant::now());
+        let saved = views.scroll_positions();
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].1.line, 40.0);
+
+        // Une vue neuve (autre écran : échelle 1) reprend la même ligne.
+        editor.set_panel_scroll(panel, saved[0].1);
+        let mut views = PanelViews::new(ViewRegistry::default(), ViewSettings::default(), 1.0);
+        views.layout(&mut text, &editor, area);
+        views.prepare(&mut text, &editor, &Theme::default(), true, true);
+        let view = views.editor_view(panel).unwrap();
+        assert_eq!(
+            view.visible_lines().start,
+            39,
+            "une ligne de marge au-dessus"
+        );
     }
 }

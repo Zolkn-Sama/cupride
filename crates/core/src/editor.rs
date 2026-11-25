@@ -44,6 +44,9 @@ pub struct Editor {
     workspace: Workspace,
     /// Document affiché par chaque panneau éditeur.
     pub(crate) panel_documents: BTreeMap<PanelId, DocumentId>,
+    /// Défilement à donner aux vues des panneaux (session restaurée, ou mémorisé pour la
+    /// session).
+    pub(crate) panel_scrolls: BTreeMap<PanelId, crate::session::ScrollPosition>,
     /// Types de panneaux connus (intégrés, puis ceux de l'interface et des plugins).
     panel_kinds: BTreeSet<String>,
     commands: CommandRegistry,
@@ -98,6 +101,7 @@ impl Editor {
             active: None,
             workspace: Workspace::new(),
             panel_documents: BTreeMap::new(),
+            panel_scrolls: BTreeMap::new(),
             panel_kinds: [PanelKind::EDITOR, PanelKind::EXPLORER]
                 .into_iter()
                 .map(ToOwned::to_owned)

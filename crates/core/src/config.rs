@@ -91,6 +91,11 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # (ou avec « tab keep »).
 # preview = false
 
+[session]
+# Au lancement, l'espace de travail du projet (zones, onglets, fichiers, curseurs, défilement)
+# est restauré tel qu'il était à la fermeture. « cupride --no-restore » démarre sans le restaurer.
+# restore = true
+
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les
 # remplacent pour les mêmes touches. Une chaîne vide retire un raccourci par défaut.
@@ -288,6 +293,20 @@ pub struct TabsConfig {
     pub preview: bool,
 }
 
+/// Section `[session]` : espace de travail entre deux lancements.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct SessionConfig {
+    /// Restaurer la session du projet au lancement.
+    pub restore: bool,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self { restore: true }
+    }
+}
+
 /// Configuration complète.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
@@ -304,12 +323,14 @@ pub struct Config {
     pub status_bar: StatusBarConfig,
     /// Section `[tabs]`.
     pub tabs: TabsConfig,
+    /// Section `[session]`.
+    pub session: SessionConfig,
     /// Section `[keys]` : touches → ligne de commande (vide pour retirer un raccourci).
     pub keys: BTreeMap<String, String>,
 }
 
 /// Clés connues, pour signaler les fautes de frappe.
-const KNOWN_KEYS: [(&str, &[&str]); 7] = [
+const KNOWN_KEYS: [(&str, &[&str]); 8] = [
     (
         "editor",
         &["line_ending", "undo_group_delay_ms", "primary_selection"],
@@ -328,6 +349,7 @@ const KNOWN_KEYS: [(&str, &[&str]); 7] = [
     ("notifications", &["timeout_ms", "error_timeout_ms"]),
     ("status_bar", &["left", "right"]),
     ("tabs", &["preview"]),
+    ("session", &["restore"]),
     ("keys", &[]),
 ];
 

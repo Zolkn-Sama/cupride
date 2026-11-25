@@ -16,8 +16,8 @@ use winit::event_loop::{ControlFlow, EventLoop};
 
 fn main() -> anyhow::Result<()> {
     // La ligne de commande d'abord : --help et --version n'ouvrent ni journal ni fenêtre.
-    let paths = match cli::parse(std::env::args_os().skip(1)) {
-        cli::Cli::Run(paths) => paths,
+    let launch = match cli::parse(std::env::args_os().skip(1)) {
+        cli::Cli::Run(launch) => launch,
         cli::Cli::Print(text) => {
             print!("{text}");
             return Ok(());
@@ -38,8 +38,12 @@ fn main() -> anyhow::Result<()> {
         editor.notify(Level::Warning, format!("configuration : {message}"));
     }
 
-    // Un fichier ou un dossier illisible n'empêche pas de démarrer : il est signalé.
-    let problems = cli::open(&mut editor, &paths);
+    // Un fichier ou un dossier illisible n'empêche pas de démarrer : il est signalé, comme un
+    // fichier de la session supprimé entre-temps.
+    let sessions = (launch.restore && editor.config().session.restore)
+        .then(cupride_core::session::sessions_dir)
+        .flatten();
+    let problems = cli::open(&mut editor, &launch.paths, sessions.as_deref());
     for problem in problems {
         tracing::warn!("{problem}");
         editor.notify(Level::Warning, problem);

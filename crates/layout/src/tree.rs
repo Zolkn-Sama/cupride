@@ -783,6 +783,29 @@ impl LayoutTree {
             .and_then(|(_, _, a)| a.group.active())
     }
 
+    /// Renomme chaque panneau `p` en `rename(p)` (identifiants neufs d'un layout chargé).
+    pub fn rename(&mut self, rename: &mut dyn FnMut(PanelId) -> PanelId) {
+        fn walk(node: &mut Node, rename: &mut dyn FnMut(PanelId) -> PanelId) {
+            match node {
+                Node::Tabs(group) => {
+                    let renamed: Vec<(PanelId, PanelId)> =
+                        group.panels.iter().map(|p| (*p, rename(*p))).collect();
+                    group.preview = group
+                        .preview
+                        .and_then(|p| renamed.iter().find(|(old, _)| *old == p))
+                        .map(|(_, new)| *new);
+                    group.panels = renamed.into_iter().map(|(_, new)| new).collect();
+                }
+                Node::Split(split) => split
+                    .children
+                    .iter_mut()
+                    .for_each(|c| walk(&mut c.node, rename)),
+            }
+        }
+        walk(&mut self.root, rename);
+        self.normalize();
+    }
+
     /// Vérifie les invariants (voir la [documentation du module](self)).
     pub fn is_valid(&self) -> bool {
         fn check(

@@ -130,6 +130,7 @@ impl Editor {
     /// Le panneau éditeur `panel` affiche désormais `document` ; l'ancien document est fermé
     /// s'il n'est plus affiché nulle part et n'a pas de modifications.
     fn rebind(&mut self, panel: PanelId, document: DocumentId) {
+        self.panel_scrolls.remove(&panel);
         let Some(old) = self.panel_documents.insert(panel, document) else {
             return;
         };
@@ -271,6 +272,7 @@ impl Editor {
     /// Retire le panneau `panel` du workspace et du document qu'il affichait.
     pub(crate) fn remove_panel(&mut self, panel: PanelId) {
         self.workspace_mut().remove(panel);
+        self.panel_scrolls.remove(&panel);
         if let Some(doc) = self.panel_documents.remove(&panel)
             && let Some(document) = self.document_mut(doc)
         {
