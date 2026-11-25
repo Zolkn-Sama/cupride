@@ -180,6 +180,18 @@ l'autre ; dans le champ de remplacement, Entrée remplace l'occurrence sélectio
 suivante, `mod+Entrée` remplace tout. Au-delà de 100 000 occurrences, seules les
 100 000 premières sont gardées (« limite »).
 
+## Multi-curseurs
+
+| Commande | Description |
+|---|---|
+| `edit add-cursor up`, `down` | Ajoute un curseur sur la ligne au-dessus ou en dessous (aussi : Alt+clic). |
+| `edit add-next-occurrence` | Sur un curseur, sélectionne le mot ; puis ajoute une sélection à l'occurrence suivante de son texte, en revenant au début (`mod+d`). |
+| `edit select-all-occurrences` | Une sélection sur chaque occurrence du texte sélectionné ou du mot sous le curseur (`mod+shift+l`). |
+| `edit keep-primary` | Revient à un seul curseur (`Échap`). |
+
+Toutes les commandes d'édition (frappe, effacement, déplacements, couper, copier, coller)
+agissent à chaque curseur.
+
 ## `config` — configuration
 
 Voir [`configuration.md`](configuration.md) pour les options.

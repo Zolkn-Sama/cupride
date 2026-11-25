@@ -560,6 +560,8 @@ pub fn default_bindings(platform: Platform) -> Vec<(&'static str, &'static str)>
         ("mod+\\", "split right"),
         ("mod+shift+e", "explorer show"),
         ("mod+f", "ui find"),
+        ("mod+d", "edit add-next-occurrence"),
+        ("mod+shift+l", "edit select-all-occurrences"),
         ("mod+shift+f", "ui search-project"),
         ("f3", "search next"),
         ("shift+f3", "search previous"),

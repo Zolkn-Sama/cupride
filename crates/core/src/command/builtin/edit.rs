@@ -14,6 +14,7 @@ use cupride_text::{
 
 use super::active;
 use crate::clipboard::{ClipboardKind, LastCopy, split_for_cursors};
+use crate::command::CommandResult;
 use crate::command::{CommandDef, CommandError, CommandOutput, CommandRegistry};
 use crate::editor::Editor;
 
@@ -209,6 +210,20 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
 
     registry.register(CommandDef::new(
         "edit",
+        "add-next-occurrence",
+        "Sélectionne le mot sous le curseur, puis ajoute une sélection à chaque occurrence suivante",
+        |editor, _| next_occurrence(editor),
+    ))?;
+
+    registry.register(CommandDef::new(
+        "edit",
+        "select-all-occurrences",
+        "Place une sélection sur chaque occurrence du texte sélectionné (ou du mot sous le curseur)",
+        |editor, _| all_occurrences(editor),
+    ))?;
+
+    registry.register(CommandDef::new(
+        "edit",
         "copy",
         "Copie les sélections dans le presse-papiers (un fragment par sélection)",
         |editor, _| {
@@ -273,6 +288,86 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
     )?;
 
     Ok(())
+}
+
+/// Texte à chercher pour les occurrences : la sélection principale, ou le mot sous le curseur
+/// (qui devient alors la sélection principale ; le booléen le signale). `None` hors de tout mot.
+fn occurrence_text(document: &mut crate::Document) -> Result<Option<(String, bool)>, CommandError> {
+    let primary = document.selections().primary();
+    if !primary.is_empty() {
+        return Ok(Some((document.buffer().slice(primary.range())?, false)));
+    }
+    let word = movement::word_range(document.buffer(), primary.head)?;
+    if word.is_empty() {
+        return Ok(None);
+    }
+    let mut selections = document.selections().clone();
+    let index = selections.primary_index();
+    let mut ranges = selections.as_slice().to_vec();
+    ranges[index] = Selection::new(word.start, word.end);
+    if let Some(updated) = Selections::from_vec(ranges, index) {
+        selections = updated;
+    }
+    document.set_selections(selections);
+    Ok(Some((document.buffer().slice(word)?, true)))
+}
+
+/// `edit add-next-occurrence` : sur un curseur, sélectionne le mot ; sur une sélection, ajoute la
+/// prochaine occurrence de son texte (en revenant au début), qui devient la principale.
+fn next_occurrence(editor: &mut Editor) -> CommandResult {
+    let (_, document) = active(editor)?;
+    // Sur un curseur, la première fois, le mot est seulement sélectionné.
+    let Some((needle, false)) = occurrence_text(document)? else {
+        return Ok(CommandOutput::None);
+    };
+    let text = document.buffer().to_text();
+    let after = document.selections().primary().end();
+    let taken = |start: usize| {
+        document
+            .selections()
+            .iter()
+            .any(|s| s.start() == start && s.end() == start + needle.len())
+    };
+    let found = text[after..]
+        .match_indices(&needle)
+        .map(|(i, _)| after + i)
+        .chain(text[..after].match_indices(&needle).map(|(i, _)| i))
+        .find(|&start| !taken(start));
+    let Some(start) = found else {
+        return Ok(CommandOutput::message(
+            "toutes les occurrences sont sélectionnées",
+        ));
+    };
+    let mut selections = document.selections().clone();
+    selections.push(Selection::new(start, start + needle.len()));
+    document.set_selections(selections);
+    Ok(CommandOutput::None)
+}
+
+/// `edit select-all-occurrences` : une sélection par occurrence ; la principale reste où elle était.
+fn all_occurrences(editor: &mut Editor) -> CommandResult {
+    let (_, document) = active(editor)?;
+    let Some((needle, _)) = occurrence_text(document)? else {
+        return Ok(CommandOutput::None);
+    };
+    let primary = document.selections().primary();
+    let text = document.buffer().to_text();
+    let ranges: Vec<Selection> = text
+        .match_indices(&needle)
+        .map(|(i, _)| Selection::new(i, i + needle.len()))
+        .collect();
+    let index = ranges
+        .iter()
+        .position(|s| s.start() == primary.start())
+        .unwrap_or(0);
+    let count = ranges.len();
+    if let Some(selections) = Selections::from_vec(ranges, index) {
+        document.set_selections(selections);
+    }
+    Ok(CommandOutput::message(format!(
+        "{count} occurrence{}",
+        if count > 1 { "s" } else { "" }
+    )))
 }
 
 /// Copie le texte des sélections non vides dans le presse-papiers, séparé par la fin de ligne du
@@ -743,5 +838,44 @@ mod tests {
             e.execute("edit move nulle-part"),
             Err(CommandError::InvalidArguments { .. })
         ));
+    }
+
+    #[test]
+    fn occurrences_et_edition_a_chaque_curseur() {
+        let mut e = editor_with("chat chien chat\nun chat", 1);
+        run(&mut e, &["edit add-next-occurrence"]);
+        let sel = |e: &Editor| {
+            e.active_document()
+                .unwrap()
+                .selections()
+                .iter()
+                .map(|s| s.range())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(sel(&e), vec![0..4], "le mot sous le curseur");
+        run(
+            &mut e,
+            &["edit add-next-occurrence", "edit add-next-occurrence"],
+        );
+        assert_eq!(sel(&e), vec![0..4, 11..15, 19..23]);
+        assert_eq!(
+            e.execute("edit add-next-occurrence").unwrap(),
+            CommandOutput::message("toutes les occurrences sont sélectionnées")
+        );
+        // Toutes les commandes d'édition agissent à chaque curseur.
+        run(&mut e, &["edit insert 'loup'"]);
+        assert_eq!(text(&e), "loup chien loup\nun loup");
+        run(
+            &mut e,
+            &["edit delete-backward", "edit move left", "edit insert X"],
+        );
+        assert_eq!(text(&e), "loXu chien loXu\nun loXu");
+        run(&mut e, &["edit keep-primary"]);
+        assert_eq!(heads(&e).len(), 1, "Échap : un seul curseur");
+        let mut e = editor_with("a b a b a", 0);
+        assert_eq!(
+            e.execute("edit select-all-occurrences").unwrap(),
+            CommandOutput::message("3 occurrences")
+        );
     }
 }
