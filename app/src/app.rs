@@ -48,6 +48,7 @@ use crate::close::{CloseDecision, CloseGuard};
 use crate::file_index::{AppEvent, FileIndex};
 use crate::input;
 use crate::latency::LatencyStats;
+use crate::redraw::Stamp;
 use crate::watcher::DiskWatcher;
 
 /// Taille initiale de la fenêtre, en pixels logiques.
@@ -64,6 +65,8 @@ struct WindowState {
     /// Vues des panneaux de cette fenêtre, et place de chaque zone.
     views: PanelViews,
     status_bar: StatusBar,
+    /// Ce que la fenêtre affichait à son dernier dessin.
+    stamp: Option<Stamp>,
     window: Arc<Window>,
 }
 
@@ -105,6 +108,11 @@ pub(crate) struct App {
     current: LayoutWindowId,
     /// La boucle a démarré (la première fenêtre a pu être ouverte).
     started: bool,
+    /// Génération de l'apparence (thème, police, zoom) : quand elle change, toutes les fenêtres
+    /// sont redessinées.
+    look: u64,
+    /// Réglages d'affichage et zoom déjà appliqués.
+    applied_look: Option<(ViewSettings, f32)>,
     close_guard: CloseGuard,
     blink: CursorBlink,
     /// La fenêtre a-t-elle le focus clavier ? Sans focus, les curseurs sont masqués et ne
@@ -236,6 +244,8 @@ impl App {
             os_windows: HashMap::new(),
             current: LayoutWindowId::new(1),
             started: false,
+            look: 0,
+            applied_look: None,
             close_guard: CloseGuard::default(),
             toasts: Toasts::default(),
             fatal: None,
@@ -477,6 +487,15 @@ impl App {
         if self.editor.theme() != self.theme_id {
             self.apply_theme();
         }
+        let look = (
+            ViewSettings::from_config(self.editor.config()),
+            self.editor.zoom(),
+        );
+        if self.applied_look.as_ref() != Some(&look) {
+            self.applied_look = Some(look);
+            self.look += 1;
+            self.redraw_all();
+        }
         let config = self.editor.config();
         self.blink.configure(
             config.view.cursor_blink,
@@ -507,7 +526,8 @@ impl App {
             }
         }
         self.theme_id = id;
-        self.request_redraw();
+        self.look += 1;
+        self.redraw_all();
     }
 
     /// Bouton gauche enfoncé : curseur, mot ou ligne selon le nombre de clics ; Maj étend la
@@ -828,8 +848,18 @@ impl App {
         state.window.request_redraw();
     }
 
-    /// Redessine toutes les fenêtres.
+    /// Redessine la fenêtre courante, et les autres fenêtres seulement si ce qu'elles affichent
+    /// a changé.
     fn request_redraw(&self) {
+        for (id, state) in &self.windows {
+            if *id == self.current || state.stamp != Stamp::of(&self.editor, *id, self.look) {
+                state.window.request_redraw();
+            }
+        }
+    }
+
+    /// Redessine toutes les fenêtres (focus, apparence).
+    fn redraw_all(&self) {
         for state in self.windows.values() {
             state.window.request_redraw();
         }
@@ -992,6 +1022,7 @@ impl App {
                 renderer,
                 views,
                 status_bar: StatusBar::default(),
+                stamp: None,
                 window,
             },
         );
@@ -1114,6 +1145,8 @@ impl App {
         if current {
             self.editor.set_layout_metrics(state.views.metrics());
         }
+        // Panneau actif de cette fenêtre : sa barre d'état le décrit.
+        let panel = self.editor.workspace().window(id).and_then(|w| w.active());
         let pending_keys: Vec<String> = self
             .resolver
             .pending()
@@ -1130,10 +1163,10 @@ impl App {
             &StatusContext {
                 editor: &self.editor,
                 pending_keys: &pending_keys,
+                panel,
             },
             (&status_config.left, &status_config.right),
         );
-        let panel = self.editor.workspace().window(id).and_then(|w| w.active());
         if current && let Some(view) = state.editor_view(panel) {
             self.editor.set_page_lines(view.page_lines());
         }
@@ -1232,6 +1265,7 @@ impl App {
         }
         state.window.pre_present_notify();
         state.surface.present(gpu, frame);
+        state.stamp = Stamp::of(&self.editor, id, self.look);
         if let Some(start) = self.pending_input.take() {
             self.latency.record(start.elapsed());
         }
@@ -1345,13 +1379,13 @@ impl ApplicationHandler<AppEvent> for App {
                 self.focused = true;
                 self.enter_window(id);
                 self.blink.reset(Instant::now());
-                self.request_redraw();
+                self.redraw_all();
             }
             WindowEvent::Focused(false) => {
                 if id == self.current {
                     self.focused = false;
                 }
-                self.request_redraw();
+                self.redraw_all();
             }
             WindowEvent::RedrawRequested | WindowEvent::Occluded(false) => self.redraw(id),
             _ => {}
