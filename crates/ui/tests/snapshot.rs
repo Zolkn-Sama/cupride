@@ -180,13 +180,23 @@ fn render_with_theme(name: &str, theme: &Theme) {
             return;
         }
     };
-    let (width, height) = (480, 120);
+    let (width, height) = (600, 150);
     let target = OffscreenTarget::new(&gpu, width, height);
     let mut renderer = Renderer::new(&gpu, OFFSCREEN_FORMAT);
     let mut text = TextSystem::new();
-    let mut document = Document::from_text("fn main() {\n    let x = \"thème\";\n}\n");
-    document.set_selections(Selections::single(Selection::new(20, 25)));
+    // Un fichier Rust : coloré par sa grammaire.
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let path = dir.path().join("main.rs");
+    std::fs::write(
+        &path,
+        "// Exemple\nfn main() {\n    let x = \"thème\";\n    println!(\"{}\", MAX + 1);\n}\n",
+    )
+    .expect("fichier");
+    let mut document = Document::open(&path).expect("ouverture");
+    document.start_syntax();
+    document.set_selections(Selections::single(Selection::new(37, 44)));
     let mut view = EditorView::new(ViewSettings::default(), 1.0);
+    view.set_syntax_colors(&theme.syntax);
     let style = view.style();
     let window = Rect::new(0.0, 0.0, width as f32, height as f32);
     view.set_bounds(Rect::new(

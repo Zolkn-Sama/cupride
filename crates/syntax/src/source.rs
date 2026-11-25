@@ -32,6 +32,25 @@ impl<'a> Source<'a> {
         let (start, chunk) = self.chunks[index];
         &chunk.as_bytes()[byte - start..]
     }
+
+    /// Texte de la plage `range`, par morceaux.
+    pub(crate) fn slices(&self, range: std::ops::Range<usize>) -> Vec<&'a [u8]> {
+        let mut slices = Vec::new();
+        let mut at = range.start;
+        let end = range.end.min(self.len);
+        while at < end {
+            let rest = self.at(at);
+            let take = rest.len().min(end - at);
+            slices.push(&rest[..take]);
+            at += take;
+        }
+        slices
+    }
+
+    /// Texte de la plage `range`, copié.
+    pub(crate) fn text(&self, range: std::ops::Range<usize>) -> String {
+        String::from_utf8_lossy(&self.slices(range).concat()).into_owned()
+    }
 }
 
 #[cfg(test)]
@@ -48,5 +67,8 @@ mod tests {
             assert_eq!(source.at(byte)[0], text.as_bytes()[byte]);
         }
         assert!(source.at(text.len()).is_empty());
+        let joined: Vec<u8> = source.slices(10..9000).concat();
+        assert_eq!(joined, text.as_bytes()[10..9000]);
+        assert_eq!(source.text(0..7), "ligne 0");
     }
 }

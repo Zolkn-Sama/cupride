@@ -246,7 +246,8 @@ notification le signale au lancement suivant.
 
 Le langage d'un document est détecté d'après l'extension ou le nom de son fichier, sinon d'après
 sa ligne `#!` (`#!/usr/bin/env python3`). Les grammaires Tree-sitter de Rust, C et Markdown sont
-intégrées en attendant les paquets de langage.
+intégrées en attendant les paquets de langage. Le code de ces langages est coloré selon les
+couleurs `[syntax]` du thème, blocs de code Markdown compris (`` ```rust ``, `` ```c ``).
 
 | Commande | Description |
 |---|---|
