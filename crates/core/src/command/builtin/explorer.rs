@@ -166,10 +166,13 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
     Ok(())
 }
 
-/// Chemin absolu : un chemin relatif part du projet, sinon du dossier courant.
+/// Chemin absolu : un chemin relatif part du dossier du terminal (commande venue d'un
+/// terminal), sinon du projet, sinon du dossier courant.
 fn resolve(editor: &Editor, path: &Path) -> PathBuf {
     let absolute = if path.is_absolute() {
         path.to_owned()
+    } else if let Some(base) = editor.base_dir() {
+        base.join(path)
     } else if let Some(project) = editor.project() {
         project.join(path)
     } else {

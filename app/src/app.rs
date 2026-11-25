@@ -126,6 +126,10 @@ pub(crate) struct App {
     wayland: bool,
     /// Demandes reçues d'autres `cupride` (instance unique), en attente.
     remote: Arc<Mutex<Vec<cupride_ipc::Incoming>>>,
+    /// Terminaux qui attendent la fermeture de documents (`cupride --wait`).
+    waiting: Vec<(Vec<DocumentId>, cupride_ipc::Responder)>,
+    /// Lancé avec `--wait` sans instance existante : quitter quand ces documents sont fermés.
+    exit_when_closed: Vec<DocumentId>,
     close_guard: CloseGuard,
     blink: CursorBlink,
     /// La fenêtre a-t-elle le focus clavier ? Sans focus, les curseurs sont masqués et ne
@@ -268,6 +272,8 @@ impl App {
             pending_placement: HashMap::new(),
             wayland: false,
             remote,
+            waiting: Vec::new(),
+            exit_when_closed: Vec::new(),
             close_guard: CloseGuard::default(),
             toasts: Toasts::default(),
             fatal: None,
@@ -1287,7 +1293,16 @@ impl App {
         for incoming in pending {
             tracing::info!(arguments = ?incoming.request.args, "demande d'un terminal");
             let answer = crate::remote::handle(&mut self.editor, &incoming.request);
-            if let Err(error) = incoming.responder.finish(&answer.replies, answer.code) {
+            let mut responder = incoming.responder;
+            if !answer.wait.is_empty() {
+                // --wait : les messages tout de suite, la fin à la fermeture des documents.
+                for reply in &answer.replies {
+                    let _ = responder.reply(reply);
+                }
+                self.waiting.push((answer.wait, responder));
+                continue;
+            }
+            if let Err(error) = responder.finish(&answer.replies, answer.code) {
                 tracing::debug!("terminal parti avant la réponse : {error}");
             }
         }
@@ -1295,6 +1310,30 @@ impl App {
         self.sync_windows(event_loop);
         if let Some(state) = self.windows.get(&self.current) {
             state.window.focus_window();
+        }
+    }
+
+    /// Quitter quand ces documents sont fermés (lancé avec `--wait` sans instance existante).
+    pub(crate) fn exit_when_closed(&mut self, documents: Vec<DocumentId>) {
+        self.exit_when_closed = documents;
+    }
+
+    /// Répond aux terminaux dont les documents attendus sont tous fermés ; quitte si c'est
+    /// l'attente de ce processus.
+    fn release_waiting(&mut self, event_loop: &ActiveEventLoop) {
+        let editor = &self.editor;
+        let closed =
+            |documents: &[DocumentId]| documents.iter().all(|d| editor.document(*d).is_none());
+        let (done, still): (Vec<_>, Vec<_>) = std::mem::take(&mut self.waiting)
+            .into_iter()
+            .partition(|(documents, _)| closed(documents));
+        self.waiting = still;
+        for (_, responder) in done {
+            let _ = responder.finish(&[], 0);
+        }
+        if !self.exit_when_closed.is_empty() && closed(&self.exit_when_closed) {
+            tracing::info!("fichiers attendus fermés (--wait) : fin");
+            event_loop.exit();
         }
     }
 
@@ -1635,6 +1674,8 @@ impl ApplicationHandler<AppEvent> for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // Terminaux qui attendaient des documents fermés pendant ce lot d'événements.
+        self.release_waiting(event_loop);
         // Écrans branchés ou débranchés, puis fenêtres ouvertes ou fermées par les commandes du
         // lot d'événements.
         if self.started {
@@ -1678,6 +1719,10 @@ impl ApplicationHandler<AppEvent> for App {
             );
         }
         self.save_session();
+        // Les terminaux qui attendaient (--wait) sont libérés : l'instance s'arrête.
+        for (_, responder) in std::mem::take(&mut self.waiting) {
+            let _ = responder.finish(&[], 0);
+        }
         // Les ressources des fenêtres sont libérées avant le GPU et la sortie de la boucle.
         self.windows.clear();
         self.os_windows.clear();

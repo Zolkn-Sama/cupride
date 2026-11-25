@@ -19,7 +19,8 @@ use winit::event_loop::{ControlFlow, EventLoop};
 
 fn main() -> anyhow::Result<()> {
     // La ligne de commande d'abord : --help et --version n'ouvrent ni journal ni fenêtre.
-    let launch = match cli::parse(std::env::args_os().skip(1)) {
+    let builtins = cupride_core::command::builtin_registry();
+    let launch = match cli::parse(std::env::args_os().skip(1), |g| builtins.has_group(g)) {
         cli::Cli::Run(launch) => launch,
         cli::Cli::Print(text) => {
             print!("{text}");
@@ -57,7 +58,26 @@ fn main() -> anyhow::Result<()> {
     let sessions = (launch.restore && editor.config().session.restore)
         .then(cupride_core::session::sessions_dir)
         .flatten();
-    let problems = cli::open(&mut editor, &launch.paths, sessions.as_deref());
+    let opened = cli::open(&mut editor, &launch.paths, sessions.as_deref());
+    let mut problems = opened.problems;
+    if let Some(window) = launch.window
+        && !editor.focus_window(cupride_core::layout::WindowId::new(window))
+    {
+        problems.push(format!("fenêtre {window} introuvable"));
+    }
+    // Commande demandée au lancement (cupride panel focus left) : exécutée une fois la session
+    // restaurée ; son message va dans le terminal.
+    if let Some(command) = &launch.command {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        match editor.run_in(&cwd, command) {
+            Ok(cupride_core::command::CommandOutput::Message(text)) => println!("{text}"),
+            Ok(cupride_core::command::CommandOutput::None) => {}
+            Err(error) => {
+                eprintln!("{error}");
+                problems.push(error.to_string());
+            }
+        }
+    }
     for problem in problems {
         tracing::warn!("{problem}");
         editor.notify(Level::Warning, problem);
@@ -88,6 +108,11 @@ fn main() -> anyhow::Result<()> {
         None => tracing::warn!("instance unique indisponible : cette instance reste seule"),
     }
     let mut app = app::App::new(editor, event_loop.create_proxy(), remote);
+    if launch.wait {
+        // Sans instance existante, ce processus est l'éditeur : il s'arrête quand les fichiers
+        // attendus sont fermés, comme un éditeur de terminal (pour Git).
+        app.exit_when_closed(opened.documents);
+    }
     event_loop
         .run_app(&mut app)
         .context("exécution de la boucle d'événements")?;

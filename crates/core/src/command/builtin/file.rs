@@ -31,10 +31,11 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
             "Ouvre un fichier (créé au premier enregistrement s'il n'existe pas)",
             |editor, args| {
                 let path: &PathBuf = args.get_one("chemin").expect("argument requis");
+                let path = editor.resolve_path(path);
                 let id = if args.get_flag("preview") {
-                    editor.open_preview(path)?
+                    editor.open_preview(&path)?
                 } else {
-                    editor.open(path)?
+                    editor.open(&path)?
                 };
                 let name = editor
                     .document(id)
@@ -73,7 +74,8 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
             "Enregistre le document actif sous un autre chemin, qui devient son fichier",
             |editor, args| {
                 let path: &PathBuf = args.get_one("chemin").expect("argument requis");
-                let path = normalize(path).map_err(|source| crate::DocumentError::Io {
+                let path = editor.resolve_path(path);
+                let path = normalize(&path).map_err(|source| crate::DocumentError::Io {
                     path: path.clone(),
                     source,
                 })?;
