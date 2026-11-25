@@ -161,8 +161,8 @@ edit add-cursor down
 | Commande | Description |
 |---|---|
 | `search find <motif> [--case] [--word] [--regex]` | Cherche le motif dans le document actif et sélectionne l'occurrence suivante, à partir du début de la sélection ; affiche sa position (`3/12`). Par défaut, la casse est ignorée ; `--case` la respecte, `--word` ne garde que les mots entiers, `--regex` lit le motif comme une expression régulière (syntaxe de la crate `regex`). |
-| `search next` | Occurrence suivante ; après la dernière, la première (`F3`, `mod+g`). |
-| `search previous` | Occurrence précédente (`Maj+F3`, `mod+shift+g`). |
+| `search next` | Occurrence suivante ; après la dernière, la première (`F3` ; `Cmd+G` sous macOS). |
+| `search previous` | Occurrence précédente (`Maj+F3` ; `Cmd+Maj+G` sous macOS). |
 | `search replace <texte>` | Remplace l'occurrence sélectionnée par le texte, puis sélectionne la suivante. Avec `--regex` dans la recherche, `$1`, `${nom}` et `$0` reprennent les groupes de capture (`$$` pour un `$`) ; sinon le texte est pris tel quel. |
 | `search replace-all <texte>` | Remplace toutes les occurrences, en une seule modification : un seul `edit undo` les rétablit toutes. |
 | `search clear` | Arrête la recherche en cours. |
@@ -188,6 +188,21 @@ bloque jamais, même sur un fichier de 100 Mo. Ligne de remplacement : Tab passe
 l'autre ; dans le champ de remplacement, Entrée remplace l'occurrence sélectionnée et passe à la
 suivante, `mod+Entrée` remplace tout. Au-delà de 100 000 occurrences, seules les
 100 000 premières sont gardées (« limite »).
+
+## Lignes
+
+Ces commandes agissent sur toutes les lignes touchées par les sélections (une sélection qui
+finit au tout début d'une ligne ne la compte pas), en une seule modification annulable.
+
+| Commande | Description |
+|---|---|
+| `edit goto <ligne[:colonne]>` | Place le curseur à la ligne et à la colonne (à partir de 1, colonne en caractères), bornées au texte. |
+| `ui goto` | Prépare `edit goto` dans la ligne de commande (`Ctrl+G`). |
+| `edit duplicate-lines` | Duplique les lignes ; les curseurs passent sur la copie du dessous (`Alt+Maj+↓`). |
+| `edit move-lines <up\|down>` | Déplace les lignes d'une ligne vers le haut ou le bas ; les sélections les suivent (`Alt+↑`, `Alt+↓`). |
+| `edit delete-lines` | Supprime les lignes (`mod+shift+k`). |
+| `edit join-lines` | Joint chaque ligne à la suivante, avec une espace, sans l'indentation de la suivante ; sur une seule ligne, avec la suivante (`mod+j`). |
+| `edit toggle-comment` | Commente les lignes non vides (au niveau d'indentation le plus faible du bloc), ou les décommente si elles le sont toutes (`mod+/`). La syntaxe vient du langage du fichier (`//`, `#`, `--`…), ou de l'option `[languages.<Nom>] comment` ; les paquets de langage la fourniront. |
 
 ## Indentation
 

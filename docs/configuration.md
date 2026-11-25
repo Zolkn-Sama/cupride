@@ -38,6 +38,7 @@ d'état (`Rust`, `Python`, `Makefile`…).
 |---|---|---|
 | `indent_style` | `"auto"`, `"spaces"`, `"tabs"` | Indentation pour ce langage. |
 | `indent_width` | entier, de 1 à 16 | Largeur pour ce langage. |
+| `comment` | texte | Début d'un commentaire de ligne, pour `edit toggle-comment` (`"//"`, `"#"`…). |
 
 ```toml
 [languages.Makefile]
@@ -203,8 +204,15 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `ui find` | `Ctrl+F` | `Cmd+F` |
 | `ui replace` | `Ctrl+H` | `Option+Cmd+F` |
 | `ui search-project` | `Ctrl+Maj+F` | `Cmd+Maj+F` |
-| `search next` | `F3`, `Ctrl+G` | `F3`, `Cmd+G` |
-| `search previous` | `Maj+F3`, `Ctrl+Maj+G` | `Maj+F3`, `Cmd+Maj+G` |
+| `search next` | `F3` | `F3`, `Cmd+G` |
+| `search previous` | `Maj+F3` | `Maj+F3`, `Cmd+Maj+G` |
+| `ui goto` | `Ctrl+G` | `Ctrl+G` |
+| `edit move-lines up` | `Alt+↑` | `Option+↑` |
+| `edit move-lines down` | `Alt+↓` | `Option+↓` |
+| `edit duplicate-lines` | `Alt+Maj+↓` | `Option+Maj+↓` |
+| `edit delete-lines` | `Ctrl+Maj+K` | `Cmd+Maj+K` |
+| `edit join-lines` | `Ctrl+J` | `Cmd+J` |
+| `edit toggle-comment` | `Ctrl+/` | `Cmd+/` |
 | `window new` | `Ctrl+Maj+N` | `Cmd+Maj+N` |
 | `window close` | `Ctrl+Maj+W` | `Cmd+Maj+W` |
 | `panel focus left` | `Ctrl+K Ctrl+←` | `Cmd+K Cmd+←` |

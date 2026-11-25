@@ -404,10 +404,12 @@ pub struct LanguageConfig {
     pub indent_style: Option<crate::indent::IndentStyle>,
     /// Largeur, à la place de `[editor] indent_width`.
     pub indent_width: Option<usize>,
+    /// Début d'un commentaire de ligne (`//`, `#`…), pour `edit toggle-comment`.
+    pub comment: Option<String>,
 }
 
 /// Clés connues d'une section `[languages.<Nom>]`.
-const LANGUAGE_KEYS: [&str; 2] = ["indent_style", "indent_width"];
+const LANGUAGE_KEYS: [&str; 3] = ["indent_style", "indent_width", "comment"];
 
 /// Configuration complète.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
