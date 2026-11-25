@@ -274,6 +274,12 @@ keyword = "#ff5c8a"
 | `[ui]` | `background`, `foreground`, `cursor`, `selection`, `current_line`, `line_number`, `line_number_active`, `panel`, `popup`, `border`, `accent`, `muted`, `list_selection`, `info`, `warning`, `error` |
 | `[syntax]` | `comment`, `keyword`, `string`, `number`, `constant`, `function`, `type`, `variable`, `operator`, `punctuation` |
 
+Les couleurs `[syntax]` colorent le code d'après son arbre syntaxique (Tree-sitter) : les
+captures des requêtes de coloration des grammaires sont ramenées à ces catégories
+(`@keyword.return` → `keyword`, `@string.escape` → `constant`, `@function.macro` → `function`,
+`@type.builtin` → `type`, titres Markdown → `keyword`…). Le texte sans catégorie garde la couleur
+`foreground`.
+
 Les fichiers des thèmes intégrés servent d'exemples complets :
 [`crates/ui/themes/`](../crates/ui/themes/).
 

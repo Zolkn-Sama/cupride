@@ -5,13 +5,22 @@
 
 use std::sync::OnceLock;
 
-use tree_sitter::Language;
+use tree_sitter::{Language, Query};
+
+#[cfg(test)]
+use crate::highlight::Highlight;
+use crate::highlight::Paint;
 
 /// Un langage analysable : sa grammaire et ses requêtes.
 pub struct LanguageConfig {
     /// Nom du langage, celui affiché dans la barre d'état (« Rust »).
     pub name: &'static str,
     pub(crate) language: Language,
+    /// Requête de coloration, et ce que devient chacune de ses captures.
+    pub(crate) highlights: Option<Query>,
+    pub(crate) paints: Vec<Paint>,
+    /// Requête des langages imbriqués (blocs de code dans du Markdown…).
+    pub(crate) injections: Option<Query>,
 }
 
 impl std::fmt::Debug for LanguageConfig {
@@ -83,32 +92,109 @@ pub fn supported() -> impl Iterator<Item = &'static str> {
         .filter(|name| !name.contains('('))
 }
 
-fn rust() -> LanguageConfig {
-    LanguageConfig {
-        name: "Rust",
-        language: tree_sitter_rust::LANGUAGE.into(),
+impl LanguageConfig {
+    /// Configuration du langage `name`, avec sa grammaire et ses requêtes. Une requête invalide
+    /// est journalisée et ignorée : le langage reste analysable.
+    fn new(
+        name: &'static str,
+        language: Language,
+        highlights: &[&str],
+        injections: Option<&str>,
+    ) -> Self {
+        let highlights = query(name, "coloration", &language, &highlights.concat());
+        let paints = highlights.as_ref().map_or_else(Vec::new, |q| {
+            q.capture_names().iter().map(|n| Paint::of(n)).collect()
+        });
+        let injections = injections.and_then(|source| query(name, "injections", &language, source));
+        Self {
+            name,
+            language,
+            highlights,
+            paints,
+            injections,
+        }
     }
+}
+
+fn query(name: &str, kind: &str, language: &Language, source: &str) -> Option<Query> {
+    match Query::new(language, source) {
+        Ok(query) => Some(query),
+        Err(error) => {
+            tracing::warn!(langage = name, requête = kind, %error, "requête invalide ignorée");
+            None
+        }
+    }
+}
+
+/// Motifs ajoutés avant la requête de coloration de la grammaire : le premier motif qui
+/// s'applique à un nœud l'emporte.
+const RUST_HIGHLIGHTS: &str = r#"
+((identifier) @constant
+ (#match? @constant "^[A-Z][A-Z\d_]+$"))
+[
+  "+" "-" "/" "%" "^" "|" "!" "=" "==" "!=" "<=" ">=" "&&" "||" "<<" ">>"
+  "+=" "-=" "*=" "/=" "%=" "^=" "|=" "&=" "<<=" ">>=" ".." "..=" "?"
+] @operator
+"#;
+
+const C_HIGHLIGHTS: &str = r#"
+((identifier) @constant
+ (#match? @constant "^[A-Z][A-Z\d_]*$"))
+(primitive_type) @type.builtin
+"#;
+
+fn rust() -> LanguageConfig {
+    LanguageConfig::new(
+        "Rust",
+        tree_sitter_rust::LANGUAGE.into(),
+        &[RUST_HIGHLIGHTS, tree_sitter_rust::HIGHLIGHTS_QUERY],
+        // Les macros (`token_tree`) ne sont pas réanalysées comme du Rust : coûteux, et leur
+        // contenu n'est souvent pas une expression valide.
+        None,
+    )
 }
 
 fn c() -> LanguageConfig {
-    LanguageConfig {
-        name: "C",
-        language: tree_sitter_c::LANGUAGE.into(),
-    }
+    LanguageConfig::new(
+        "C",
+        tree_sitter_c::LANGUAGE.into(),
+        &[C_HIGHLIGHTS, tree_sitter_c::HIGHLIGHT_QUERY],
+        None,
+    )
 }
 
 fn markdown() -> LanguageConfig {
-    LanguageConfig {
-        name: "Markdown",
-        language: tree_sitter_md::LANGUAGE.into(),
-    }
+    LanguageConfig::new(
+        "Markdown",
+        tree_sitter_md::LANGUAGE.into(),
+        &[tree_sitter_md::HIGHLIGHT_QUERY_BLOCK],
+        Some(tree_sitter_md::INJECTION_QUERY_BLOCK),
+    )
 }
 
 fn markdown_inline() -> LanguageConfig {
-    LanguageConfig {
-        name: "Markdown (en ligne)",
-        language: tree_sitter_md::INLINE_LANGUAGE.into(),
-    }
+    LanguageConfig::new(
+        "Markdown (en ligne)",
+        tree_sitter_md::INLINE_LANGUAGE.into(),
+        &[tree_sitter_md::HIGHLIGHT_QUERY_INLINE],
+        Some(tree_sitter_md::INJECTION_QUERY_INLINE),
+    )
+}
+
+/// Catégories de coloration que la requête du langage peut produire (pour les tests).
+#[cfg(test)]
+pub(crate) fn highlights_of(config: &LanguageConfig) -> Vec<Highlight> {
+    let mut found: Vec<Highlight> = config
+        .paints
+        .iter()
+        .filter_map(|p| match p {
+            Paint::Color(h) => Some(*h),
+            _ => None,
+        })
+        .collect();
+    found.sort_by_key(|h| *h as u8);
+    found.dedup();
+    found
 }
 
 #[cfg(test)]
@@ -124,5 +210,15 @@ mod tests {
         assert!(config_for("markdown_inline").is_some());
         assert!(config_for("Python").is_none());
         assert_eq!(supported().collect::<Vec<_>>(), ["Rust", "C", "Markdown"]);
+    }
+
+    #[test]
+    fn requetes_valides() {
+        for name in ["Rust", "C", "Markdown", "markdown_inline"] {
+            let config = config_for(name).unwrap();
+            assert!(config.highlights.is_some(), "coloration de {name}");
+            assert!(!highlights_of(config).is_empty(), "{name}");
+        }
+        assert!(config_for("Markdown").unwrap().injections.is_some());
     }
 }

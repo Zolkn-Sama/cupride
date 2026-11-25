@@ -158,6 +158,7 @@ impl PanelView for EditorView {
             if &display != self.display() {
                 self.set_display(display);
             }
+            self.set_syntax_colors(&cx.theme.syntax);
             EditorView::prepare(self, text, document);
         }
     }
