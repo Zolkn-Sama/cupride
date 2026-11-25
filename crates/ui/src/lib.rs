@@ -60,7 +60,9 @@ pub use gutter::GutterMarker;
 pub use history::{CommandHistory, HISTORY_LIMIT};
 pub use label::Label;
 pub use mouse::{ClickCounter, ClickModifiers, MULTI_CLICK_DELAY, MouseSelection};
-pub use panels::{PanelContext, PanelView, PanelViews, ViewFactory, ViewRegistry, Zone};
+pub use panels::{
+    PanelContext, PanelView, PanelViews, Tab, ViewFactory, ViewRegistry, Zone, panel_title,
+};
 pub use picker::{MAX_ROWS, Picker, PickerItem};
 pub use status_bar::{StatusBar, StatusContext, StatusElement, StatusElements};
 pub use style::Style;

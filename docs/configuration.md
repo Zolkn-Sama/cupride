@@ -68,6 +68,12 @@ colonne, en caractères affichés, et taille de la sélection), `line_ending` (`
 `encoding` (`UTF-8`, `UTF-8 BOM`), `language` (d'après l'extension). Un nom inconnu est signalé
 et ignoré. Les plugins pourront ajouter leurs propres éléments.
 
+### `[tabs]`
+
+| Option | Valeurs | Défaut | Effet |
+|---|---|---|---|
+| `preview` | `true`, `false` | `false` | Onglet d'aperçu : un fichier ouvert depuis l'ouverture rapide ou l'explorateur remplace l'onglet d'aperçu de la zone au lieu d'en ajouter un. L'onglet d'aperçu (nom en gris) est gardé dès que le document est modifié, avec `tab keep` ou un double clic. |
+
 ### `[keys]`
 
 Raccourcis : `"touches" = "ligne de commande"`. Ils s'ajoutent aux raccourcis par défaut et les
@@ -126,6 +132,10 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `ui command-line 'file save-as '` | `Ctrl+Maj+S` | `Cmd+Maj+S` |
 | `ui command-line 'file open '` | `Ctrl+O` | `Cmd+O` |
 | `panel close` | `Ctrl+W` | `Cmd+W` |
+| `tab next` | `Ctrl+Tab`, `Ctrl+Page suiv.` | `Ctrl+Tab`, `Ctrl+Page suiv.` |
+| `tab previous` | `Ctrl+Maj+Tab`, `Ctrl+Page préc.` | `Ctrl+Maj+Tab`, `Ctrl+Page préc.` |
+| `tab move-right` | `Ctrl+Maj+Page suiv.` | `Ctrl+Maj+Page suiv.` |
+| `tab move-left` | `Ctrl+Maj+Page préc.` | `Ctrl+Maj+Page préc.` |
 | `split right` | `Ctrl+\` | `Cmd+\` |
 | `split down` | `Ctrl+K Ctrl+\` | `Cmd+K Cmd+\` |
 | `file close` | `Ctrl+K Ctrl+W` | `Cmd+K Cmd+W` |
@@ -233,6 +243,12 @@ Les fichiers des thèmes intégrés servent d'exemples complets :
 # de curseurs), "position" (ligne et colonne), "line_ending", "encoding", "language".
 # left = ["file", "modified", "keys"]
 # right = ["selections", "position", "line_ending", "encoding", "language"]
+
+[tabs]
+# Onglet d'aperçu : un fichier ouvert depuis l'ouverture rapide ou l'explorateur remplace l'onglet
+# d'aperçu de la zone au lieu d'en ajouter un ; l'onglet est gardé dès qu'on modifie le document
+# (ou avec « tab keep »).
+# preview = false
 
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les

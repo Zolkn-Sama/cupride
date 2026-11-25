@@ -47,7 +47,7 @@ pendant l'écriture laisse toujours l'ancien fichier intact.
 
 | Commande | Description |
 |---|---|
-| `file open <chemin>` | Ouvre un fichier et en fait le document actif. Un fichier déjà ouvert n'est pas dupliqué : son document redevient actif. Un fichier inexistant est créé au premier enregistrement. Fichier binaire ou non UTF-8 : refusé, jamais modifié. |
+| `file open <chemin> [--preview]` | Ouvre un fichier et en fait le document actif, dans un onglet de la zone active (`--preview` : dans l'onglet d'aperçu, voir [`tab`](#tab--onglets)). Un fichier déjà ouvert n'est pas dupliqué : son document redevient actif. Un fichier inexistant est créé au premier enregistrement. Fichier binaire ou non UTF-8 : refusé, jamais modifié. |
 | `file save` | Enregistre le document actif, en conservant ses fins de ligne. Un document sans fichier demande `file save-as`. |
 | `file save-as <chemin>` | Enregistre le document actif sous `<chemin>`, qui devient son fichier. |
 | `file close [--force]` | Ferme le document actif, et tous les panneaux qui l'affichent. S'il a des modifications non enregistrées, la commande échoue, sauf avec `--force`. |
@@ -219,6 +219,25 @@ propre défilement dans chaque zone. Sans document, la nouvelle zone reçoit un 
 
 Une zone est divisée dans le sens de son split quand elle en a déjà un : trois `split right` de
 suite donnent quatre colonnes, pas des splits imbriqués.
+
+## `tab` — onglets
+
+Chaque zone est un groupe d'onglets ; ces commandes agissent sur la zone active. Le titre d'un
+onglet est le nom de son document, suivi de ● s'il a des modifications non enregistrées. Un clic
+affiche l'onglet, un clic du milieu le ferme (comme `panel close`).
+
+| Commande | Description |
+|---|---|
+| `tab next` | Affiche l'onglet suivant ; après le dernier, le premier (`ctrl+tab`, `ctrl+pagedown`). |
+| `tab previous` | Affiche l'onglet précédent (`ctrl+shift+tab`, `ctrl+pageup`). |
+| `tab move-left` | Déplace l'onglet actif d'un rang vers la gauche (`ctrl+shift+pageup`). |
+| `tab move-right` | Déplace l'onglet actif d'un rang vers la droite (`ctrl+shift+pagedown`). |
+| `tab keep` | Garde l'onglet d'aperçu actif (aussi : double clic sur l'onglet, ou modifier le document). |
+
+**Onglet d'aperçu** (option `[tabs] preview`, désactivée par défaut) : un fichier ouvert depuis
+l'ouverture rapide (ou `file open --preview`) remplace l'onglet d'aperçu de la zone au lieu d'en
+ajouter un. Son titre est en italique et en gris. Le document qu'il affichait est fermé s'il
+n'est affiché nulle part ailleurs.
 
 ## `panel` — panneaux
 

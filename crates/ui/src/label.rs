@@ -9,6 +9,7 @@ pub struct Label {
     /// Positions mises en valeur (en octets) et leur couleur.
     highlights: Vec<usize>,
     highlight_color: Color,
+    italic: bool,
     family: String,
     metrics: Metrics,
     buffer: Option<Buffer>,
@@ -29,6 +30,7 @@ impl Default for Label {
             text: String::new(),
             highlights: Vec::new(),
             highlight_color: Color::default(),
+            italic: false,
             family: String::new(),
             metrics: Metrics::new(1.0, 1.0),
             buffer: None,
@@ -59,6 +61,22 @@ impl Label {
         self.set_highlighted(text_system, text, &[], Color::default(), family, metrics);
     }
 
+    /// Comme [`Label::set`], en italique si `italic`.
+    pub fn set_italic(
+        &mut self,
+        text_system: &mut TextSystem,
+        text: &str,
+        italic: bool,
+        family: &str,
+        metrics: Metrics,
+    ) {
+        if self.italic != italic {
+            self.italic = italic;
+            self.buffer = None;
+        }
+        self.set_highlighted(text_system, text, &[], Color::default(), family, metrics);
+    }
+
     /// Met `text` en forme, les caractères aux positions `highlights` (en octets) de la couleur
     /// `color` ; les autres prennent la couleur donnée au dessin.
     pub fn set_highlighted(
@@ -82,7 +100,10 @@ impl Label {
         let mut buffer = Buffer::new(text_system.font_system(), metrics);
         buffer.set_wrap(Wrap::None);
         buffer.set_size(None, Some(metrics.line_height));
-        let base = attrs(family);
+        let mut base = attrs(family);
+        if self.italic {
+            base = base.style(cupride_render::text::cosmic_text::Style::Italic);
+        }
         if highlights.is_empty() {
             buffer.set_text(text, &base, Shaping::Advanced, None);
         } else {

@@ -85,6 +85,12 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # left = ["file", "modified", "keys"]
 # right = ["selections", "position", "line_ending", "encoding", "language"]
 
+[tabs]
+# Onglet d'aperçu : un fichier ouvert depuis l'ouverture rapide ou l'explorateur remplace l'onglet
+# d'aperçu de la zone au lieu d'en ajouter un ; l'onglet est gardé dès qu'on modifie le document
+# (ou avec « tab keep »).
+# preview = false
+
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les
 # remplacent pour les mêmes touches. Une chaîne vide retire un raccourci par défaut.
@@ -274,6 +280,14 @@ impl Default for StatusBarConfig {
     }
 }
 
+/// Section `[tabs]` : onglets.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct TabsConfig {
+    /// Onglet d'aperçu, remplacé par le prochain fichier ouvert en aperçu.
+    pub preview: bool,
+}
+
 /// Configuration complète.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
@@ -288,12 +302,14 @@ pub struct Config {
     pub notifications: NotificationsConfig,
     /// Section `[status_bar]`.
     pub status_bar: StatusBarConfig,
+    /// Section `[tabs]`.
+    pub tabs: TabsConfig,
     /// Section `[keys]` : touches → ligne de commande (vide pour retirer un raccourci).
     pub keys: BTreeMap<String, String>,
 }
 
 /// Clés connues, pour signaler les fautes de frappe.
-const KNOWN_KEYS: [(&str, &[&str]); 6] = [
+const KNOWN_KEYS: [(&str, &[&str]); 7] = [
     (
         "editor",
         &["line_ending", "undo_group_delay_ms", "primary_selection"],
@@ -311,6 +327,7 @@ const KNOWN_KEYS: [(&str, &[&str]); 6] = [
     ),
     ("notifications", &["timeout_ms", "error_timeout_ms"]),
     ("status_bar", &["left", "right"]),
+    ("tabs", &["preview"]),
     ("keys", &[]),
 ];
 
