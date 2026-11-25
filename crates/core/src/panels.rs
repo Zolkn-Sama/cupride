@@ -5,10 +5,33 @@
 //! du document actif : les commandes d'édition agissent sur le document du panneau qui a le
 //! focus, avec les sélections de ce panneau.
 
-use cupride_layout::{Direction, LayoutError, PanelId, PanelKind};
+use cupride_layout::{Bounds, Direction, LayoutError, PanelId, PanelKind};
 
 use crate::command::CommandError;
 use crate::editor::{DocumentId, Editor};
+
+/// Géométrie des zones, fournie par l'interface : le noyau n'a pas de fenêtre, mais le
+/// redimensionnement au clavier et la navigation entre zones en ont besoin.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LayoutMetrics {
+    /// Place de l'ensemble des zones (pixels physiques).
+    pub area: Bounds,
+    /// Épaisseur des séparations.
+    pub gap: f32,
+    /// Taille minimale d'une zone, en largeur et en hauteur.
+    pub min_size: f32,
+}
+
+impl Default for LayoutMetrics {
+    /// Valeurs tant que l'interface n'a rien fourni (sans interface : REPL, tests).
+    fn default() -> Self {
+        Self {
+            area: Bounds::new(0.0, 0.0, 1_000.0, 700.0),
+            gap: 1.0,
+            min_size: 80.0,
+        }
+    }
+}
 
 /// Où placer un nouveau panneau, par rapport au panneau actif.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

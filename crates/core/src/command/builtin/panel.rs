@@ -5,7 +5,7 @@ use clap::{Arg, ArgAction};
 
 use crate::command::{CommandDef, CommandError, CommandOutput, CommandRegistry};
 use crate::editor::Editor;
-use crate::layout::{Bounds, Direction, PanelKind};
+use crate::layout::{Axis, Direction, PanelKind};
 use crate::panels::NewPanel;
 
 /// Noms des directions, tels qu'on les tape.
@@ -100,10 +100,11 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
             |editor, args| {
                 let direction = direction(args, "direction").expect("argument requis");
                 let panel = editor.active_panel().ok_or(CommandError::NoActivePanel)?;
+                let metrics = editor.layout_metrics();
                 let neighbor = editor
                     .workspace()
                     .tree()
-                    .neighbor(panel, direction, NAVIGATION_AREA, 0.0)
+                    .neighbor(panel, direction, metrics.area, metrics.gap)
                     .ok_or_else(|| {
                         CommandError::Failed(format!(
                             "aucune zone {}",
@@ -127,6 +128,54 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
         ),
     )?;
 
+    registry.register(
+        CommandDef::new(
+            "panel",
+            "resize",
+            "Agrandit ou réduit la zone active, en largeur ou en hauteur",
+            |editor, args| {
+                let how: &String = args.get_one("sens").expect("argument requis");
+                let (axis, sign) = match how.as_str() {
+                    "wider" => (Axis::Horizontal, 1.0),
+                    "narrower" => (Axis::Horizontal, -1.0),
+                    "taller" => (Axis::Vertical, 1.0),
+                    _ => (Axis::Vertical, -1.0),
+                };
+                let panel = editor.active_panel().ok_or(CommandError::NoActivePanel)?;
+                let metrics = editor.layout_metrics();
+                let step = metrics.area.length(axis) * RESIZE_STEP;
+                let changed = editor.workspace_mut().tree_mut().resize(
+                    panel,
+                    axis,
+                    sign * step,
+                    metrics.area,
+                    metrics.gap,
+                    metrics.min_size,
+                );
+                if !changed {
+                    return Err(CommandError::Failed(format!(
+                        "la zone ne peut pas être {}",
+                        match how.as_str() {
+                            "wider" => "élargie",
+                            "narrower" => "rétrécie",
+                            "taller" => "agrandie en hauteur",
+                            _ => "réduite en hauteur",
+                        }
+                    )));
+                }
+                Ok(CommandOutput::None)
+            },
+        )
+        .arg(
+            Arg::new("sens")
+                .required(true)
+                .value_parser(PossibleValuesParser::new([
+                    "wider", "narrower", "taller", "shorter",
+                ]))
+                .help("wider, narrower (largeur), taller, shorter (hauteur)"),
+        ),
+    )?;
+
     registry.register(CommandDef::new(
         "panel",
         "list",
@@ -137,9 +186,8 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
     Ok(())
 }
 
-/// Surface sur laquelle on cherche la zone voisine : seules les proportions comptent, la taille
-/// de la fenêtre n'y change rien (les recouvrements se comparent le long d'un seul axe).
-const NAVIGATION_AREA: Bounds = Bounds::new(0.0, 0.0, 10_000.0, 10_000.0);
+/// Part de la fenêtre gagnée ou perdue par `panel resize`.
+const RESIZE_STEP: f32 = 0.05;
 
 /// Ouvre le document actif dans un nouveau panneau ; sans document, un document vide.
 fn split_editor(editor: &mut Editor, place: NewPanel) {
@@ -321,5 +369,38 @@ mod tests {
         e.execute("panel focus down").unwrap();
         assert_eq!(e.active_panel(), Some(three));
         assert!(e.execute("panel focus diagonal").is_err());
+    }
+
+    #[test]
+    fn redimensionner_au_clavier() {
+        use crate::layout::Node;
+        let weights = |e: &Editor| match e.workspace().tree().root() {
+            Node::Split(split) => split
+                .children()
+                .iter()
+                .map(|c| (c.weight() * 100.0).round())
+                .collect::<Vec<_>>(),
+            Node::Tabs(_) => vec![],
+        };
+        let mut e = Editor::new();
+        e.new_document();
+        assert!(e.execute("panel resize wider").is_err(), "une seule zone");
+        e.execute("split right").unwrap();
+        e.execute("panel resize wider").unwrap();
+        assert_eq!(weights(&e), vec![45.0, 55.0]);
+        e.execute("panel resize narrower").unwrap();
+        e.execute("panel resize narrower").unwrap();
+        assert_eq!(weights(&e), vec![55.0, 45.0]);
+        assert!(
+            e.execute("panel resize taller").is_err(),
+            "pas de zone au-dessus"
+        );
+        // Taille minimale : 80 px sur 1000.
+        for _ in 0..30 {
+            let _ = e.execute("panel resize narrower");
+        }
+        assert_eq!(weights(&e), vec![92.0, 8.0]);
+        let error = e.execute("panel resize narrower").unwrap_err();
+        assert_eq!(error.to_string(), "la zone ne peut pas être rétrécie");
     }
 }

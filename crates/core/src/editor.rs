@@ -56,6 +56,8 @@ pub struct Editor {
     published_active: Option<DocumentId>,
     /// Nombre de lignes d'une page, pour `edit move page-up` : fourni par la vue.
     page_lines: usize,
+    /// Géométrie des zones : fournie par l'interface.
+    layout_metrics: crate::panels::LayoutMetrics,
     clipboard: Box<dyn Clipboard>,
     /// Dernière copie faite dans l'IDE, pour redistribuer ses fragments entre les curseurs.
     last_copy: Option<LastCopy>,
@@ -108,6 +110,7 @@ impl Editor {
             published: SecondaryMap::new(),
             published_active: None,
             page_lines: DEFAULT_PAGE_LINES,
+            layout_metrics: crate::panels::LayoutMetrics::default(),
             clipboard: Box::new(MemoryClipboard::default()),
             last_copy: None,
             zoom: 1.0,
@@ -568,6 +571,16 @@ impl Editor {
     /// Change le nombre de lignes d'une page : l'interface y met le nombre de lignes visibles.
     pub fn set_page_lines(&mut self, lines: usize) {
         self.page_lines = lines.max(1);
+    }
+
+    /// Géométrie des zones, pour le redimensionnement au clavier et la navigation.
+    pub fn layout_metrics(&self) -> crate::panels::LayoutMetrics {
+        self.layout_metrics
+    }
+
+    /// Change la géométrie des zones : l'interface y met la place réelle des zones.
+    pub fn set_layout_metrics(&mut self, metrics: crate::panels::LayoutMetrics) {
+        self.layout_metrics = metrics;
     }
 
     /// Fenêtres et layout.

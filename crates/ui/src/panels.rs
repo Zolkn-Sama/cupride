@@ -442,6 +442,54 @@ impl PanelViews {
         }
     }
 
+    /// Taille minimale d'une zone : sa barre d'onglets et quelques lignes.
+    pub fn min_zone_size(&self) -> f32 {
+        let style = self.style();
+        (Self::tab_bar_height(&style) + 3.0 * style.line_height).max(style.px(80.0))
+    }
+
+    /// Géométrie des zones, pour le noyau (redimensionnement au clavier, navigation).
+    pub fn metrics(&self) -> cupride_core::LayoutMetrics {
+        cupride_core::LayoutMetrics {
+            area: bounds(self.area),
+            gap: self.gap(),
+            min_size: self.min_zone_size(),
+        }
+    }
+
+    /// Séparation sous le point (`x`, `y`), avec quelques pixels de marge pour la saisir.
+    pub fn divider_at(&self, x: f32, y: f32) -> Option<&Divider> {
+        let margin = self.style().px(3.0);
+        self.dividers.iter().find(|d| {
+            let b = d.bounds;
+            Rect::new(
+                b.x - margin,
+                b.y - margin,
+                b.width + 2.0 * margin,
+                b.height + 2.0 * margin,
+            )
+            .contains(x, y)
+        })
+    }
+
+    /// Fait glisser la séparation `divider` jusqu'au point (`x`, `y`). Renvoie vrai si les
+    /// tailles ont changé.
+    pub fn drag_divider(&self, editor: &mut Editor, divider: &Divider, x: f32, y: f32) -> bool {
+        let position = match divider.axis {
+            cupride_core::layout::Axis::Horizontal => x,
+            cupride_core::layout::Axis::Vertical => y,
+        };
+        let metrics = self.metrics();
+        editor.workspace_mut().tree_mut().drag_divider(
+            &divider.split,
+            divider.index,
+            position,
+            metrics.area,
+            metrics.gap,
+            metrics.min_size,
+        )
+    }
+
     /// Onglet sous le point (`x`, `y`).
     pub fn tab_at(&self, x: f32, y: f32) -> Option<PanelId> {
         let zone = self.zones.iter().find(|z| z.tab_bar.contains(x, y))?;
@@ -750,5 +798,27 @@ mod tests {
             .unwrap();
         assert!(shown.bounds.right() <= zone.tab_bar.right());
         assert!(shown.bounds.x >= zone.tab_bar.x);
+    }
+
+    #[test]
+    fn glisser_une_separation() {
+        let mut editor = Editor::new();
+        let doc = editor.new_document();
+        editor
+            .open_editor_panel(doc, NewPanel::Split(Direction::Right))
+            .unwrap();
+        let mut text = TextSystem::new();
+        let mut views = PanelViews::new(ViewRegistry::default(), ViewSettings::default(), 1.0);
+        let area = Rect::new(0.0, 0.0, 801.0, 600.0);
+        views.layout(&mut text, &editor, area);
+        let divider = views.divider_at(402.0, 300.0).cloned().expect("séparation");
+        assert!(views.divider_at(300.0, 300.0).is_none());
+        assert!(views.drag_divider(&mut editor, &divider, 200.5, 300.0));
+        views.layout(&mut text, &editor, area);
+        assert_eq!(views.zones()[0].bounds.width, 200.0);
+        // Taille minimale.
+        views.drag_divider(&mut editor, &divider, 0.0, 300.0);
+        views.layout(&mut text, &editor, area);
+        assert_eq!(views.zones()[0].bounds.width, views.min_zone_size().round());
     }
 }
