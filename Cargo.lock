@@ -666,6 +666,7 @@ dependencies = [
  "cupride-text",
  "directories",
  "serde",
+ "serde_json",
  "shlex",
  "slotmap",
  "strsim",

@@ -74,6 +74,17 @@ et ignoré. Les plugins pourront ajouter leurs propres éléments.
 |---|---|---|---|
 | `preview` | `true`, `false` | `false` | Onglet d'aperçu : un fichier ouvert depuis l'ouverture rapide ou l'explorateur remplace l'onglet d'aperçu de la zone au lieu d'en ajouter un. L'onglet d'aperçu (nom en gris) est gardé dès que le document est modifié, avec `tab keep` ou un double clic. |
 
+### `[session]`
+
+| Option | Valeurs | Défaut | Effet |
+|---|---|---|---|
+| `restore` | `true`, `false` | `true` | Au lancement, l'espace de travail du projet est restauré tel qu'il était à la fermeture : zones et proportions, onglets, fichiers, curseurs et défilement. `cupride --no-restore` démarre sans le restaurer. |
+
+La session est enregistrée à la fermeture, en JSON, dans le dossier de données de l'OS
+(`sessions/`), une par projet (le dossier ouvert avec `cupride <dossier>`). Les documents sans
+fichier n'y sont pas gardés. Un fichier supprimé entre-temps : son panneau est fermé, et une
+notification le signale.
+
 ### `[keys]`
 
 Raccourcis : `"touches" = "ligne de commande"`. Ils s'ajoutent aux raccourcis par défaut et les
@@ -261,6 +272,11 @@ Les fichiers des thèmes intégrés servent d'exemples complets :
 # d'aperçu de la zone au lieu d'en ajouter un ; l'onglet est gardé dès qu'on modifie le document
 # (ou avec « tab keep »).
 # preview = false
+
+[session]
+# Au lancement, l'espace de travail du projet (zones, onglets, fichiers, curseurs, défilement)
+# est restauré tel qu'il était à la fermeture. « cupride --no-restore » démarre sans le restaurer.
+# restore = true
 
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les

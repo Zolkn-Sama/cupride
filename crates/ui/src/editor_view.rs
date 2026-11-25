@@ -456,6 +456,32 @@ impl EditorView {
         }
     }
 
+    /// Défilement actuel, indépendant de l'écran : ligne en haut de la vue et décalage horizontal
+    /// en pixels logiques.
+    pub fn scroll_position(&self) -> cupride_core::session::ScrollPosition {
+        let [x, y] = self.scroll.target();
+        cupride_core::session::ScrollPosition {
+            line: y / self.line_height().max(1.0),
+            x: x / self.scale,
+        }
+    }
+
+    /// Place le défilement (session restaurée) ; il est borné à la prochaine préparation.
+    pub fn set_scroll_position(&mut self, position: cupride_core::session::ScrollPosition) {
+        let line = if position.line.is_finite() {
+            position.line.max(0.0)
+        } else {
+            0.0
+        };
+        let x = if position.x.is_finite() {
+            position.x.max(0.0)
+        } else {
+            0.0
+        };
+        self.scroll
+            .jump_to([x * self.scale, line * self.line_height()]);
+    }
+
     /// Avance l'animation de défilement ; renvoie vrai s'il faut encore redessiner.
     pub fn tick(&mut self, now: Instant) -> bool {
         self.scroll.tick(now)

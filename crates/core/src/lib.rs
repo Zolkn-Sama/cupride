@@ -11,6 +11,7 @@
 //! - [`notifications`] : informations, avertissements et erreurs, avec leur historique.
 //! - [`keymap`] : raccourcis clavier, simples ou en séquence, sans aucune logique.
 //! - [`Document`] : un texte, son fichier, son historique et ses sélections.
+//! - [`session`] : espace de travail enregistré à la fermeture et restauré au lancement.
 //!
 //! Ne dépend jamais de `render`, `ui` ou `app` : tout le noyau se teste avec `cargo test` et se
 //! pilote depuis le REPL console.
@@ -25,6 +26,7 @@ pub mod keymap;
 pub mod language;
 pub mod notifications;
 mod panels;
+pub mod session;
 mod ui_request;
 
 pub use cupride_layout as layout;

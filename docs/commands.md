@@ -11,16 +11,22 @@ Toute action de CuprIDE est une commande. Une même commande est accessible depu
 ## Lancement
 
 ```
-cupride [chemin…]
+cupride [--no-restore] [chemin…]
 ```
 
 | Appel | Effet |
 |---|---|
-| `cupride` | Document vide. |
+| `cupride` | Session restaurée, sinon document vide. |
 | `cupride src/main.rs` | Ouvre le fichier. Un fichier inexistant ouvre un nouveau document avec ce chemin, créé au premier enregistrement. |
 | `cupride .` | Ouvre le dossier comme projet (son nom s'affiche dans le titre). |
 | `cupride . a.rs b.rs` | Dossier du projet et fichiers ; le premier fichier est actif. |
+| `cupride --no-restore` | Démarre sans restaurer l'espace de travail du projet. |
 | `cupride --help`, `cupride --version` | Aide, version. |
+
+L'espace de travail du projet (zones, onglets, fichiers, curseurs, défilement) est restauré tel
+qu'il était à la fermeture, sauf avec `--no-restore` ou l'option `[session] restore = false` (voir
+la [configuration](configuration.md#session)) ; les fichiers demandés s'y ajoutent, dans la zone
+active. Un fichier supprimé entre-temps : son panneau est fermé, et une notification le signale.
 
 Un fichier illisible (binaire, non UTF-8) n'empêche pas de démarrer : il est signalé dans le
 titre de la fenêtre et dans le journal. Une option inconnue arrête le lancement avec le code 2.

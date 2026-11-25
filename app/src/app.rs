@@ -743,6 +743,30 @@ impl App {
         }
     }
 
+    /// Enregistre l'espace de travail (layout, fichiers, curseurs, défilement) pour le prochain
+    /// lancement. Un échec est journalisé, sans empêcher de quitter.
+    fn save_session(&mut self) {
+        if self.fatal.is_some() {
+            return;
+        }
+        if let Some(state) = &self.window {
+            for (panel, scroll) in state.views.scroll_positions() {
+                self.editor.set_panel_scroll(panel, scroll);
+            }
+        }
+        let Some(dir) = cupride_core::session::sessions_dir() else {
+            tracing::warn!("dossier de données introuvable : session non enregistrée");
+            return;
+        };
+        let path = dir.join(cupride_core::session::session_file_name(
+            self.editor.project(),
+        ));
+        match cupride_core::session::save(&self.editor.capture_session(), &path) {
+            Ok(()) => tracing::info!(session = %path.display(), "session enregistrée"),
+            Err(error) => tracing::warn!("{error}"),
+        }
+    }
+
     /// Erreur qui empêche de démarrer : message clair dans les journaux, et fin de la boucle ;
     /// `main` l'affiche et sort avec un code d'erreur.
     fn fail(&mut self, event_loop: &ActiveEventLoop, message: String) {
@@ -1061,6 +1085,7 @@ impl ApplicationHandler<AppEvent> for App {
                 "latence de frappe"
             );
         }
+        self.save_session();
         // Les ressources de la fenêtre sont libérées avant le GPU et la sortie de la boucle.
         self.window = None;
         self.gpu = None;

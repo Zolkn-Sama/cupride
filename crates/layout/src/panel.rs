@@ -88,6 +88,10 @@ impl Panel {
         self.id
     }
 
+    pub(crate) fn set_id(&mut self, id: PanelId) {
+        self.id = id;
+    }
+
     /// Type.
     pub fn kind(&self) -> &PanelKind {
         &self.kind

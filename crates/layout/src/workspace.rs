@@ -171,12 +171,32 @@ impl Workspace {
         Some(panel)
     }
 
-    /// Remplace l'arbre et les panneaux par ceux de `other` (layout chargé), en gardant la suite
-    /// des identifiants : un identifiant ne sert jamais deux fois.
-    pub fn replace(&mut self, other: Workspace) {
-        let next_id = self.next_id.max(other.next_id);
-        *self = other;
+    /// Remplace l'arbre et les panneaux par ceux de `other` (layout chargé). Ses panneaux
+    /// reçoivent des identifiants neufs, à la suite de ceux déjà attribués : un identifiant ne
+    /// sert jamais deux fois. Renvoie la correspondance entre anciens et nouveaux identifiants.
+    pub fn replace(&mut self, other: Workspace) -> BTreeMap<PanelId, PanelId> {
+        let mut renamed = BTreeMap::new();
+        let mut next_id = self.next_id.max(other.next_id);
+        for id in other.panels.keys() {
+            renamed.insert(*id, PanelId::new(next_id));
+            next_id += 1;
+        }
+        let mut tree = other.tree;
+        tree.rename(&mut |id| renamed.get(&id).copied().unwrap_or(id));
+        self.tree = tree;
+        self.panels = other
+            .panels
+            .into_values()
+            .filter_map(|mut panel| {
+                let id = *renamed.get(&panel.id())?;
+                panel.set_id(id);
+                Some((id, panel))
+            })
+            .collect();
+        self.active = other.active.and_then(|id| renamed.get(&id).copied());
+        self.recent = self.active.into_iter().collect();
         self.next_id = next_id;
+        renamed
     }
 
     /// Prochain identifiant attribué.
@@ -287,13 +307,29 @@ mod tests {
     }
 
     #[test]
-    fn remplacer_garde_la_suite_des_identifiants() {
+    fn remplacer_renumerote_les_panneaux() {
         let mut ws = Workspace::new();
         for _ in 0..5 {
             ws.create(editor());
         }
-        ws.replace(Workspace::new());
-        assert_eq!(ws.panel_count(), 0);
-        assert_eq!(ws.create(editor()).get(), 6);
+        let mut loaded = Workspace::new();
+        let a = loaded.create(editor());
+        loaded.tree_mut().add(a, None).unwrap();
+        let b = loaded.create(editor());
+        loaded.tree_mut().split(a, Direction::Right, b).unwrap();
+        loaded.tree_mut().set_preview(b, true).unwrap();
+        loaded.focus(b).unwrap();
+        let renamed = ws.replace(loaded);
+        assert_eq!(renamed[&a], PanelId::new(6));
+        assert_eq!(renamed[&b], PanelId::new(7));
+        assert_eq!(ws.tree().panels(), vec![PanelId::new(6), PanelId::new(7)]);
+        assert_eq!(ws.active(), Some(PanelId::new(7)));
+        assert_eq!(ws.panel(PanelId::new(7)).unwrap().id(), PanelId::new(7));
+        assert_eq!(
+            ws.tree().group_of(PanelId::new(7)).unwrap().preview(),
+            Some(PanelId::new(7))
+        );
+        assert!(ws.is_valid());
+        assert_eq!(ws.create(editor()).get(), 8);
     }
 }
