@@ -61,6 +61,9 @@ use crate::watcher::DiskWatcher;
 /// Taille initiale de la fenêtre, en pixels logiques.
 const INITIAL_SIZE: LogicalSize<f64> = LogicalSize::new(1_100.0, 720.0);
 
+/// Intervalle entre deux copies des documents non enregistrés (récupération après plantage).
+const BACKUP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// Décalage d'une nouvelle fenêtre par rapport à la fenêtre courante, en pixels logiques.
 const CASCADE: f64 = 32.0;
 
@@ -188,6 +191,8 @@ pub(crate) struct App {
     last_replacement: String,
     /// Recherche dans le projet, en arrière-plan.
     project_search: ProjectWorker,
+    /// Dernière copie des documents non enregistrés.
+    last_backup: Instant,
     /// Occurrences surlignées, partagées par les vues : (document, révision, occurrences).
     highlights: Option<SharedMatches>,
     /// Fichiers du projet, indexés en arrière-plan pour l'ouverture rapide.
@@ -276,6 +281,7 @@ impl App {
             search_jump: false,
             last_replacement: String::new(),
             project_search: ProjectWorker::default(),
+            last_backup: Instant::now(),
             highlights: None,
             file_index: FileIndex::default(),
             disk: DiskWatcher::new(proxy.clone()),
@@ -1757,11 +1763,27 @@ impl ApplicationHandler<AppEvent> for App {
         // curseur ou expiration d'une notification. Sans rien de tout cela, la boucle dort
         // jusqu'au prochain événement.
         let now = Instant::now();
+        // Copie des documents non enregistrés, au plus toutes les 15 s, s'il y a du nouveau.
+        let backup = self
+            .editor
+            .needs_backup()
+            .then(|| self.last_backup + BACKUP_INTERVAL);
+        if backup.is_some_and(|due| due <= now) {
+            if let Err(error) = self.editor.backup_documents() {
+                tracing::warn!("copie de récupération impossible : {error}");
+            }
+            self.last_backup = now;
+        }
+        let backup = self
+            .editor
+            .needs_backup()
+            .then(|| self.last_backup + BACKUP_INTERVAL);
         let blink = self.focused.then(|| self.blink.next_change(now)).flatten();
         let wake = [
             self.close_guard.deadline(),
             blink,
             self.toasts.next_expiry(),
+            backup,
         ]
         .into_iter()
         .flatten()
@@ -1783,6 +1805,10 @@ impl ApplicationHandler<AppEvent> for App {
             );
         }
         self.save_session();
+        // Fermeture normale : les copies de récupération ne servent plus.
+        if let Err(error) = self.editor.finish_recovery() {
+            tracing::warn!("récupération après plantage : {error}");
+        }
         // Les terminaux qui attendaient (--wait) sont libérés : l'instance s'arrête.
         for (_, responder) in std::mem::take(&mut self.waiting) {
             let _ = responder.finish(&[], 0);

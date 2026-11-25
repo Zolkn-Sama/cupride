@@ -30,6 +30,7 @@ pub mod monitors;
 pub mod notifications;
 mod panels;
 pub mod project_search;
+pub mod recovery;
 pub mod search;
 pub mod session;
 mod ui_request;
