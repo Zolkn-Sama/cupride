@@ -559,6 +559,8 @@ pub fn default_bindings(platform: Platform) -> Vec<(&'static str, &'static str)>
         ("ctrl+shift+pageup", "tab move-left"),
         ("mod+\\", "split right"),
         ("mod+shift+e", "explorer show"),
+        ("mod+shift+n", "window new"),
+        ("mod+shift+w", "window close"),
         ("mod+k mod+left", "panel focus left"),
         ("mod+k mod+right", "panel focus right"),
         ("mod+k mod+up", "panel focus up"),

@@ -12,6 +12,7 @@ mod tab;
 mod theme;
 mod ui;
 mod view;
+mod window;
 
 use super::{CommandError, CommandRegistry};
 use crate::document::Document;
@@ -31,6 +32,7 @@ pub(crate) fn register_all(registry: &mut CommandRegistry) -> Result<(), Command
     tab::register(registry)?;
     layout::register(registry)?;
     explorer::register(registry)?;
+    window::register(registry)?;
     Ok(())
 }
 

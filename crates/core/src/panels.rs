@@ -294,9 +294,12 @@ impl Editor {
             self.set_active_raw(Some(doc));
             return;
         }
-        let current = self.active_id().filter(|id| self.document(*id).is_some());
-        let fallback = current.or_else(|| self.panel_documents.values().next().copied());
-        self.set_active_raw(fallback);
+        // Panneau sans document (explorateur) : le document actif reste, s'il existe encore. Sans
+        // panneau actif (fenêtre vide), il n'y a pas de document actif.
+        let current = self
+            .active_id()
+            .filter(|id| panel.is_some() && self.document(*id).is_some());
+        self.set_active_raw(current);
     }
 }
 

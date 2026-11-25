@@ -28,6 +28,7 @@ pub mod notifications;
 mod panels;
 pub mod session;
 mod ui_request;
+mod windows;
 
 pub use cupride_layout as layout;
 pub use cupride_text as text;

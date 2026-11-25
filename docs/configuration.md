@@ -91,6 +91,12 @@ notification le signale.
 |---|---|---|---|
 | `ignored` | `"dim"`, `"hide"`, `"show"` | `"dim"` | Fichiers ignorés par `.gitignore` et `.ignore` dans l'explorateur : en gris, masqués, ou comme les autres. Le dossier `.git` n'est jamais affiché. |
 
+### `[window]`
+
+| Option | Valeurs | Défaut | Effet |
+|---|---|---|---|
+| `quit_on_last_close` | `true`, `false` | `true` | Fermer la dernière fenêtre quitte CuprIDE. Avec `false`, CuprIDE reste lancé sans fenêtre. |
+
 ### `[keys]`
 
 Raccourcis : `"touches" = "ligne de commande"`. Ils s'ajoutent aux raccourcis par défaut et les
@@ -156,6 +162,8 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `split right` | `Ctrl+\` | `Cmd+\` |
 | `split down` | `Ctrl+K Ctrl+\` | `Cmd+K Cmd+\` |
 | `explorer show` | `Ctrl+Maj+E` | `Cmd+Maj+E` |
+| `window new` | `Ctrl+Maj+N` | `Cmd+Maj+N` |
+| `window close` | `Ctrl+Maj+W` | `Cmd+Maj+W` |
 | `panel focus left` | `Ctrl+K Ctrl+←` | `Cmd+K Cmd+←` |
 | `panel focus right` | `Ctrl+K Ctrl+→` | `Cmd+K Cmd+→` |
 | `panel focus up` | `Ctrl+K Ctrl+↑` | `Cmd+K Cmd+↑` |
@@ -289,6 +297,11 @@ Les fichiers des thèmes intégrés servent d'exemples complets :
 # Fichiers ignorés (.gitignore, .ignore) : "dim" (affichés en gris), "hide" (masqués) ou
 # "show" (affichés comme les autres). Le dossier .git n'est jamais affiché.
 # ignored = "dim"
+
+[window]
+# Fermer la dernière fenêtre quitte CuprIDE. Avec false, CuprIDE reste lancé sans fenêtre : la
+# prochaine commande « cupride » en ouvre une, dans la même instance.
+# quit_on_last_close = true
 
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les
