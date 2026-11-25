@@ -183,6 +183,8 @@ pub(crate) struct App {
     /// trouvée à la prochaine réponse.
     search_origin: Option<usize>,
     search_jump: bool,
+    /// Dernier texte de remplacement saisi.
+    last_replacement: String,
     /// Occurrences surlignées, partagées par les vues : (document, révision, occurrences).
     highlights: Option<SharedMatches>,
     /// Fichiers du projet, indexés en arrière-plan pour l'ouverture rapide.
@@ -269,6 +271,7 @@ impl App {
             search: SearchWorker::default(),
             search_origin: None,
             search_jump: false,
+            last_replacement: String::new(),
             highlights: None,
             file_index: FileIndex::default(),
             disk: DiskWatcher::new(proxy.clone()),

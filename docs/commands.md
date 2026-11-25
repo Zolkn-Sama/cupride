@@ -154,8 +154,11 @@ edit add-cursor down
 | `search find <motif> [--case] [--word] [--regex]` | Cherche le motif dans le document actif et sélectionne l'occurrence suivante, à partir du début de la sélection ; affiche sa position (`3/12`). Par défaut, la casse est ignorée ; `--case` la respecte, `--word` ne garde que les mots entiers, `--regex` lit le motif comme une expression régulière (syntaxe de la crate `regex`). |
 | `search next` | Occurrence suivante ; après la dernière, la première (`F3`, `mod+g`). |
 | `search previous` | Occurrence précédente (`Maj+F3`, `mod+shift+g`). |
+| `search replace <texte>` | Remplace l'occurrence sélectionnée par le texte, puis sélectionne la suivante. Avec `--regex` dans la recherche, `$1`, `${nom}` et `$0` reprennent les groupes de capture (`$$` pour un `$`) ; sinon le texte est pris tel quel. |
+| `search replace-all <texte>` | Remplace toutes les occurrences, en une seule modification : un seul `edit undo` les rétablit toutes. |
 | `search clear` | Arrête la recherche en cours. |
 | `ui find` | Ouvre la barre de recherche (`mod+f`), préremplie avec la sélection (sur une ligne) ou le motif en cours. |
+| `ui replace` | Ouvre la barre avec la ligne de remplacement (`Ctrl+H`, `Option+Cmd+F` sous macOS). |
 
 **Barre de recherche** : en haut à droite de la zone active. La recherche est incrémentale :
 chaque frappe sélectionne la première occurrence à partir du point de départ, et toutes les
@@ -163,7 +166,9 @@ occurrences sont surlignées. Entrée (ou ↓) : suivante ; Maj+Entrée (ou ↑)
 fermer (le motif reste, `F3` continue). Options : `Alt+C` casse, `Alt+W` mot entier, `Alt+R`
 expression régulière, ou un clic sur `Aa`, `mot`, `.*`. Une expression invalide est signalée dans
 la barre. La recherche se fait dans un thread à part, sur une copie du document : l'interface ne
-bloque jamais, même sur un fichier de 100 Mo. Au-delà de 100 000 occurrences, seules les
+bloque jamais, même sur un fichier de 100 Mo. Ligne de remplacement : Tab passe d'un champ à
+l'autre ; dans le champ de remplacement, Entrée remplace l'occurrence sélectionnée et passe à la
+suivante, `mod+Entrée` remplace tout. Au-delà de 100 000 occurrences, seules les
 100 000 premières sont gardées (« limite »).
 
 ## `config` — configuration

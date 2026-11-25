@@ -188,12 +188,23 @@ impl App {
         }
     }
 
-    /// Touche pour la barre de recherche. Entrée : suivante ; Maj+Entrée : précédente ;
-    /// Échap : fermer ; Alt+C, Alt+W, Alt+R (aussi avec Cmd ou Ctrl) : options.
-    pub(super) fn find_key(&mut self, combo: Option<KeyCombo>, text: Option<&str>) -> bool {
-        if self.find.is_none() {
-            return false;
+    /// Ouvre la barre de recherche avec la ligne de remplacement.
+    pub(super) fn open_replace(&mut self, pattern: &str) {
+        let replacement = self.last_replacement.clone();
+        self.open_find(pattern);
+        if let Some(bar) = &mut self.find {
+            bar.show_replace(&replacement);
         }
+        self.request_redraw();
+    }
+
+    /// Touche pour la barre de recherche. Entrée : suivante, ou, dans le champ de remplacement,
+    /// remplacer ; Cmd/Ctrl+Entrée dans ce champ : tout remplacer ; Maj+Entrée : précédente ;
+    /// Tab : autre champ ; Échap : fermer ; Alt+C, Alt+W, Alt+R : options.
+    pub(super) fn find_key(&mut self, combo: Option<KeyCombo>, text: Option<&str>) -> bool {
+        let Some(bar) = &mut self.find else {
+            return false;
+        };
         if let Some(combo) = combo
             && combo.modifiers.alt
             && let Key::Char(c) = combo.key
@@ -205,28 +216,28 @@ impl App {
                 _ => None,
             };
             if let Some(option) = option {
-                if let Some(bar) = &mut self.find {
-                    bar.toggle(option);
-                }
+                bar.toggle(option);
                 self.apply_find_query(true);
                 return true;
             }
         }
+        let in_replace = bar.replace_focused();
+        let before = bar.input.text().to_owned();
         if let Some(text) = text {
-            if let Some(bar) = &mut self.find {
-                bar.input.insert(text);
-            }
-            self.apply_find_query(true);
+            bar.focused_input().insert(text);
+            self.after_find_edit(&before);
             return true;
         }
         let Some(combo) = combo else {
             return true;
         };
-        let Some(bar) = &mut self.find else {
-            return false;
+        let primary = match Platform::current() {
+            Platform::MacOs => combo.modifiers.meta,
+            Platform::Other => combo.modifiers.ctrl,
         };
-        let before = bar.input.text().to_owned();
-        match bar.input.key(combo, Platform::current()) {
+        match bar.focused_input().key(combo, Platform::current()) {
+            InputEvent::Submit if in_replace && primary => self.replace_all_matches(),
+            InputEvent::Submit if in_replace && !combo.modifiers.shift => self.replace_one(),
             InputEvent::Submit => {
                 let command = if combo.modifiers.shift {
                     "search previous"
@@ -234,6 +245,10 @@ impl App {
                     "search next"
                 };
                 self.step_match(command);
+            }
+            InputEvent::Complete => {
+                bar.switch_field();
+                self.request_redraw();
             }
             InputEvent::Cancel => self.close_find(),
             InputEvent::Up => self.step_match("search previous"),
@@ -251,20 +266,74 @@ impl App {
                 if let Some(text) = self.editor.clipboard_mut().get(ClipboardKind::Standard)
                     && let Some(bar) = &mut self.find
                 {
-                    bar.input.insert(&text);
+                    bar.focused_input().insert(&text);
                 }
-                self.apply_find_query(true);
+                self.after_find_edit(&before);
             }
-            InputEvent::Handled | InputEvent::Complete => {
-                if self.find.as_ref().is_some_and(|b| b.input.text() != before) {
-                    self.apply_find_query(true);
-                } else {
-                    self.request_redraw();
-                }
-            }
+            InputEvent::Handled => self.after_find_edit(&before),
             InputEvent::Ignored => return false,
         }
         true
+    }
+
+    /// Après une modification d'un champ : nouvelle recherche si le motif a changé.
+    fn after_find_edit(&mut self, before: &str) {
+        let Some(bar) = &self.find else {
+            return;
+        };
+        if bar.input.text() != before {
+            self.apply_find_query(true);
+        } else {
+            if let Some(text) = bar.replacement() {
+                self.last_replacement = text.to_owned();
+            }
+            self.request_redraw();
+        }
+    }
+
+    /// Remplace l'occurrence sélectionnée et passe à la suivante.
+    fn replace_one(&mut self) {
+        let Some(with) = self
+            .find
+            .as_ref()
+            .and_then(|b| b.replacement())
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        let result = self.editor.replace_match(&with);
+        let status = match result {
+            Ok(Some((index, count))) => (format!("{index}/{count}"), false),
+            Ok(None) => ("plus aucune occurrence".to_owned(), false),
+            Err(error) => (error.to_string(), true),
+        };
+        if let Some(bar) = &mut self.find {
+            bar.set_status(Some(status.0), status.1);
+        }
+        self.after_any_command(Instant::now());
+    }
+
+    /// Remplace toutes les occurrences, en une seule modification annulable.
+    fn replace_all_matches(&mut self) {
+        let Some(with) = self
+            .find
+            .as_ref()
+            .and_then(|b| b.replacement())
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        let status = match self.editor.replace_all(&with) {
+            Ok(count) => (
+                format!("{count} remplacement{}", if count > 1 { "s" } else { "" }),
+                false,
+            ),
+            Err(error) => (error.to_string(), true),
+        };
+        if let Some(bar) = &mut self.find {
+            bar.set_status(Some(status.0), status.1);
+        }
+        self.after_any_command(Instant::now());
     }
 
     /// Occurrence suivante ou précédente, et sa position dans la barre.
@@ -298,6 +367,8 @@ impl App {
         if let Some(option) = bar.option_at(x, y) {
             bar.toggle(option);
             self.apply_find_query(true);
+        } else {
+            bar.focus_replace(bar.in_replace(x, y));
         }
         self.focus.push(Element::Find);
         true

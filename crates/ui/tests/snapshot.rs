@@ -415,7 +415,11 @@ fn recherche() {
     view.draw(frame.base(), &theme, document, true);
     let mut bar = FindBar::new(&SearchQuery::new("message"));
     bar.set_status(Some("1/3".into()), false);
-    bar.prepare(&mut text, &style, Rect::new(0.0, 0.0, width as f32, height as f32));
+    bar.prepare(
+        &mut text,
+        &style,
+        Rect::new(0.0, 0.0, width as f32, height as f32),
+    );
     bar.draw(frame.push_layer(), &style, &theme, true);
     renderer
         .render(&gpu, &mut text, &target.view, target.size(), &frame)

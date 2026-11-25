@@ -14,6 +14,8 @@ pub enum UiRequest {
     QuickOpen,
     /// Ouvrir la barre de recherche, préremplie avec ce motif.
     Find(String),
+    /// Ouvrir la barre de recherche avec le champ de remplacement.
+    Replace(String),
     /// Montrer ce fichier ou ce dossier dans l'explorateur (dossiers parents dépliés).
     Reveal(std::path::PathBuf),
     /// Placer la fenêtre sur l'écran `monitor` (numéro, à partir de 1).

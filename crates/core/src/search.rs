@@ -13,7 +13,7 @@ use thiserror::Error;
 
 use crate::command::CommandError;
 use crate::editor::{DocumentId, Editor};
-use crate::text::{Selection, Selections, TextBuffer};
+use crate::text::{Edit, EditKind, Selection, Selections, TextBuffer};
 
 /// Nombre maximal d'occurrences retenues : au-delà, la recherche s'arrête (et le signale).
 pub const MAX_MATCHES: usize = 100_000;
@@ -226,6 +226,105 @@ impl Editor {
     }
 }
 
+/// Texte qui remplace une occurrence : en mode expression régulière, `$1`, `${nom}` et `$0`
+/// reprennent les groupes de capture (`$$` pour un `$`) ; sinon, le texte tel quel.
+fn replacement(query: &SearchQuery, captures: &regex::Captures<'_>, with: &str) -> String {
+    if query.regex {
+        let mut text = String::new();
+        captures.expand(with, &mut text);
+        text
+    } else {
+        with.to_owned()
+    }
+}
+
+impl Editor {
+    /// Remplace l'occurrence sélectionnée par `with` (groupes de capture en mode expression
+    /// régulière), puis sélectionne la suivante. Si la sélection n'est pas une occurrence, la
+    /// suivante est seulement sélectionnée. Renvoie la position de l'occurrence sélectionnée et
+    /// leur nombre, ou `None` s'il n'en reste aucune.
+    pub fn replace_match(&mut self, with: &str) -> Result<Option<(usize, usize)>, CommandError> {
+        let query = self
+            .search
+            .query
+            .clone()
+            .ok_or_else(|| CommandError::Failed("aucune recherche en cours".into()))?;
+        let regex = query
+            .compile()
+            .map_err(|e| CommandError::Failed(e.to_string()))?;
+        let (id, document) = crate::command::builtin_active(self)?;
+        let selection = document.selections().primary();
+        let text = document.buffer().to_text();
+        let found = regex
+            .captures_at(&text, selection.start())
+            .filter(|c| c.get(0).is_some_and(|m| m.range() == selection.range()));
+        let Some(captures) = found else {
+            return match self.select_match(true, Some(selection.start())) {
+                Ok(position) => Ok(Some(position)),
+                Err(_) => Ok(None),
+            };
+        };
+        let new_text = replacement(&query, &captures, with);
+        let range = selection.range();
+        let document = self
+            .document_mut(id)
+            .ok_or(CommandError::NoActiveDocument)?;
+        document.transact(EditKind::Other, |buffer, tx| {
+            let edit = Edit::replace(buffer, range.clone(), new_text.clone())?;
+            tx.apply(buffer, edit)?;
+            tx.set_selections_after(Selections::cursor(range.start + new_text.len()));
+            Ok(())
+        })?;
+        self.flush_events();
+        match self.select_match(true, None) {
+            Ok(position) => Ok(Some(position)),
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// Remplace toutes les occurrences par `with`, en **une seule** modification : un seul
+    /// « annuler » les rétablit toutes. Renvoie le nombre de remplacements.
+    pub fn replace_all(&mut self, with: &str) -> Result<usize, CommandError> {
+        let query = self
+            .search
+            .query
+            .clone()
+            .ok_or_else(|| CommandError::Failed("aucune recherche en cours".into()))?;
+        let regex = query
+            .compile()
+            .map_err(|e| CommandError::Failed(e.to_string()))?;
+        let (id, document) = crate::command::builtin_active(self)?;
+        let text = document.buffer().to_text();
+        let replacements: Vec<(Range<usize>, String)> = regex
+            .captures_iter(&text)
+            .filter_map(|c| {
+                let whole = c.get(0)?;
+                (!whole.is_empty()).then(|| (whole.range(), replacement(&query, &c, with)))
+            })
+            .collect();
+        if replacements.is_empty() {
+            return Err(CommandError::Failed(format!(
+                "« {} » introuvable",
+                query.pattern
+            )));
+        }
+        let count = replacements.len();
+        let document = self
+            .document_mut(id)
+            .ok_or(CommandError::NoActiveDocument)?;
+        document.transact(EditKind::Other, |buffer, tx| {
+            // De la fin vers le début : les positions des occurrences restantes ne bougent pas.
+            for (range, new_text) in replacements.iter().rev() {
+                let edit = Edit::replace(buffer, range.clone(), new_text.clone())?;
+                tx.apply(buffer, edit)?;
+            }
+            Ok(())
+        })?;
+        self.flush_events();
+        Ok(count)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,5 +432,50 @@ mod tests {
         assert_eq!(editor.search_matches(id), Some(found.as_slice()));
         editor.execute("edit insert 'x'").unwrap();
         assert_eq!(editor.search_matches(id), None, "le texte a changé");
+    }
+
+    #[test]
+    fn remplacer() {
+        let mut editor = Editor::new();
+        editor.insert_document(crate::Document::from_text("chat, chat et chaton"));
+        editor.set_search_query(Some(SearchQuery {
+            whole_word: true,
+            ..SearchQuery::new("chat")
+        }));
+        // La sélection n'est pas une occurrence : la première est seulement sélectionnée.
+        assert_eq!(editor.replace_match("chien").unwrap(), Some((1, 2)));
+        assert_eq!(text(&editor), "chat, chat et chaton");
+        assert_eq!(editor.replace_match("chien").unwrap(), Some((1, 1)));
+        assert_eq!(text(&editor), "chien, chat et chaton");
+        assert_eq!(editor.replace_match("chien").unwrap(), None, "plus aucune");
+        assert_eq!(text(&editor), "chien, chien et chaton");
+    }
+
+    #[test]
+    fn tout_remplacer_en_une_transaction() {
+        let mut editor = Editor::new();
+        editor.insert_document(crate::Document::from_text("a=1; b=22; c=333;"));
+        editor.set_search_query(Some(SearchQuery {
+            regex: true,
+            ..SearchQuery::new(r"(\w)=(\d+)")
+        }));
+        assert_eq!(
+            editor.replace_all("$2:${1}").unwrap(),
+            3,
+            "groupes de capture"
+        );
+        assert_eq!(text(&editor), "1:a; 22:b; 333:c;");
+        editor.execute("edit undo").unwrap();
+        assert_eq!(text(&editor), "a=1; b=22; c=333;", "un seul annuler");
+        // Sans expression régulière, le remplacement est littéral.
+        editor.set_search_query(Some(SearchQuery::new("b=22")));
+        editor.replace_all("$1").unwrap();
+        assert_eq!(text(&editor), "a=1; $1; c=333;");
+        editor.set_search_query(Some(SearchQuery::new("zut")));
+        assert!(editor.replace_all("x").is_err());
+    }
+
+    fn text(editor: &Editor) -> String {
+        editor.active_document().unwrap().buffer().to_text()
     }
 }
