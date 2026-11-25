@@ -23,4 +23,4 @@ pub use tree::{
     Child, DROP_EDGE, Divider, DropTarget, GroupArea, LayoutError, LayoutTree, Node, Placement,
     Split, TabGroup,
 };
-pub use workspace::{WindowId, WindowLayout, Workspace};
+pub use workspace::{WindowGeometry, WindowId, WindowLayout, Workspace};

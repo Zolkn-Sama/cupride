@@ -37,12 +37,36 @@ impl fmt::Display for WindowId {
     }
 }
 
-/// Une fenêtre : son arbre de layout et son panneau actif.
+/// Place d'une fenêtre sur le bureau, gardée dans la session : écran, position et taille (pixels
+/// physiques), agrandie ou plein écran.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowGeometry {
+    /// Nom de l'écran où elle était.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monitor: Option<String>,
+    /// Coin haut gauche.
+    pub x: i32,
+    /// Coin haut gauche.
+    pub y: i32,
+    /// Largeur intérieure.
+    pub width: u32,
+    /// Hauteur intérieure.
+    pub height: u32,
+    /// Agrandie.
+    #[serde(default)]
+    pub maximized: bool,
+    /// En plein écran.
+    #[serde(default)]
+    pub fullscreen: bool,
+}
+
+/// Une fenêtre : son arbre de layout, son panneau actif et sa place sur le bureau.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindowLayout {
     id: WindowId,
     tree: LayoutTree,
     active: Option<PanelId>,
+    geometry: Option<WindowGeometry>,
 }
 
 impl WindowLayout {
@@ -51,7 +75,13 @@ impl WindowLayout {
             id,
             tree: LayoutTree::new(),
             active: None,
+            geometry: None,
         }
+    }
+
+    /// Place sur le bureau, si elle est connue (session restaurée).
+    pub fn geometry(&self) -> Option<&WindowGeometry> {
+        self.geometry.as_ref()
     }
 
     /// Identifiant.
@@ -96,6 +126,8 @@ struct RawWindow {
     tree: LayoutTree,
     #[serde(default)]
     active: Option<PanelId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    geometry: Option<WindowGeometry>,
 }
 
 /// Forme sérialisée du workspace. Les sessions d'avant le multi-fenêtres (`tree` et `active` à
@@ -123,6 +155,7 @@ impl From<RawWorkspace> for Workspace {
                 id: WindowId::new(1),
                 tree,
                 active: raw.active,
+                geometry: None,
             });
         }
         let mut panels: BTreeMap<PanelId, Panel> =
@@ -148,6 +181,7 @@ impl From<RawWorkspace> for Workspace {
                 id: raw_window.id,
                 tree,
                 active,
+                geometry: raw_window.geometry,
             });
         }
         // Un modèle hors des arbres est oublié.
@@ -181,6 +215,7 @@ impl From<Workspace> for RawWorkspace {
                     id: w.id,
                     tree: w.tree,
                     active: w.active,
+                    geometry: w.geometry,
                 })
                 .collect(),
             active_window: workspace.active_window,
@@ -223,6 +258,13 @@ impl Workspace {
 
     fn window_mut(&mut self, id: WindowId) -> Option<&mut WindowLayout> {
         self.windows.iter_mut().find(|w| w.id == id)
+    }
+
+    /// Mémorise la place de la fenêtre `id` sur le bureau, pour la session.
+    pub fn set_geometry(&mut self, id: WindowId, geometry: WindowGeometry) {
+        if let Some(window) = self.window_mut(id) {
+            window.geometry = Some(geometry);
+        }
     }
 
     /// Fenêtre active (celle qui a le focus).
@@ -692,5 +734,25 @@ mod tests {
         );
         assert_eq!(windows.len(), 2);
         assert_eq!(fresh.create_window(), WindowId::new(3));
+    }
+
+    #[test]
+    fn place_des_fenetres_gardee() {
+        let mut ws = Workspace::new();
+        let second = ws.create_window();
+        let geometry = WindowGeometry {
+            monitor: Some("DELL".into()),
+            x: 1920,
+            y: 40,
+            width: 1200,
+            height: 800,
+            maximized: true,
+            fullscreen: false,
+        };
+        ws.set_geometry(second, geometry.clone());
+        let json = serde_json::to_string(&ws).unwrap();
+        let back: Workspace = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.window(second).unwrap().geometry(), Some(&geometry));
+        assert_eq!(back.window(WindowId::new(1)).unwrap().geometry(), None);
     }
 }

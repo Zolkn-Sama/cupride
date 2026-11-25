@@ -17,7 +17,9 @@ use std::time::Instant;
 use cupride_core::clipboard::ClipboardKind;
 use cupride_core::command::CommandOutput;
 use cupride_core::keymap::{KeyResolver, Resolution};
-use cupride_core::layout::{Axis, Divider, DropTarget, PanelId, WindowId as LayoutWindowId};
+use cupride_core::layout::{
+    Axis, Divider, DropTarget, PanelId, WindowGeometry, WindowId as LayoutWindowId,
+};
 use cupride_core::monitors::{MonitorInfo, Placement, PlacementStrategy};
 use cupride_core::notifications::Level;
 use cupride_core::text::{Selections, TextBuffer};
@@ -936,10 +938,24 @@ impl App {
         if self.fatal.is_some() {
             return;
         }
-        for state in self.windows.values() {
+        for (id, state) in &self.windows {
             for (panel, scroll) in state.views.scroll_positions() {
                 self.editor.set_panel_scroll(panel, scroll);
             }
+            // Écran, position, taille et état de chaque fenêtre.
+            let os = &state.window;
+            let position = os.outer_position().unwrap_or_default();
+            let size = os.inner_size();
+            let geometry = WindowGeometry {
+                monitor: os.current_monitor().and_then(|m| m.name()),
+                x: position.x,
+                y: position.y,
+                width: size.width,
+                height: size.height,
+                maximized: os.is_maximized(),
+                fullscreen: os.fullscreen().is_some(),
+            };
+            self.editor.workspace_mut().set_geometry(*id, geometry);
         }
         let Some(dir) = cupride_core::session::sessions_dir() else {
             tracing::warn!("dossier de données introuvable : session non enregistrée");
@@ -973,7 +989,30 @@ impl App {
             .with_inner_size(INITIAL_SIZE);
         // Sous Wayland, la position est ignorée : l'écran demandé est traité après l'ouverture.
         let pending = self.pending_placement.remove(&id);
-        if let Some(placement) = pending
+        let saved = self
+            .editor
+            .workspace()
+            .window(id)
+            .and_then(|w| w.geometry())
+            .cloned()
+            .filter(|_| pending.is_none());
+        if let Some(saved) = &saved {
+            // Fenêtre d'une session : à sa place, ou rapatriée sur un écran disponible.
+            let placement = cupride_core::monitors::rescue(
+                Placement {
+                    x: saved.x,
+                    y: saved.y,
+                    width: saved.width,
+                    height: saved.height,
+                },
+                saved.monitor.as_deref(),
+                self.editor.monitors(),
+            );
+            attributes = attributes
+                .with_position(PhysicalPosition::new(placement.x, placement.y))
+                .with_inner_size(PhysicalSize::new(placement.width, placement.height))
+                .with_maximized(saved.maximized);
+        } else if let Some(placement) = pending
             .filter(|_| !self.wayland)
             .and_then(|monitor| self.placement_on(monitor, None))
         {
@@ -1050,6 +1089,14 @@ impl App {
         );
         if let Some(monitor) = pending.filter(|_| self.wayland) {
             self.place_window(id, monitor);
+        }
+        if saved.is_some_and(|s| s.fullscreen)
+            && let Some(state) = self.windows.get(&id)
+        {
+            let monitor = state.window.current_monitor();
+            state
+                .window
+                .set_fullscreen(Some(Fullscreen::Borderless(monitor)));
         }
         Ok(())
     }
