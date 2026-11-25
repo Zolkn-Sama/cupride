@@ -57,7 +57,7 @@ pub struct Editor {
     /// Nombre de lignes d'une page, pour `edit move page-up` : fourni par la vue.
     page_lines: usize,
     /// Géométrie des zones : fournie par l'interface.
-    layout_metrics: crate::panels::LayoutMetrics,
+    pub(crate) layout_metrics: crate::panels::LayoutMetrics,
     clipboard: Box<dyn Clipboard>,
     /// Dernière copie faite dans l'IDE, pour redistribuer ses fragments entre les curseurs.
     last_copy: Option<LastCopy>,

@@ -11,7 +11,7 @@ use std::time::Instant;
 use cupride_core::clipboard::ClipboardKind;
 use cupride_core::command::CommandOutput;
 use cupride_core::keymap::{KeyResolver, Resolution};
-use cupride_core::layout::{Axis, Divider, PanelId};
+use cupride_core::layout::{Axis, Divider, DropTarget, PanelId};
 use cupride_core::notifications::Level;
 use cupride_core::text::{Selections, TextBuffer};
 use cupride_core::{DocumentId, Editor};
@@ -68,6 +68,14 @@ impl WindowState {
     }
 }
 
+/// Onglet saisi à la souris : il devient un glisser-déposer au-delà de quelques pixels.
+struct TabDrag {
+    panel: PanelId,
+    origin: (f32, f32),
+    dragging: bool,
+    target: Option<DropTarget>,
+}
+
 /// État de l'application.
 pub(crate) struct App {
     editor: Editor,
@@ -101,6 +109,8 @@ pub(crate) struct App {
     mouse: MouseSelection,
     /// Séparation entre deux zones, saisie à la souris.
     divider_drag: Option<Divider>,
+    /// Onglet saisi à la souris, pour le déplacer.
+    tab_drag: Option<TabDrag>,
     /// Forme actuelle du pointeur.
     pointer: Pointer,
     /// Dernier texte envoyé à la sélection primaire, pour ne pas le renvoyer à chaque image.
@@ -183,6 +193,7 @@ impl App {
             clicks: ClickCounter::default(),
             mouse: MouseSelection::default(),
             divider_drag: None,
+            tab_drag: None,
             pointer: Pointer::Default,
             last_primary: None,
             focus: Focus::new(Element::Editor),
@@ -506,9 +517,31 @@ impl App {
                     .tree_mut()
                     .set_preview(panel, false);
             }
+            self.tab_drag = Some(TabDrag {
+                panel,
+                origin: (x, y),
+                dragging: false,
+                target: None,
+            });
         }
         self.after_any_command(Instant::now());
         true
+    }
+
+    /// Bouton relâché pendant le glisser d'un onglet : le panneau est déplacé vers la cible.
+    fn drop_tab(&mut self) {
+        let Some(drag) = self.tab_drag.take() else {
+            return;
+        };
+        if let Some(target) = drag.target.filter(|_| drag.dragging) {
+            let result = self
+                .editor
+                .move_panel(drag.panel, target.anchor, target.placement)
+                .map(|()| CommandOutput::None)
+                .map_err(Into::into);
+            self.after_command(result, Instant::now());
+        }
+        self.request_redraw();
     }
 
     /// Clic du milieu sur un onglet : le ferme, comme `panel close`.
@@ -588,6 +621,19 @@ impl App {
         if let Some(divider) = &self.divider_drag {
             if state.views.drag_divider(&mut self.editor, divider, x, y) {
                 state.window.request_redraw();
+            }
+            return;
+        }
+        if let Some(drag) = &mut self.tab_drag {
+            let threshold = state.views.style().px(6.0);
+            let (ox, oy) = drag.origin;
+            drag.dragging |= (x - ox).hypot(y - oy) > threshold;
+            if drag.dragging {
+                let target = state.views.drop_target(&self.editor, drag.panel, x, y);
+                if target != drag.target {
+                    drag.target = target;
+                    state.window.request_redraw();
+                }
             }
             return;
         }
@@ -829,6 +875,11 @@ impl App {
             self.focused && editor_focused,
             blink_on,
         );
+        if let Some(target) = self.tab_drag.as_ref().and_then(|d| d.target.as_ref()) {
+            state
+                .views
+                .draw_drop_preview(scene.push_layer(), target, &self.theme);
+        }
         self.status_bar.draw(scene.base(), &style, &self.theme);
         let mut ime_area = None;
         if let Some(line) = &mut self.command_line {
@@ -946,6 +997,7 @@ impl ApplicationHandler<AppEvent> for App {
                 ElementState::Pressed => self.mouse_pressed(),
                 ElementState::Released => {
                     self.divider_drag = None;
+                    self.drop_tab();
                     self.mouse.release();
                     self.update_primary_selection();
                 }

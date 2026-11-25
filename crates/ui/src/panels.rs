@@ -10,9 +10,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::time::Instant;
 
-use cupride_core::layout::{Bounds, Divider, PanelId, PanelKind};
+use cupride_core::layout::{Bounds, Divider, DropTarget, PanelId, PanelKind, Placement};
 use cupride_core::{DocumentId, Editor};
-use cupride_render::{Layer, Quad, Rect, TextSystem};
+use cupride_render::{Color, Layer, Quad, Rect, TextSystem};
 
 use crate::editor_view::{EditorView, Pointer, ViewSettings};
 use crate::label::Label;
@@ -490,6 +490,51 @@ impl PanelViews {
         )
     }
 
+    /// Où le panneau `panel`, glissé par son onglet et lâché au point (`x`, `y`), serait placé :
+    /// sur une barre d'onglets, en onglet dans cette zone ; dans une zone, en onglet au centre ou
+    /// dans une nouvelle zone près des bords.
+    pub fn drop_target(
+        &self,
+        editor: &Editor,
+        panel: PanelId,
+        x: f32,
+        y: f32,
+    ) -> Option<DropTarget> {
+        if let Some(zone) = self.tab_bar_at(x, y) {
+            if zone.panels.contains(&panel) {
+                return None;
+            }
+            return Some(DropTarget {
+                anchor: zone.active?,
+                placement: Placement::Tab,
+                preview: bounds(zone.bounds),
+            });
+        }
+        editor
+            .workspace()
+            .tree()
+            .drop_target(panel, x, y, bounds(self.area), self.gap())
+    }
+
+    /// Dessine l'aperçu de la place que prendrait un panneau lâché sur `target`.
+    pub fn draw_drop_preview(&self, layer: &mut Layer<'_>, target: &DropTarget, theme: &Theme) {
+        let area = rect(target.preview);
+        let accent = theme.accent;
+        layer.quads.push(Quad::new(
+            area,
+            Color::rgba(accent.r, accent.g, accent.b, 0x40),
+        ));
+        let line = self.style().px(2.0).max(1.0);
+        for edge in [
+            Rect::new(area.x, area.y, area.width, line),
+            Rect::new(area.x, area.bottom() - line, area.width, line),
+            Rect::new(area.x, area.y, line, area.height),
+            Rect::new(area.right() - line, area.y, line, area.height),
+        ] {
+            layer.quads.push(Quad::new(edge, accent));
+        }
+    }
+
     /// Onglet sous le point (`x`, `y`).
     pub fn tab_at(&self, x: f32, y: f32) -> Option<PanelId> {
         let zone = self.zones.iter().find(|z| z.tab_bar.contains(x, y))?;
@@ -820,5 +865,34 @@ mod tests {
         views.drag_divider(&mut editor, &divider, 0.0, 300.0);
         views.layout(&mut text, &editor, area);
         assert_eq!(views.zones()[0].bounds.width, views.min_zone_size().round());
+    }
+
+    #[test]
+    fn deposer_un_onglet() {
+        let mut editor = Editor::new();
+        let doc = editor.new_document();
+        let left = editor.active_panel().unwrap();
+        let right = editor
+            .open_editor_panel(doc, NewPanel::Split(Direction::Right))
+            .unwrap();
+        let mut text = TextSystem::new();
+        let mut views = PanelViews::new(ViewRegistry::default(), ViewSettings::default(), 1.0);
+        views.layout(&mut text, &editor, Rect::new(0.0, 0.0, 801.0, 600.0));
+        // Sur la barre d'onglets de l'autre zone : en onglet.
+        let target = views.drop_target(&editor, left, 600.0, 5.0).unwrap();
+        assert_eq!((target.anchor, target.placement), (right, Placement::Tab));
+        assert!(
+            views.drop_target(&editor, right, 600.0, 5.0).is_none(),
+            "sa zone"
+        );
+        // Près du bas de l'autre zone : dans une nouvelle zone en dessous.
+        let target = views.drop_target(&editor, left, 600.0, 590.0).unwrap();
+        assert_eq!(target.placement, Placement::Side(Direction::Down));
+        editor
+            .move_panel(left, target.anchor, target.placement)
+            .unwrap();
+        views.layout(&mut text, &editor, Rect::new(0.0, 0.0, 801.0, 600.0));
+        assert_eq!(views.zones().len(), 2);
+        assert_eq!(views.zones()[1].active, Some(left));
     }
 }
