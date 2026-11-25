@@ -1,7 +1,23 @@
 //! Arbre de layout de CuprIDE.
 //!
-//! Contiendra les splits, groupes d'onglets, panneaux, fenêtres et écrans, ainsi que leur
-//! sérialisation. Cette crate n'a aucune dépendance interne.
+//! - [`LayoutTree`] : arbre d'une fenêtre, fait de splits ([`Split`], axe et proportions) et de
+//!   groupes d'onglets ([`TabGroup`]). Diviser, fermer, déplacer et redimensionner le laissent
+//!   toujours valide ; il se sérialise en JSON.
+//! - [`PanelId`] : identifiant stable d'un panneau.
+//! - [`geometry`] : rectangles, axes et directions ; le layout calcule la place de chaque zone,
+//!   pour que la navigation et le redimensionnement se testent sans interface.
+//!
+//! Cette crate n'a aucune dépendance interne.
+
+pub mod geometry;
+mod panel;
+mod tree;
+
+pub use geometry::{Axis, Bounds, Direction};
+pub use panel::PanelId;
+pub use tree::{
+    Child, Divider, GroupArea, LayoutError, LayoutTree, Node, Placement, Split, TabGroup,
+};
 
 /// Ensemble des fenêtres et de leur layout.
 ///
