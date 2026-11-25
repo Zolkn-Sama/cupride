@@ -11,6 +11,7 @@ use std::time::Instant;
 use cupride_core::clipboard::ClipboardKind;
 use cupride_core::command::CommandOutput;
 use cupride_core::keymap::{KeyResolver, Resolution};
+use cupride_core::layout::PanelId;
 use cupride_core::notifications::Level;
 use cupride_core::text::{Selections, TextBuffer};
 use cupride_core::{DocumentId, Editor};
@@ -18,8 +19,8 @@ use cupride_render::Frame;
 use cupride_render::{Acquire, Gpu, Rect, Renderer, TextSystem, WindowSurface};
 use cupride_ui::{
     ClickCounter, ClickModifiers, CommandHistory, CommandLine, CursorBlink, EditorView, Focus,
-    MouseSelection, Picker, Pointer, Preedit, StatusBar, StatusContext, StatusElements, Theme,
-    Themes, Toasts, ViewSettings, WHEEL_LINES,
+    MouseSelection, PanelViews, Picker, Pointer, Preedit, StatusBar, StatusContext, StatusElements,
+    Theme, Themes, Toasts, ViewRegistry, ViewSettings, WHEEL_LINES,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
@@ -50,8 +51,21 @@ struct WindowState {
     // Ordre des champs : la surface doit être libérée avant la fenêtre.
     surface: WindowSurface,
     renderer: Renderer,
-    view: EditorView,
+    /// Vues des panneaux, et place de chaque zone.
+    views: PanelViews,
     window: Arc<Window>,
+}
+
+impl WindowState {
+    /// Vue d'éditeur du panneau `panel`.
+    fn editor_view(&self, panel: Option<PanelId>) -> Option<&EditorView> {
+        self.views.editor_view(panel?)
+    }
+
+    /// Vue d'éditeur du panneau `panel`, modifiable.
+    fn editor_view_mut(&mut self, panel: Option<PanelId>) -> Option<&mut EditorView> {
+        self.views.editor_view_mut(panel?)
+    }
 }
 
 /// État de l'application.
@@ -71,9 +85,9 @@ pub(crate) struct App {
     focused: bool,
     /// Modificateurs enfoncés.
     modifiers: ModifiersState,
-    /// Document et position du curseur principal au dernier dessin : quand ils changent, la vue
-    /// suit le curseur.
-    last_cursor: Option<(DocumentId, usize)>,
+    /// Panneau actif, son document et la position du curseur principal au dernier dessin : quand
+    /// ils changent, la vue suit le curseur.
+    last_cursor: Option<(PanelId, DocumentId, usize)>,
     /// Séquence de touches en cours (`ctrl+k …`).
     resolver: KeyResolver,
     /// Une méthode de saisie compose du texte : les touches lui appartiennent.
@@ -268,17 +282,16 @@ impl App {
                     text,
                     cursor: cursor.map(|(start, _)| start),
                 });
-                if let Some(state) = &mut self.window {
-                    state.view.set_preedit(preedit);
+                let panel = self.editor.active_panel();
+                if let Some(view) = self.window.as_mut().and_then(|s| s.editor_view_mut(panel)) {
+                    view.set_preedit(preedit);
                 }
                 self.blink.reset(Instant::now());
                 self.request_redraw();
             }
             Ime::Commit(text) => {
                 self.composing = false;
-                if let Some(state) = &mut self.window {
-                    state.view.set_preedit(None);
-                }
+                self.clear_preedit();
                 if !self.overlay_commit(&text) {
                     self.insert(&text, Instant::now());
                 }
@@ -286,10 +299,21 @@ impl App {
             Ime::Enabled => {}
             Ime::Disabled => {
                 self.composing = false;
-                if let Some(state) = &mut self.window {
-                    state.view.set_preedit(None);
-                }
+                self.clear_preedit();
                 self.request_redraw();
+            }
+        }
+    }
+
+    /// Retire le texte en composition de toutes les vues.
+    fn clear_preedit(&mut self) {
+        let Some(state) = &mut self.window else {
+            return;
+        };
+        let panels: Vec<PanelId> = self.editor.workspace().tree().panels();
+        for panel in panels {
+            if let Some(view) = state.views.editor_view_mut(panel) {
+                view.set_preedit(None);
             }
         }
     }
@@ -361,10 +385,10 @@ impl App {
             config.view.cursor_blink_interval(),
         );
         if let Some(state) = &mut self.window {
-            state.view.set_settings(ViewSettings::from_config(config));
+            state.views.set_settings(ViewSettings::from_config(config));
             // Zoom de l'interface (view zoom-in…) : appliqué à chaud, comme un changement d'écran.
             state
-                .view
+                .views
                 .set_scale(state.window.scale_factor() as f32 * self.editor.zoom());
         }
     }
@@ -413,8 +437,12 @@ impl App {
         }
         // Un clic dans l'éditeur ferme les couches et lui rend le focus.
         self.close_overlays();
+        let panel = self.editor.active_panel();
         let (Some(state), Some(document)) = (&self.window, self.editor.active_document_mut())
         else {
+            return;
+        };
+        let Some(view) = state.editor_view(panel) else {
             return;
         };
         let (x, y) = self.mouse_position;
@@ -422,7 +450,7 @@ impl App {
         let clicks = self
             .clicks
             .click(now, x, y, state.window.scale_factor() as f32);
-        let offset = state.view.offset_at(x, y, document.buffer());
+        let offset = view.offset_at(x, y, document.buffer());
         let modifiers = ClickModifiers {
             extend: self.modifiers.shift_key(),
             add: self.modifiers.alt_key(),
@@ -475,12 +503,16 @@ impl App {
         if !self.editor.config().editor.primary_selection {
             return;
         }
+        let panel = self.editor.active_panel();
         let (Some(state), Some(document)) = (&self.window, self.editor.active_document_mut())
         else {
             return;
         };
+        let Some(view) = state.editor_view(panel) else {
+            return;
+        };
         let (x, y) = self.mouse_position;
-        let offset = state.view.offset_at(x, y, document.buffer());
+        let offset = view.offset_at(x, y, document.buffer());
         document.set_selections(Selections::cursor(offset));
         self.execute("edit paste --primary", Instant::now());
     }
@@ -492,7 +524,11 @@ impl App {
         let Some(state) = &self.window else {
             return;
         };
-        let pointer = state.view.pointer_at(x, y);
+        let pointer = state
+            .views
+            .panel_at(x, y)
+            .and_then(|panel| state.views.view(panel))
+            .map_or(Pointer::Default, |view| view.pointer_at(x, y));
         if pointer != self.pointer {
             self.pointer = pointer;
             state.window.set_cursor(match pointer {
@@ -505,10 +541,13 @@ impl App {
         if !self.mouse.is_dragging() {
             return;
         }
-        let Some(document) = self.editor.active_document_mut() else {
+        let panel = self.editor.active_panel();
+        let (Some(view), Some(document)) =
+            (state.editor_view(panel), self.editor.active_document_mut())
+        else {
             return;
         };
-        let offset = state.view.offset_at(x, y, document.buffer());
+        let offset = view.offset_at(x, y, document.buffer());
         if let Some(selections) = self
             .mouse
             .drag(document.buffer(), document.selections(), offset)
@@ -526,9 +565,14 @@ impl App {
         let Some(state) = &mut self.window else {
             return;
         };
+        // La molette fait défiler le panneau sous la souris.
+        let (x, y) = self.mouse_position;
+        let Some(panel) = state.views.panel_at(x, y).or(self.editor.active_panel()) else {
+            return;
+        };
         let (dx, dy, smooth) = match delta {
             MouseScrollDelta::LineDelta(x, y) => {
-                let step = WHEEL_LINES * state.view.line_height();
+                let step = WHEEL_LINES * state.views.style().line_height;
                 (-x * step, -y * step, true)
             }
             MouseScrollDelta::PixelDelta(p) => (-p.x as f32, -p.y as f32, false),
@@ -538,7 +582,9 @@ impl App {
         } else {
             (dx, dy)
         };
-        state.view.scroll_by(dx, dy, smooth, Instant::now());
+        if let Some(view) = state.views.view_mut(panel) {
+            view.scroll_by(dx, dy, smooth, Instant::now());
+        }
         state.window.request_redraw();
     }
 
@@ -609,12 +655,16 @@ impl App {
         tracing::info!(gpu = %gpu.describe(), format = ?surface.format(), "rendu prêt");
         let renderer = Renderer::new(&gpu, surface.format());
         let settings = ViewSettings::from_config(self.editor.config());
-        let view = EditorView::new(settings, window.scale_factor() as f32 * self.editor.zoom());
+        let views = PanelViews::new(
+            ViewRegistry::default(),
+            settings,
+            window.scale_factor() as f32 * self.editor.zoom(),
+        );
         self.gpu = Some(gpu);
         self.window = Some(WindowState {
             surface,
             renderer,
-            view,
+            views,
             window,
         });
         // Thème et barre d'état de la configuration, dès la première image.
@@ -640,7 +690,7 @@ impl App {
         };
         let size = state.surface.size();
         let window_rect = Rect::new(0.0, 0.0, size.0 as f32, size.1 as f32);
-        let style = state.view.style();
+        let style = state.views.style();
         let status_height = StatusBar::height(&style);
         let parts = cupride_ui::layout::split(
             window_rect,
@@ -650,7 +700,7 @@ impl App {
                 cupride_ui::layout::Size::Fixed(status_height),
             ],
         );
-        state.view.set_bounds(parts[0]);
+        state.views.layout(&self.editor, parts[0]);
         let pending_keys: Vec<String> = self
             .resolver
             .pending()
@@ -670,27 +720,42 @@ impl App {
             },
             (&status_config.left, &status_config.right),
         );
-        self.editor.set_page_lines(state.view.page_lines());
+        let panel = self.editor.active_panel();
+        if let Some(view) = state.editor_view(panel) {
+            self.editor.set_page_lines(view.page_lines());
+        }
         let now = Instant::now();
         let blink_on = self.focused && self.blink.visible(now);
         let editor_focused = self.focus.is_focused(Element::Editor);
-        let cursors_visible = blink_on && editor_focused;
-        let animating = state.view.tick(now);
+        let animating = state.views.tick(now);
         let mut scene = Frame::new(self.theme.background);
-        if let Some(document) = self.editor.active_document() {
-            let cursor = self
-                .editor
-                .active_id()
-                .map(|id| (id, document.selections().primary().head));
-            if cursor != self.last_cursor {
-                self.last_cursor = cursor;
-                state.view.follow_cursor();
+        // La vue du panneau actif suit son curseur quand il bouge, ou quand le panneau change.
+        let cursor = panel
+            .zip(self.editor.active_document())
+            .and_then(|(panel, document)| {
+                let id = self.editor.panel_document(panel)?;
+                Some((panel, id, document.selections().primary().head))
+            });
+        if cursor != self.last_cursor {
+            self.last_cursor = cursor;
+            if let Some(view) = state.editor_view_mut(panel) {
+                view.follow_cursor();
             }
-            state.view.prepare(&mut self.text, document);
-            state
-                .view
-                .draw(scene.base(), &self.theme, document, cursors_visible);
         }
+        state.views.prepare(
+            &mut self.text,
+            &self.editor,
+            &self.theme,
+            self.focused && editor_focused,
+            blink_on,
+        );
+        state.views.draw(
+            scene.base(),
+            &self.editor,
+            &self.theme,
+            self.focused && editor_focused,
+            blink_on,
+        );
         self.status_bar.draw(scene.base(), &style, &self.theme);
         let mut ime_area = None;
         if let Some(line) = &mut self.command_line {
@@ -728,9 +793,8 @@ impl App {
             tracing::error!("{error}");
         }
         if let Some(cursor) = ime_area.or_else(|| {
-            self.editor
-                .active_document()
-                .and_then(|document| state.view.primary_cursor_rect(document))
+            let document = self.editor.active_document()?;
+            state.editor_view(panel)?.primary_cursor_rect(document)
         }) {
             // La fenêtre de l'IME s'ouvre sous le curseur.
             state.window.set_ime_cursor_area(
@@ -785,7 +849,7 @@ impl ApplicationHandler<AppEvent> for App {
                 // forme à la nouvelle échelle. `Resized` suit avec la nouvelle taille physique.
                 if let Some(state) = &mut self.window {
                     state
-                        .view
+                        .views
                         .set_scale(scale_factor as f32 * self.editor.zoom());
                     state.window.request_redraw();
                 }

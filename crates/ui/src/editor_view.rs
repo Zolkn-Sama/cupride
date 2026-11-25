@@ -7,6 +7,8 @@ use std::time::Instant;
 
 use cupride_core::Document;
 use cupride_core::config::{Config, LineNumbers};
+use cupride_core::layout::PanelId;
+use cupride_core::text::Selections;
 use cupride_core::text::TextBuffer;
 use cupride_render::text::{Buffer, Metrics, Shaping, Wrap};
 use cupride_render::{Frame, Layer, Quad, Rect, TextItem, TextSystem};
@@ -58,6 +60,16 @@ impl ViewSettings {
             line_height: config.font.line_height.clamp(0.8, 4.0),
             highlight_current_line: config.view.highlight_current_line,
             line_numbers: config.view.line_numbers,
+        }
+    }
+
+    /// Police et dimensions de l'interface à l'échelle `scale`, alignées sur celles de l'éditeur.
+    pub fn style(&self, scale: f32) -> crate::style::Style {
+        crate::style::Style {
+            family: self.font_family.clone(),
+            font_size: self.font_size * scale,
+            line_height: (self.font_size * self.line_height * scale).round(),
+            scale,
         }
     }
 
@@ -119,8 +131,12 @@ pub struct Preedit {
 /// Vue d'un document dans un rectangle de la fenêtre.
 ///
 /// Seules les lignes visibles sont mises en forme ; une ligne déjà mise en forme est réutilisée
-/// tant que son texte, la police et l'échelle ne changent pas.
+/// tant que son texte, la police et l'échelle ne changent pas. Une vue rattachée à un panneau
+/// ([`EditorView::for_panel`]) affiche les sélections de ce panneau : un même document peut être
+/// affiché dans plusieurs vues, chacune avec son défilement et ses curseurs.
 pub struct EditorView {
+    /// Panneau affiché, dont la vue montre les sélections.
+    panel: Option<PanelId>,
     settings: ViewSettings,
     /// Échelle : facteur de l'écran (DPI).
     scale: f32,
@@ -149,6 +165,7 @@ pub struct EditorView {
 impl std::fmt::Debug for EditorView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EditorView")
+            .field("panel", &self.panel)
             .field("settings", &self.settings)
             .field("scale", &self.scale)
             .field("bounds", &self.bounds)
@@ -161,6 +178,7 @@ impl EditorView {
     /// Vue avec ces réglages, pour un écran d'échelle `scale`.
     pub fn new(settings: ViewSettings, scale: f32) -> Self {
         Self {
+            panel: None,
             settings,
             scale,
             bounds: Rect::default(),
@@ -175,6 +193,32 @@ impl EditorView {
             lines: HashMap::new(),
             visible: 0..0,
         }
+    }
+
+    /// Vue du panneau `panel` : elle affiche les sélections de ce panneau.
+    pub fn for_panel(panel: PanelId, settings: ViewSettings, scale: f32) -> Self {
+        Self {
+            panel: Some(panel),
+            ..Self::new(settings, scale)
+        }
+    }
+
+    /// Panneau affiché.
+    pub fn panel(&self) -> Option<PanelId> {
+        self.panel
+    }
+
+    /// Sélections affichées : celles du panneau de la vue, ou celles du document.
+    pub fn selections<'d>(&self, document: &'d Document) -> &'d Selections {
+        match self.panel {
+            Some(panel) => document.selections_in(panel),
+            None => document.selections(),
+        }
+    }
+
+    /// Réglages d'affichage.
+    pub fn settings(&self) -> &ViewSettings {
+        &self.settings
     }
 
     /// Change les réglages d'affichage ; si la police change, toutes les lignes seront remises
@@ -209,14 +253,19 @@ impl EditorView {
         self.bounds = bounds;
     }
 
+    /// Place de la vue dans la fenêtre.
+    pub fn bounds(&self) -> Rect {
+        self.bounds
+    }
+
     /// Police et dimensions de l'interface, alignées sur celles de l'éditeur.
     pub fn style(&self) -> crate::style::Style {
-        crate::style::Style {
-            family: self.settings.font_family.clone(),
-            font_size: self.settings.font_size * self.scale,
-            line_height: self.line_height(),
-            scale: self.scale,
-        }
+        self.settings.style(self.scale)
+    }
+
+    /// Échelle : facteur de l'écran multiplié par le zoom.
+    pub fn scale(&self) -> f32 {
+        self.scale
     }
 
     /// Hauteur d'une ligne, en pixels physiques.
@@ -262,7 +311,7 @@ impl EditorView {
         let buffer = document.buffer();
         self.line_count = buffer.len_lines();
         self.scroll.clamp(self.max_scroll());
-        let head = document.selections().primary().head;
+        let head = self.selections(document).primary().head;
         let reveal = std::mem::take(&mut self.reveal);
         if reveal {
             self.reveal_line(buffer.byte_to_line(head).unwrap_or_default());
@@ -504,7 +553,7 @@ impl EditorView {
     ) {
         frame.quads.push(Quad::new(self.bounds, theme.background));
         let line_height = self.line_height();
-        let selections = document.selections();
+        let selections = self.selections(document);
         let buffer = document.buffer();
         let line_of = |offset: usize| buffer.byte_to_line(offset).unwrap_or_default();
         let text_area = self.text_area();
@@ -704,7 +753,7 @@ impl EditorView {
     /// Position du curseur principal dans la fenêtre (pour placer la fenêtre de l'IME), si sa
     /// ligne est préparée.
     pub fn primary_cursor_rect(&self, document: &Document) -> Option<Rect> {
-        let head = document.selections().primary().head;
+        let head = self.selections(document).primary().head;
         self.cursor_rect(document.buffer(), head, 1.0)
     }
 }
