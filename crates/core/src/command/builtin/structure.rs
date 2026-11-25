@@ -54,9 +54,12 @@ fn syntax(document: &Document) -> Result<&Syntax, CommandError> {
         .syntax()
         .filter(|s| s.tree().is_some())
         .ok_or_else(|| {
-            CommandError::Failed(match document.language() {
-                Some(language) => format!("pas d'arbre syntaxique pour le langage {language}"),
-                None => "langage du document inconnu : pas d'arbre syntaxique".to_owned(),
+            CommandError::Failed(match (document.syntax(), document.language()) {
+                (Some(syntax), _) if syntax.is_parsing() => {
+                    "analyse syntaxique en cours".to_owned()
+                }
+                (_, Some(language)) => format!("pas d'arbre syntaxique pour le langage {language}"),
+                (_, None) => "langage du document inconnu : pas d'arbre syntaxique".to_owned(),
             })
         })
 }
