@@ -426,7 +426,7 @@ fn spans_lines(document: &crate::Document) -> bool {
 
 /// Lignes touchées par les sélections, sans doublon, dans l'ordre. Une sélection qui finit au
 /// tout début d'une ligne ne compte pas cette ligne.
-fn selected_lines(document: &crate::Document) -> Result<Vec<usize>, TextError> {
+pub(super) fn selected_lines(document: &crate::Document) -> Result<Vec<usize>, TextError> {
     let buffer = document.buffer();
     let mut lines = Vec::new();
     for selection in document.selections().iter() {

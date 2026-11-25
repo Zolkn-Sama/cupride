@@ -215,7 +215,7 @@ mod tests {
         let editor = Editor::new();
         let completion = complete(editor.commands(), "edit mo left", 7);
         assert_eq!(completion.start, 5);
-        assert_eq!(completion.candidates, ["move"]);
+        assert_eq!(completion.candidates, ["move", "move-lines"]);
     }
 
     #[test]

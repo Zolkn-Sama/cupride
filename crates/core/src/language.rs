@@ -50,6 +50,18 @@ pub fn language_of(path: &Path) -> Option<&'static str> {
         .map(|(_, language)| *language)
 }
 
+/// Début d'un commentaire de ligne dans le langage `language` (en attendant les paquets de
+/// langage, qui le fourniront).
+pub fn line_comment(language: &str) -> Option<&'static str> {
+    Some(match language {
+        "Rust" | "JavaScript" | "TypeScript" | "TSX" | "JSX" | "JSON" | "C" | "C++" | "C#"
+        | "Go" | "Java" | "Kotlin" | "Swift" | "PHP" | "Zig" | "SCSS" | "WGSL" => "//",
+        "Python" | "TOML" | "YAML" | "Ruby" | "Shell" | "Dockerfile" | "Makefile" => "#",
+        "Lua" | "SQL" => "--",
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
