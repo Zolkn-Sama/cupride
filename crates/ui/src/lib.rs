@@ -14,8 +14,13 @@
 //!
 //! Éléments :
 //!
+//! - [`PanelView`] : interface commune des vues de panneaux ; [`ViewRegistry`] : fabrique de la
+//!   vue de chaque type de panneau ; [`PanelViews`] : une vue par panneau, et place de chaque zone
+//!   du layout dans la fenêtre.
 //! - [`EditorView`] : vue d'un document ; seules les lignes visibles sont mises en forme ;
-//!   sélections, curseurs et ligne courante ; défilement animé et vue qui suit le curseur.
+//!   sélections, curseurs et ligne courante ; défilement animé et vue qui suit le curseur. Un
+//!   même document affiché dans deux panneaux a deux vues, chacune avec son défilement et ses
+//!   curseurs.
 //! - [`GutterMarker`] : marqueur de la gouttière (diagnostic, Git, point d'arrêt), à côté des
 //!   numéros de ligne.
 //! - [`MouseSelection`] : clics simples, doubles et triples, glisser, Maj+clic et Alt+clic.
@@ -37,6 +42,7 @@ mod history;
 mod label;
 pub mod layout;
 mod mouse;
+mod panels;
 mod picker;
 mod scroll;
 mod status_bar;
@@ -54,6 +60,7 @@ pub use gutter::GutterMarker;
 pub use history::{CommandHistory, HISTORY_LIMIT};
 pub use label::Label;
 pub use mouse::{ClickCounter, ClickModifiers, MULTI_CLICK_DELAY, MouseSelection};
+pub use panels::{PanelContext, PanelView, PanelViews, ViewFactory, ViewRegistry, Zone};
 pub use picker::{MAX_ROWS, Picker, PickerItem};
 pub use status_bar::{StatusBar, StatusContext, StatusElement, StatusElements};
 pub use style::Style;

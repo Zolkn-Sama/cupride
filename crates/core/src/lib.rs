@@ -1,6 +1,8 @@
 //! Noyau de CuprIDE, sans interface graphique.
 //!
 //! - [`Editor`] : état global de l'éditeur (documents ouverts, document actif, workspace).
+//!   Chaque document affiché l'est dans un panneau ; le panneau actif décide du document actif
+//!   ([`NewPanel`] : où placer un nouveau panneau).
 //! - [`clipboard`] : presse-papiers, fourni par l'application (mémoire par défaut).
 //! - [`command`] : registre unique des commandes, utilisé par toutes les sources d'actions.
 //! - [`config`] : configuration TOML de l'utilisateur.
@@ -22,10 +24,12 @@ pub mod events;
 pub mod keymap;
 pub mod language;
 pub mod notifications;
+mod panels;
 mod ui_request;
 
 pub use cupride_layout as layout;
 pub use cupride_text as text;
 pub use document::{Document, DocumentError, LineEnding};
 pub use editor::{DocumentId, Editor};
+pub use panels::NewPanel;
 pub use ui_request::UiRequest;

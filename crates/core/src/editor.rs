@@ -1,9 +1,10 @@
 //! État global de l'éditeur.
 
+use std::collections::BTreeMap;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use cupride_layout::Workspace;
+use cupride_layout::{PanelId, Workspace};
 use slotmap::{SecondaryMap, SlotMap};
 
 use crate::clipboard::{Clipboard, LastCopy, MemoryClipboard};
@@ -41,6 +42,8 @@ pub struct Editor {
     documents: SlotMap<DocumentId, Document>,
     active: Option<DocumentId>,
     workspace: Workspace,
+    /// Document affiché par chaque panneau éditeur.
+    pub(crate) panel_documents: BTreeMap<PanelId, DocumentId>,
     commands: CommandRegistry,
     keymap: Keymap,
     config: Config,
@@ -90,6 +93,7 @@ impl Editor {
             documents: SlotMap::with_key(),
             active: None,
             workspace: Workspace::new(),
+            panel_documents: BTreeMap::new(),
             commands: CommandRegistry::new(),
             keymap: Keymap::new(),
             config: Config::default(),
@@ -109,8 +113,9 @@ impl Editor {
         }
     }
 
-    /// Ouvre le fichier `path` et en fait le document actif. Si ce fichier est déjà ouvert (même
-    /// sous un autre chemin menant au même fichier), le document existant est réutilisé.
+    /// Ouvre le fichier `path` et en fait le document actif, affiché dans la zone active. Si ce
+    /// fichier est déjà ouvert (même sous un autre chemin menant au même fichier), le document
+    /// existant est réutilisé.
     pub fn open(&mut self, path: impl AsRef<Path>) -> Result<DocumentId, DocumentError> {
         let path = normalize(path.as_ref()).map_err(|source| DocumentError::Io {
             path: path.as_ref().to_owned(),
@@ -124,27 +129,24 @@ impl Editor {
                 self.documents.insert(document)
             }
         };
-        self.active = Some(id);
-        self.flush_events();
+        self.show_document(id);
         Ok(id)
     }
 
-    /// Crée un document vide sans fichier et en fait le document actif.
+    /// Crée un document vide sans fichier et en fait le document actif, dans un nouvel onglet.
     pub fn new_document(&mut self) -> DocumentId {
         let mut document = Document::new();
         document.set_line_ending(self.config.editor.line_ending.for_new_document());
         self.configure(&mut document);
         let id = self.documents.insert(document);
-        self.active = Some(id);
-        self.flush_events();
+        self.show_document(id);
         id
     }
 
-    /// Ajoute un document déjà construit et en fait le document actif.
+    /// Ajoute un document déjà construit et en fait le document actif, dans un nouvel onglet.
     pub fn insert_document(&mut self, document: Document) -> DocumentId {
         let id = self.documents.insert(document);
-        self.active = Some(id);
-        self.flush_events();
+        self.show_document(id);
         id
     }
 
@@ -157,15 +159,31 @@ impl Editor {
             .map(|(id, _)| id)
     }
 
-    /// Ferme le document `id` et le renvoie. Si c'était le document actif, le dernier document
-    /// ouvert devient actif.
+    /// Ferme le document `id`, et les panneaux qui l'affichent, et le renvoie. Si c'était le
+    /// document actif, celui du panneau qui reçoit le focus le devient.
     pub fn close(&mut self, id: DocumentId) -> Option<Document> {
+        self.documents.get(id)?;
+        for panel in self.panels_showing(id) {
+            self.remove_panel(panel);
+        }
+        let document = self.remove_document(id);
+        self.sync_active_document();
+        self.flush_events();
+        document
+    }
+
+    /// Retire le document `id`, sans toucher aux panneaux.
+    pub(crate) fn remove_document(&mut self, id: DocumentId) -> Option<Document> {
         let document = self.documents.remove(id)?;
         if self.active == Some(id) {
-            self.active = self.documents.keys().last();
+            self.active = None;
         }
-        self.flush_events();
         Some(document)
+    }
+
+    /// Change le document actif, sans toucher aux panneaux.
+    pub(crate) fn set_active_raw(&mut self, id: Option<DocumentId>) {
+        self.active = id;
     }
 
     /// Document `id`.
@@ -203,15 +221,10 @@ impl Editor {
         self.documents.get_mut(self.active?)
     }
 
-    /// Fait de `id` le document actif. Renvoie `false` si ce document n'existe pas.
+    /// Fait de `id` le document actif, affiché dans la zone active. Renvoie `false` si ce
+    /// document n'existe pas.
     pub fn set_active(&mut self, id: DocumentId) -> bool {
-        if self.documents.contains_key(id) {
-            self.active = Some(id);
-            self.flush_events();
-            true
-        } else {
-            false
-        }
+        self.show_document(id).is_some()
     }
 
     /// Registre des commandes.
