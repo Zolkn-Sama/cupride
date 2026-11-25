@@ -573,6 +573,8 @@ pub fn default_bindings(platform: Platform) -> Vec<(&'static str, &'static str)>
         ("mod+shift+k", "edit delete-lines"),
         ("mod+j", "edit join-lines"),
         ("mod+/", "edit toggle-comment"),
+        ("ctrl+shift+down", "edit next-function"),
+        ("ctrl+shift+up", "edit previous-function"),
         ("mod+shift+n", "window new"),
         ("mod+shift+w", "window close"),
         ("mod+k mod+left", "panel focus left"),
@@ -610,6 +612,8 @@ pub fn default_bindings(platform: Platform) -> Vec<(&'static str, &'static str)>
             ("alt+cmd+f", "ui replace"),
             ("cmd+g", "search next"),
             ("cmd+shift+g", "search previous"),
+            ("ctrl+shift+cmd+right", "edit expand-selection"),
+            ("ctrl+shift+cmd+left", "edit shrink-selection"),
         ]),
         Platform::Other => bindings.extend([
             ("ctrl+left", "edit move word-left"),
@@ -624,6 +628,8 @@ pub fn default_bindings(platform: Platform) -> Vec<(&'static str, &'static str)>
             ("ctrl+alt+down", "edit add-cursor down"),
             ("ctrl+h", "ui replace"),
             ("alt+z", "view wrap"),
+            ("alt+shift+right", "edit expand-selection"),
+            ("alt+shift+left", "edit shrink-selection"),
         ]),
     }
     bindings

@@ -219,6 +219,10 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `edit delete-lines` | `Ctrl+Maj+K` | `Cmd+Maj+K` |
 | `edit join-lines` | `Ctrl+J` | `Cmd+J` |
 | `edit toggle-comment` | `Ctrl+/` | `Cmd+/` |
+| `edit expand-selection` | `Alt+Maj+→` | `Ctrl+Maj+Cmd+→` |
+| `edit shrink-selection` | `Alt+Maj+←` | `Ctrl+Maj+Cmd+←` |
+| `edit next-function` | `Ctrl+Maj+↓` | `Ctrl+Maj+↓` |
+| `edit previous-function` | `Ctrl+Maj+↑` | `Ctrl+Maj+↑` |
 | `view wrap` | `Alt+Z` | — (Option+Z tape un caractère) |
 | `window new` | `Ctrl+Maj+N` | `Cmd+Maj+N` |
 | `window close` | `Ctrl+Maj+W` | `Cmd+Maj+W` |

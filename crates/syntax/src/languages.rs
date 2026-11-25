@@ -21,6 +21,8 @@ pub struct LanguageConfig {
     pub(crate) paints: Vec<Paint>,
     /// Requête des langages imbriqués (blocs de code dans du Markdown…).
     pub(crate) injections: Option<Query>,
+    /// Requête des fonctions (`@function`), pour aller de l'une à l'autre.
+    pub(crate) functions: Option<Query>,
 }
 
 impl std::fmt::Debug for LanguageConfig {
@@ -100,18 +102,31 @@ impl LanguageConfig {
         language: Language,
         highlights: &[&str],
         injections: Option<&str>,
+        functions: &[&str],
     ) -> Self {
         let highlights = query(name, "coloration", &language, &highlights.concat());
         let paints = highlights.as_ref().map_or_else(Vec::new, |q| {
             q.capture_names().iter().map(|n| Paint::of(n)).collect()
         });
         let injections = injections.and_then(|source| query(name, "injections", &language, source));
+        let functions = (!functions.is_empty())
+            .then(|| {
+                let kinds: String = functions.iter().map(|k| format!("({k}) ")).collect();
+                query(
+                    name,
+                    "fonctions",
+                    &language,
+                    &format!("[{kinds}] @function"),
+                )
+            })
+            .flatten();
         Self {
             name,
             language,
             highlights,
             paints,
             injections,
+            functions,
         }
     }
 }
@@ -151,6 +166,11 @@ fn rust() -> LanguageConfig {
         // Les macros (`token_tree`) ne sont pas réanalysées comme du Rust : coûteux, et leur
         // contenu n'est souvent pas une expression valide.
         None,
+        &[
+            "function_item",
+            "function_signature_item",
+            "macro_definition",
+        ],
     )
 }
 
@@ -160,6 +180,7 @@ fn c() -> LanguageConfig {
         tree_sitter_c::LANGUAGE.into(),
         &[C_HIGHLIGHTS, tree_sitter_c::HIGHLIGHT_QUERY],
         None,
+        &["function_definition"],
     )
 }
 
@@ -169,6 +190,7 @@ fn markdown() -> LanguageConfig {
         tree_sitter_md::LANGUAGE.into(),
         &[tree_sitter_md::HIGHLIGHT_QUERY_BLOCK],
         Some(tree_sitter_md::INJECTION_QUERY_BLOCK),
+        &["atx_heading", "setext_heading"],
     )
 }
 
@@ -178,6 +200,7 @@ fn markdown_inline() -> LanguageConfig {
         tree_sitter_md::INLINE_LANGUAGE.into(),
         &[tree_sitter_md::HIGHLIGHT_QUERY_INLINE],
         Some(tree_sitter_md::INJECTION_QUERY_INLINE),
+        &[],
     )
 }
 
@@ -220,5 +243,8 @@ mod tests {
             assert!(!highlights_of(config).is_empty(), "{name}");
         }
         assert!(config_for("Markdown").unwrap().injections.is_some());
+        for name in ["Rust", "C", "Markdown"] {
+            assert!(config_for(name).unwrap().functions.is_some(), "{name}");
+        }
     }
 }

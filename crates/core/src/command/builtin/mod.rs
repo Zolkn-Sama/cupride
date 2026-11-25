@@ -11,12 +11,15 @@ mod notifications;
 mod panel;
 mod recovery;
 mod search;
+mod structure;
 mod syntax;
 mod tab;
 mod theme;
 mod ui;
 mod view;
 mod window;
+
+pub(crate) use structure::Expansions;
 
 use super::{CommandError, CommandRegistry};
 use crate::document::Document;
@@ -41,6 +44,7 @@ pub(crate) fn register_all(registry: &mut CommandRegistry) -> Result<(), Command
     recovery::register(registry)?;
     lines::register(registry)?;
     syntax::register(registry)?;
+    structure::register(registry)?;
     Ok(())
 }
 

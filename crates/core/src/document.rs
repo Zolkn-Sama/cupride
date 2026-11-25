@@ -200,6 +200,8 @@ pub struct Document {
     syntax: Option<cupride_syntax::Syntax>,
     /// Réveil de l'application quand une analyse en arrière-plan est finie.
     syntax_waker: Option<cupride_syntax::Waker>,
+    /// Étapes de `edit expand-selection`, que `edit shrink-selection` défait.
+    pub(crate) expansions: crate::command::builtin::Expansions,
 }
 
 impl Default for Document {
@@ -236,6 +238,7 @@ impl Document {
             language: None,
             syntax: None,
             syntax_waker: None,
+            expansions: Default::default(),
         }
     }
 
