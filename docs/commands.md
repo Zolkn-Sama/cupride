@@ -11,7 +11,8 @@ Toute action de CuprIDE est une commande. Une même commande est accessible depu
 ## Lancement
 
 ```
-cupride [--no-restore] [chemin…]
+cupride [options] [chemin…]
+cupride [--window N] <groupe> <commande> [arguments]
 ```
 
 | Appel | Effet |
@@ -21,6 +22,9 @@ cupride [--no-restore] [chemin…]
 | `cupride .` | Ouvre le dossier comme projet (son nom s'affiche dans le titre). |
 | `cupride . a.rs b.rs` | Dossier du projet et fichiers ; le premier fichier est actif. |
 | `cupride --no-restore` | Démarre sans restaurer l'espace de travail du projet. |
+| `cupride --window 2 a.rs` | Ouvre dans la fenêtre 2 de l'instance en marche. |
+| `cupride --wait COMMIT_EDITMSG` | Ouvre le fichier et attend qu'il soit fermé avant de rendre la main : CuprIDE peut servir d'éditeur à Git (`git config --global core.editor "cupride --wait"`). Sans instance en marche, CuprIDE s'arrête à la fermeture du fichier, comme un éditeur de terminal. |
+| `cupride panel focus left` | Exécute une commande dans l'instance en marche, avec la même syntaxe que la ligne de commande interne. |
 | `cupride --help`, `cupride --version` | Aide, version. |
 
 **Instance unique** : un seul CuprIDE tourne par utilisateur ; toutes ses fenêtres partagent les
@@ -31,6 +35,19 @@ l'instance renvoie. La communication passe par un socket local privé (Unix : da
 `0700` de l'utilisateur, sous `$XDG_RUNTIME_DIR` ou le dossier temporaire ; Windows : un tube
 nommé propre à l'utilisateur, fermé aux autres utilisateurs en écriture et aux clients distants).
 Après un plantage, le socket orphelin est détecté et remplacé au lancement suivant.
+
+**Commandes depuis le terminal** : un premier argument qui est un groupe de commandes (`file`,
+`panel`, `window`…) fait de la suite une commande interne, exécutée dans l'instance (dans la
+fenêtre `--window N` si elle est donnée). Son message s'affiche dans le terminal ; une erreur
+s'affiche sur la sortie d'erreur, et `cupride` sort avec le code 1 (2 pour une ligne de commande
+mal formée). Les chemins relatifs partent du dossier du terminal. Un fichier qui porterait le nom
+d'un groupe s'ouvre avec `./nom`.
+
+```
+cupride window list
+cupride file open src/main.rs
+cupride --window 2 panel move --window 1
+```
 
 L'espace de travail du projet (zones, onglets, fichiers, curseurs, défilement) est restauré tel
 qu'il était à la fermeture, sauf avec `--no-restore` ou l'option `[session] restore = false` (voir

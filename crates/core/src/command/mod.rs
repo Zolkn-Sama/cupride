@@ -19,6 +19,13 @@ pub fn quote(argument: &str) -> String {
     shlex::try_quote(argument).map_or_else(|_| argument.to_owned(), |q| q.into_owned())
 }
 
+/// Registre des seules commandes intégrées : pour reconnaître une commande sans éditeur (CLI).
+pub fn builtin_registry() -> CommandRegistry {
+    let mut registry = CommandRegistry::new();
+    builtin::register_all(&mut registry).expect("les commandes intégrées ont des noms uniques");
+    registry
+}
+
 /// Résultat d'une commande.
 pub type CommandResult = Result<CommandOutput, CommandError>;
 

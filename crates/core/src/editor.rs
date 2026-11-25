@@ -84,6 +84,9 @@ pub struct Editor {
     zoom: f32,
     /// Dossier ouvert comme projet, s'il y en a un.
     project: Option<PathBuf>,
+    /// Dossier d'où partent les chemins relatifs de la commande en cours (commande venue d'un
+    /// terminal) ; sinon, le dossier courant du processus.
+    base_dir: Option<PathBuf>,
     /// Demandes à l'interface, pas encore lues.
     ui_requests: Vec<UiRequest>,
     notifications: Notifications,
@@ -146,6 +149,7 @@ impl Editor {
             last_copy: None,
             zoom: 1.0,
             project: None,
+            base_dir: None,
             ui_requests: Vec::new(),
             notifications: Notifications::default(),
             monitors: Vec::new(),
@@ -566,6 +570,30 @@ impl Editor {
         std::mem::take(&mut self.ui_requests)
     }
 
+    /// Exécute la ligne `args` (déjà découpée : groupe, commande, arguments) avec `dir` comme
+    /// point de départ des chemins relatifs : une commande tapée dans un terminal.
+    pub fn run_in(&mut self, dir: &Path, args: &[String]) -> CommandResult {
+        let line: Vec<String> = args.iter().map(|a| crate::command::quote(a)).collect();
+        let previous = self.base_dir.replace(dir.to_owned());
+        let result = self.execute(&line.join(" "));
+        self.base_dir = previous;
+        result
+    }
+
+    /// Chemin absolu : un chemin relatif part du dossier de la commande en cours (terminal), sinon
+    /// du dossier courant.
+    pub fn resolve_path(&self, path: &Path) -> PathBuf {
+        match &self.base_dir {
+            Some(base) if path.is_relative() => base.join(path),
+            _ => path.to_owned(),
+        }
+    }
+
+    /// Dossier d'où partent les chemins relatifs de la commande en cours, s'il est imposé.
+    pub fn base_dir(&self) -> Option<&Path> {
+        self.base_dir.as_deref()
+    }
+
     /// Dossier ouvert comme projet.
     pub fn project(&self) -> Option<&Path> {
         self.project.as_deref()
@@ -754,5 +782,24 @@ mod tests {
         let mut editor = Editor::new();
         assert!(editor.open(&path).is_err());
         assert_eq!(editor.document_count(), 0);
+    }
+
+    #[test]
+    fn commande_d_un_terminal() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("note.txt"), "x").unwrap();
+        let mut editor = Editor::new();
+        let args = |a: &[&str]| a.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        editor
+            .run_in(dir.path(), &args(&["file", "open", "note.txt"]))
+            .unwrap();
+        assert_eq!(editor.active_document().unwrap().display_name(), "note.txt");
+        assert!(editor.base_dir().is_none(), "seulement pendant la commande");
+        // Arguments avec espaces et guillemets : transmis tels quels.
+        editor
+            .run_in(dir.path(), &args(&["file", "save-as", "mon fichier'.txt"]))
+            .unwrap();
+        assert!(dir.path().join("mon fichier'.txt").exists());
+        assert!(editor.run_in(dir.path(), &args(&["nope", "x"])).is_err());
     }
 }
