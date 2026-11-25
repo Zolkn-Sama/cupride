@@ -440,6 +440,13 @@ impl App {
         if self.tab_pressed(x, y) {
             return;
         }
+        // Un clic dans une autre zone lui donne le focus ; le clic y place ensuite le curseur.
+        if let Some(panel) = self.window.as_ref().and_then(|s| s.views.panel_at(x, y))
+            && self.editor.active_panel() != Some(panel)
+        {
+            self.editor.focus_panel(panel);
+            self.after_any_command(Instant::now());
+        }
         let panel = self.editor.active_panel();
         let (Some(state), Some(document)) = (&self.window, self.editor.active_document_mut())
         else {

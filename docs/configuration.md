@@ -138,6 +138,10 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `tab move-left` | `Ctrl+Maj+Page préc.` | `Ctrl+Maj+Page préc.` |
 | `split right` | `Ctrl+\` | `Cmd+\` |
 | `split down` | `Ctrl+K Ctrl+\` | `Cmd+K Cmd+\` |
+| `panel focus left` | `Ctrl+K Ctrl+←` | `Cmd+K Cmd+←` |
+| `panel focus right` | `Ctrl+K Ctrl+→` | `Cmd+K Cmd+→` |
+| `panel focus up` | `Ctrl+K Ctrl+↑` | `Cmd+K Cmd+↑` |
+| `panel focus down` | `Ctrl+K Ctrl+↓` | `Cmd+K Cmd+↓` |
 | `file close` | `Ctrl+K Ctrl+W` | `Cmd+K Cmd+W` |
 | `view zoom-in` | `Ctrl+=`, `Ctrl+Maj+=`, `Ctrl++` | `Cmd+=`, `Cmd+Maj+=`, `Cmd++` |
 | `view zoom-out` | `Ctrl+-` | `Cmd+-` |
