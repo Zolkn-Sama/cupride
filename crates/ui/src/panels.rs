@@ -11,7 +11,9 @@ use std::fmt;
 use std::time::Instant;
 
 use cupride_core::keymap::KeyCombo;
-use cupride_core::layout::{Bounds, Divider, DropTarget, PanelId, PanelKind, Placement};
+use cupride_core::layout::{
+    Bounds, Divider, DropTarget, LayoutTree, PanelId, PanelKind, Placement, WindowId,
+};
 use cupride_core::session::ScrollPosition;
 use cupride_core::{DocumentId, Editor};
 use cupride_render::{Color, Layer, Quad, Rect, TextSystem};
@@ -334,6 +336,8 @@ pub struct PanelViews {
     area: Rect,
     zones: Vec<Zone>,
     dividers: Vec<Divider>,
+    /// Fenêtre affichée ; `None` : la fenêtre active.
+    window: Option<WindowId>,
 }
 
 impl fmt::Debug for PanelViews {
@@ -369,6 +373,34 @@ impl PanelViews {
             area: Rect::default(),
             zones: Vec::new(),
             dividers: Vec::new(),
+            window: None,
+        }
+    }
+
+    /// Vues de la fenêtre `window` (par défaut, celles de la fenêtre active).
+    pub fn for_window(mut self, window: WindowId) -> Self {
+        self.window = Some(window);
+        self
+    }
+
+    /// Fenêtre affichée.
+    pub fn window(&self) -> Option<WindowId> {
+        self.window
+    }
+
+    /// Arbre de la fenêtre affichée.
+    fn tree<'e>(&self, editor: &'e Editor) -> Option<&'e LayoutTree> {
+        match self.window {
+            Some(window) => editor.workspace().window(window).map(|w| w.tree()),
+            None => Some(editor.workspace().tree()),
+        }
+    }
+
+    /// Panneau actif de la fenêtre affichée.
+    fn window_active(&self, editor: &Editor) -> Option<PanelId> {
+        match self.window {
+            Some(window) => editor.workspace().window(window)?.active(),
+            None => editor.active_panel(),
         }
     }
 
@@ -421,11 +453,15 @@ impl PanelViews {
     /// titres des onglets, et place chaque zone dans `area`.
     pub fn layout(&mut self, text: &mut TextSystem, editor: &Editor, area: Rect) {
         let workspace = editor.workspace();
-        let exists = |panel: &PanelId| workspace.panel(*panel).is_some();
+        let empty = LayoutTree::new();
+        let tree = self.tree(editor).unwrap_or(&empty);
+        // Seuls les panneaux de la fenêtre ont une vue ici.
+        let shown = tree.panels();
+        let exists = |panel: &PanelId| shown.contains(panel);
         self.views.retain(|panel, _| exists(panel));
         self.labels.retain(|panel, _| exists(panel));
         self.documents.retain(|panel, _| exists(panel));
-        for panel in workspace.panels() {
+        for panel in shown.iter().filter_map(|id| workspace.panel(*id)) {
             let id = panel.id();
             let document = editor.panel_document(id);
             if self.views.contains_key(&id) && self.documents.get(&id) == Some(&document) {
@@ -454,7 +490,6 @@ impl PanelViews {
         let gap = self.gap();
         let bar_height = Self::tab_bar_height(&style);
         let padding = style.px(12.0);
-        let tree = workspace.tree();
         let mut zones = Vec::new();
         for group_area in tree.areas(bounds(area), gap) {
             let group = group_area.group;
@@ -754,7 +789,7 @@ impl PanelViews {
                 None => layer.quads.push(Quad::new(zone.content, theme.panel)),
             }
         }
-        let active = editor.active_panel();
+        let active = self.window_active(editor);
         for zone in &self.zones {
             let has_active = active.is_some() && zone.active == active;
             self.draw_tabs(layer, zone, theme, has_active, has_active && focused);

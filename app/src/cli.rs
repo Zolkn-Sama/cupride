@@ -6,8 +6,16 @@
 //! cupride .                    ouvre le dossier comme projet
 //! cupride . README.md a.rs     dossier du projet et fichiers ; le premier fichier est actif
 //! cupride --no-restore         sans restaurer la session du projet
+//! cupride --window 2 a.rs      dans la fenêtre 2 de l'instance
+//! cupride --wait COMMIT_MSG    attend la fermeture du fichier (éditeur de Git)
+//! cupride panel focus left     commande interne, même syntaxe que la ligne de commande
+//! cupride --new-instance       instance indépendante, configuration vierge
+//! cupride --new-instance --config-dir ~/essai   instance indépendante, avec ce dossier
 //! cupride --version | --help
 //! ```
+//!
+//! Un premier argument qui est un groupe de commandes (`file`, `panel`, `window`…) fait de la
+//! suite une commande ; un fichier qui porterait ce nom s'ouvre avec `./nom`.
 //!
 //! La session du projet (zones, onglets, fichiers) est restaurée avant d'ouvrir les fichiers
 //! demandés, qui s'ajoutent dans la zone active.
@@ -27,6 +35,16 @@ pub(crate) struct Launch {
     pub(crate) paths: Vec<PathBuf>,
     /// Restaurer la session du projet (sauf `--no-restore`).
     pub(crate) restore: bool,
+    /// Fenêtre où ouvrir les fichiers ou exécuter la commande (`--window N`).
+    pub(crate) window: Option<u64>,
+    /// Attendre la fermeture des fichiers ouverts (`--wait`).
+    pub(crate) wait: bool,
+    /// Commande interne (`groupe commande arguments…`), au lieu de fichiers.
+    pub(crate) command: Option<Vec<String>>,
+    /// Instance indépendante : ni transmise à l'instance en marche, ni joignable (`--new-instance`).
+    pub(crate) new_instance: bool,
+    /// Dossier de configuration et de données de l'instance indépendante (`--config-dir`).
+    pub(crate) config_dir: Option<PathBuf>,
 }
 
 /// Ce que demande la ligne de commande.
@@ -47,7 +65,9 @@ fn command() -> Command {
         .help_template(
             "{about}\n\nUtilisation : {usage}\n\n{all-args}\n\nUn chemin inexistant ouvre un nouveau document, créé au premier enregistrement.",
         )
-        .override_usage("cupride [--no-restore] [chemin…]")
+        .override_usage(
+            "cupride [options] [chemin…]\n       cupride [--window N] <groupe> <commande> [arguments]",
+        )
         .disable_help_flag(true)
         .disable_version_flag(true)
         .arg(
@@ -62,6 +82,44 @@ fn command() -> Command {
                 .long("no-restore")
                 .action(ArgAction::SetTrue)
                 .help("Démarre sans restaurer l'espace de travail du projet")
+                .help_heading("Options"),
+        )
+        .arg(
+            Arg::new("window")
+                .long("window")
+                .value_name("N")
+                .value_parser(value_parser!(u64))
+                .help("Ouvre dans la fenêtre N de l'instance (voir « window list »)")
+                .help_heading("Options"),
+        )
+        .arg(
+            Arg::new("wait")
+                .long("wait")
+                .action(ArgAction::SetTrue)
+                .help("Attend que les fichiers ouverts soient fermés (éditeur de Git…)")
+                .help_heading("Options"),
+        )
+        .arg(
+            Arg::new("new-instance")
+                .long("new-instance")
+                .action(ArgAction::SetTrue)
+                .help(
+                    "Lance une instance indépendante, avec son propre dossier de configuration \
+                     (vierge et temporaire, sauf --config-dir) : la session habituelle n'est pas \
+                     touchée",
+                )
+                .help_heading("Options"),
+        )
+        .arg(
+            Arg::new("config-dir")
+                .long("config-dir")
+                .value_name("dossier")
+                .value_parser(value_parser!(PathBuf))
+                .requires("new-instance")
+                .help(
+                    "Dossier de l'instance indépendante : config.toml, themes/, et ses données \
+                     (session, layouts, historique) dans data/",
+                )
                 .help_heading("Options"),
         )
         .arg(
@@ -82,20 +140,63 @@ fn command() -> Command {
         )
 }
 
-/// Analyse les arguments (sans le nom du programme).
-pub(crate) fn parse<I, T>(args: I) -> Cli
+/// Options qui prennent une valeur : leur valeur n'est pas un groupe de commandes.
+const OPTIONS_WITH_VALUE: [&str; 2] = ["--window", "--config-dir"];
+
+/// Analyse les arguments (sans le nom du programme). `is_group` reconnaît les groupes de
+/// commandes (`file`, `panel`…) : le premier argument qui en est un, après les options, fait de
+/// la suite une commande interne.
+pub(crate) fn parse<I, T>(args: I, is_group: impl Fn(&str) -> bool) -> Cli
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
-    let args = std::iter::once(OsString::from("cupride")).chain(args.into_iter().map(Into::into));
-    match command().try_get_matches_from(args) {
+    let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
+    let mut index = 0;
+    let mut split = None;
+    while let Some(arg) = args.get(index) {
+        let arg = arg.to_string_lossy();
+        if arg == "--" {
+            break;
+        }
+        if arg.starts_with('-') {
+            index += if OPTIONS_WITH_VALUE.contains(&arg.as_ref()) {
+                2
+            } else {
+                1
+            };
+            continue;
+        }
+        if is_group(&arg) {
+            split = Some(index);
+        }
+        break;
+    }
+    let (options, internal) = match split {
+        Some(index) => (
+            &args[..index],
+            Some(
+                args[index..]
+                    .iter()
+                    .map(|a| a.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>(),
+            ),
+        ),
+        None => (&args[..], None),
+    };
+    let options = std::iter::once(OsString::from("cupride")).chain(options.iter().cloned());
+    match command().try_get_matches_from(options) {
         Ok(matches) => Cli::Run(Launch {
             paths: matches
                 .get_many::<PathBuf>("chemins")
                 .map(|paths| paths.cloned().collect())
                 .unwrap_or_default(),
             restore: !matches.get_flag("no-restore"),
+            window: matches.get_one::<u64>("window").copied(),
+            wait: matches.get_flag("wait"),
+            command: internal,
+            new_instance: matches.get_flag("new-instance"),
+            config_dir: matches.get_one::<PathBuf>("config-dir").cloned(),
         }),
         Err(error) => match error.kind() {
             clap::error::ErrorKind::DisplayHelp => Cli::Print(error.render().to_string()),
@@ -112,7 +213,7 @@ where
 /// restaurée depuis le dossier `sessions` s'il est donné ; les fichiers sont ouverts et le premier
 /// devient actif. Sans fichier ni session, un document vide est créé. Renvoie les problèmes à
 /// signaler ; l'IDE démarre quand même.
-pub(crate) fn open(editor: &mut Editor, paths: &[PathBuf], sessions: Option<&Path>) -> Vec<String> {
+pub(crate) fn open(editor: &mut Editor, paths: &[PathBuf], sessions: Option<&Path>) -> Opened {
     let mut problems = Vec::new();
     let mut first = None;
     for path in paths.iter().filter(|p| p.is_dir()) {
@@ -137,10 +238,12 @@ pub(crate) fn open(editor: &mut Editor, paths: &[PathBuf], sessions: Option<&Pat
             Err(error) => problems.push(error.to_string()),
         }
     }
+    let mut documents = Vec::new();
     for path in paths.iter().filter(|p| !p.is_dir()) {
         match editor.open(path) {
             Ok(id) => {
                 first.get_or_insert(id);
+                documents.push(id);
             }
             Err(error) => problems.push(error.to_string()),
         }
@@ -154,7 +257,19 @@ pub(crate) fn open(editor: &mut Editor, paths: &[PathBuf], sessions: Option<&Pat
         }
         None => {}
     }
-    problems
+    Opened {
+        problems,
+        documents,
+    }
+}
+
+/// Résultat de [`open`].
+#[derive(Debug, Default)]
+pub(crate) struct Opened {
+    /// Problèmes à signaler.
+    pub(crate) problems: Vec<String>,
+    /// Documents des fichiers demandés.
+    pub(crate) documents: Vec<cupride_core::DocumentId>,
 }
 
 /// Nom affiché d'un projet : le nom de son dossier.
@@ -168,30 +283,37 @@ pub(crate) fn project_name(path: &Path) -> String {
 mod tests {
     use super::*;
 
+    /// Analyse avec les groupes de commandes intégrés.
+    fn p<const N: usize>(args: [&str; N]) -> Cli {
+        let registry = cupride_core::command::builtin_registry();
+        parse(args, |group| registry.has_group(group))
+    }
+
     #[test]
     fn analyse() {
         let run = |paths: &[&str], restore| {
             Cli::Run(Launch {
                 paths: paths.iter().map(PathBuf::from).collect(),
                 restore,
+                ..Launch::default()
             })
         };
-        assert_eq!(parse::<_, &str>([]), run(&[], true));
-        assert_eq!(parse(["a.rs", "dossier"]), run(&["a.rs", "dossier"], true));
-        assert_eq!(parse(["--no-restore", "a.rs"]), run(&["a.rs"], false));
+        assert_eq!(p([]), run(&[], true));
+        assert_eq!(p(["a.rs", "dossier"]), run(&["a.rs", "dossier"], true));
+        assert_eq!(p(["--no-restore", "a.rs"]), run(&["a.rs"], false));
         assert_eq!(
-            parse(["--version"]),
+            p(["--version"]),
             Cli::Print(format!("cupride {}\n", env!("CARGO_PKG_VERSION")))
         );
-        let Cli::Print(help) = parse(["-h"]) else {
+        let Cli::Print(help) = p(["-h"]) else {
             panic!("aide attendue");
         };
         assert!(
-            help.contains("Utilisation : cupride [--no-restore] [chemin…]"),
+            help.contains("Utilisation : cupride [options] [chemin…]"),
             "{help}"
         );
         assert!(help.contains("ouvert comme projet"), "{help}");
-        let Cli::Error(error) = parse(["--inconnue"]) else {
+        let Cli::Error(error) = p(["--inconnue"]) else {
             panic!("erreur attendue");
         };
         assert!(
@@ -199,7 +321,7 @@ mod tests {
             "{error}"
         );
         // Un fichier qui s'appelle comme une option reste ouvrable.
-        assert_eq!(parse(["--", "--x"]), run(&["--x"], true));
+        assert_eq!(p(["--", "--x"]), run(&["--x"], true));
     }
 
     #[test]
@@ -214,7 +336,8 @@ mod tests {
             &mut editor,
             &[dir.path().into(), missing.clone(), file.clone()],
             None,
-        );
+        )
+        .problems;
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(
             editor.project(),
@@ -231,7 +354,7 @@ mod tests {
         // Dossier seul : document vide ; second dossier : signalé, ignoré.
         let mut editor = Editor::new();
         let other = tempfile::tempdir().unwrap();
-        let problems = open(&mut editor, &[dir.path().into(), other.path().into()], None);
+        let problems = open(&mut editor, &[dir.path().into(), other.path().into()], None).problems;
         assert_eq!(problems.len(), 1, "{problems:?}");
         assert_eq!(editor.document_count(), 1);
         assert_eq!(editor.active_document().unwrap().path(), None);
@@ -240,7 +363,7 @@ mod tests {
         let binary = dir.path().join("image.bin");
         std::fs::write(&binary, b"\0\0\0").unwrap();
         let mut editor = Editor::new();
-        assert_eq!(open(&mut editor, &[binary], None).len(), 1);
+        assert_eq!(open(&mut editor, &[binary], None).problems.len(), 1);
         assert_eq!(editor.document_count(), 1);
     }
 
@@ -264,7 +387,7 @@ mod tests {
 
         // Relancé sur le projet : les deux zones reviennent, sans document vide.
         let mut editor = Editor::new();
-        let problems = open(&mut editor, std::slice::from_ref(&project), Some(&sessions));
+        let problems = open(&mut editor, std::slice::from_ref(&project), Some(&sessions)).problems;
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(editor.workspace().tree().groups().len(), 2);
         assert_eq!(editor.document_count(), 2);
@@ -282,5 +405,56 @@ mod tests {
         open(&mut editor, &[project], None);
         assert_eq!(editor.workspace().tree().groups().len(), 1);
         assert_eq!(editor.document_count(), 1, "document vide");
+    }
+
+    #[test]
+    fn commandes_et_options() {
+        let Cli::Run(launch) = p(["--window", "2", "panel", "focus", "left", "--force"]) else {
+            panic!("commande attendue");
+        };
+        assert_eq!(launch.window, Some(2));
+        assert_eq!(
+            launch.command.as_deref(),
+            Some(
+                &[
+                    "panel".to_owned(),
+                    "focus".into(),
+                    "left".into(),
+                    "--force".into()
+                ][..]
+            ),
+            "les options après le groupe appartiennent à la commande"
+        );
+        assert!(launch.paths.is_empty());
+        let Cli::Run(launch) = p(["--wait", "COMMIT_EDITMSG"]) else {
+            panic!("fichier attendu");
+        };
+        assert!(launch.wait);
+        assert_eq!(launch.command, None);
+        assert_eq!(launch.paths, vec![PathBuf::from("COMMIT_EDITMSG")]);
+        // Un fichier qui porte le nom d'un groupe : avec ./
+        let Cli::Run(launch) = p(["./file"]) else {
+            panic!("fichier attendu");
+        };
+        assert_eq!(launch.command, None);
+        assert!(matches!(p(["--window", "x"]), Cli::Error(_)));
+    }
+
+    #[test]
+    fn instance_independante() {
+        let Cli::Run(launch) = p(["--new-instance", "--config-dir", "essai", "a.rs"]) else {
+            panic!("lancement attendu");
+        };
+        assert!(launch.new_instance);
+        assert_eq!(launch.config_dir, Some(PathBuf::from("essai")));
+        assert_eq!(launch.paths, vec![PathBuf::from("a.rs")]);
+        let Cli::Error(error) = p(["--config-dir", "essai"]) else {
+            panic!("--config-dir seul refusé");
+        };
+        assert!(error.contains("--new-instance"), "{error}");
+        let Cli::Run(launch) = p(["--new-instance", "--config-dir", "file"]) else {
+            panic!("lancement attendu");
+        };
+        assert_eq!(launch.command, None, "valeur d'option, pas un groupe");
     }
 }

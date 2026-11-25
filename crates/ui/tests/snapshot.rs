@@ -127,6 +127,7 @@ fn ligne_de_commande() {
         &StatusContext {
             editor: &editor,
             pending_keys: "",
+            panel: None,
         },
         (&config.left, &config.right),
     );
@@ -208,6 +209,7 @@ fn render_with_theme(name: &str, theme: &Theme) {
         &StatusContext {
             editor: &editor,
             pending_keys: "",
+            panel: None,
         },
         (&config.left, &config.right),
     );

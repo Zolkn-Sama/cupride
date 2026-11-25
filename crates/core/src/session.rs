@@ -97,11 +97,6 @@ pub enum SessionError {
     },
 }
 
-/// Dossier des sessions, dans le dossier de données de l'OS.
-pub fn sessions_dir() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "cupride").map(|d| d.data_dir().join("sessions"))
-}
-
 /// Nom du fichier de session d'un projet : son nom de dossier et une empreinte de son chemin
 /// complet (deux projets de même nom ont deux sessions) ; `default.json` sans projet.
 pub fn session_file_name(project: Option<&Path>) -> String {
@@ -195,7 +190,8 @@ impl Editor {
     /// pas.
     pub fn capture_session(&self) -> Session {
         let mut workspace = self.workspace().clone();
-        for panel in self.workspace().tree().panels() {
+        let panels: Vec<PanelId> = self.workspace().panels().map(|p| p.id()).collect();
+        for panel in panels {
             let Some(id) = self.panel_document(panel) else {
                 continue;
             };
@@ -230,7 +226,8 @@ impl Editor {
         let mut workspace = session.workspace;
         let mut problems = Vec::new();
         let mut bindings = Vec::new();
-        for panel in workspace.tree().panels() {
+        let panels: Vec<PanelId> = workspace.panels().map(|p| p.id()).collect();
+        for panel in panels {
             let Some(model) = workspace.panel(panel) else {
                 continue;
             };
@@ -268,7 +265,7 @@ impl Editor {
             }
         }
         self.panel_scrolls.clear();
-        let renamed = self.workspace_mut().replace(workspace);
+        let (renamed, _) = self.workspace_mut().replace(workspace);
         for (old, document, state) in bindings {
             let Some(&panel) = renamed.get(&old) else {
                 continue;

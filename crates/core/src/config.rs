@@ -101,6 +101,16 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # "show" (affichés comme les autres). Le dossier .git n'est jamais affiché.
 # ignored = "dim"
 
+[window]
+# Fermer la dernière fenêtre quitte CuprIDE. Avec false, CuprIDE reste lancé sans fenêtre : la
+# prochaine commande « cupride » en ouvre une, dans la même instance.
+# quit_on_last_close = true
+
+# Sous Wayland, une application ne peut pas placer ses fenêtres. Quand un écran est demandé
+# (window new --monitor, window move) : "fullscreen" (plein écran sur cet écran) ou
+# "compositor" (le compositeur choisit). Une notification le signale. Sans effet ailleurs.
+# wayland_placement = "fullscreen"
+
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les
 # remplacent pour les mêmes touches. Une chaîne vide retire un raccourci par défaut.
@@ -333,6 +343,25 @@ pub struct ExplorerConfig {
     pub ignored: IgnoredFiles,
 }
 
+/// Section `[window]` : fenêtres.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct WindowConfig {
+    /// Fermer la dernière fenêtre quitte l'application.
+    pub quit_on_last_close: bool,
+    /// Placement d'une fenêtre sur un écran demandé, sous Wayland.
+    pub wayland_placement: crate::monitors::WaylandPlacement,
+}
+
+impl Default for WindowConfig {
+    fn default() -> Self {
+        Self {
+            quit_on_last_close: true,
+            wayland_placement: crate::monitors::WaylandPlacement::default(),
+        }
+    }
+}
+
 /// Configuration complète.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
@@ -353,12 +382,14 @@ pub struct Config {
     pub session: SessionConfig,
     /// Section `[explorer]`.
     pub explorer: ExplorerConfig,
+    /// Section `[window]`.
+    pub window: WindowConfig,
     /// Section `[keys]` : touches → ligne de commande (vide pour retirer un raccourci).
     pub keys: BTreeMap<String, String>,
 }
 
 /// Clés connues, pour signaler les fautes de frappe.
-const KNOWN_KEYS: [(&str, &[&str]); 9] = [
+const KNOWN_KEYS: [(&str, &[&str]); 10] = [
     (
         "editor",
         &["line_ending", "undo_group_delay_ms", "primary_selection"],
@@ -379,6 +410,7 @@ const KNOWN_KEYS: [(&str, &[&str]); 9] = [
     ("tabs", &["preview"]),
     ("session", &["restore"]),
     ("explorer", &["ignored"]),
+    ("window", &["quit_on_last_close", "wayland_placement"]),
     ("keys", &[]),
 ];
 

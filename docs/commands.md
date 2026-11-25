@@ -11,7 +11,8 @@ Toute action de CuprIDE est une commande. Une même commande est accessible depu
 ## Lancement
 
 ```
-cupride [--no-restore] [chemin…]
+cupride [options] [chemin…]
+cupride [--window N] <groupe> <commande> [arguments]
 ```
 
 | Appel | Effet |
@@ -21,7 +22,33 @@ cupride [--no-restore] [chemin…]
 | `cupride .` | Ouvre le dossier comme projet (son nom s'affiche dans le titre). |
 | `cupride . a.rs b.rs` | Dossier du projet et fichiers ; le premier fichier est actif. |
 | `cupride --no-restore` | Démarre sans restaurer l'espace de travail du projet. |
+| `cupride --window 2 a.rs` | Ouvre dans la fenêtre 2 de l'instance en marche. |
+| `cupride --wait COMMIT_EDITMSG` | Ouvre le fichier et attend qu'il soit fermé avant de rendre la main : CuprIDE peut servir d'éditeur à Git (`git config --global core.editor "cupride --wait"`). Sans instance en marche, CuprIDE s'arrête à la fermeture du fichier, comme un éditeur de terminal. |
+| `cupride panel focus left` | Exécute une commande dans l'instance en marche, avec la même syntaxe que la ligne de commande interne. |
+| `cupride --new-instance [--config-dir dossier]` | Lance une instance indépendante, pour essayer une configuration sans toucher à sa session : elle ne passe pas par l'instance en marche et ne lui répond pas. Son dossier : `config.toml`, `themes/`, et ses données (session, layouts, historique) dans `data/`. Sans `--config-dir`, un dossier temporaire vierge, supprimé à la sortie. |
 | `cupride --help`, `cupride --version` | Aide, version. |
+
+**Instance unique** : un seul CuprIDE tourne par utilisateur ; toutes ses fenêtres partagent les
+documents. Lancer `cupride` quand il tourne déjà lui transmet la ligne de commande (les chemins
+relatifs partent du dossier du terminal) : les fichiers s'ouvrent dans sa fenêtre active, qui
+passe au premier plan, et le nouveau processus se termine aussitôt, avec le code de sortie que
+l'instance renvoie. La communication passe par un socket local privé (Unix : dans un dossier
+`0700` de l'utilisateur, sous `$XDG_RUNTIME_DIR` ou le dossier temporaire ; Windows : un tube
+nommé propre à l'utilisateur, fermé aux autres utilisateurs en écriture et aux clients distants).
+Après un plantage, le socket orphelin est détecté et remplacé au lancement suivant.
+
+**Commandes depuis le terminal** : un premier argument qui est un groupe de commandes (`file`,
+`panel`, `window`…) fait de la suite une commande interne, exécutée dans l'instance (dans la
+fenêtre `--window N` si elle est donnée). Son message s'affiche dans le terminal ; une erreur
+s'affiche sur la sortie d'erreur, et `cupride` sort avec le code 1 (2 pour une ligne de commande
+mal formée). Les chemins relatifs partent du dossier du terminal. Un fichier qui porterait le nom
+d'un groupe s'ouvre avec `./nom`.
+
+```
+cupride window list
+cupride file open src/main.rs
+cupride --window 2 panel move --window 1
+```
 
 L'espace de travail du projet (zones, onglets, fichiers, curseurs, défilement) est restauré tel
 qu'il était à la fermeture, sauf avec `--no-restore` ou l'option `[session] restore = false` (voir
@@ -203,12 +230,33 @@ erreur aussi (erreur), comme les avertissements de configuration et de fermeture
 
 ## `window` — fenêtres
 
-| Commande | Description | Issue |
-|---|---|---|
-| `window new [--monitor N]` | Ouvre une nouvelle fenêtre, éventuellement sur l'écran `N` | WIN |
-| `window close` | Ferme la fenêtre active | WIN |
-| `window move --monitor N` | Déplace la fenêtre active sur l'écran `N` | WIN |
-| `window list-monitors` | Liste les écrans : nom, résolution, échelle | WIN |
+Toutes les fenêtres partagent les mêmes documents ; chacune a son propre layout (zones, onglets).
+Les fenêtres sont numérotées à partir de 1, dans l'ordre de leur ouverture ; un numéro ne sert
+qu'une fois par session. La ligne de commande, la palette et les notifications s'affichent dans
+la fenêtre qui a le focus.
+
+Un document n'existe qu'une fois en mémoire : une modification apparaît aussitôt dans toutes les
+fenêtres qui l'affichent, et annuler ou rétablir agit sur ce document où qu'il soit affiché.
+Chaque fenêtre garde ses propres curseurs et son défilement, et sa barre d'état décrit son propre
+panneau actif. Seules les fenêtres qui affichent ce qui a changé sont redessinées.
+
+| Commande | Description |
+|---|---|
+| `window new [--monitor N]` | Ouvre une nouvelle fenêtre, avec un document vide (`mod+shift+n`) ; avec `--monitor`, centrée sur l'écran `N`. |
+| `window move --monitor N [fenêtre]` | Déplace la fenêtre active (ou la fenêtre donnée) sur l'écran `N` : centrée, réduite à 90 % de l'écran au plus pour y tenir, sortie du plein écran. |
+| `window list-monitors` | Liste les écrans : numéro, nom, résolution (pixels physiques), échelle ; l'écran principal est signalé. |
+| `window close [N] [--force]` | Ferme la fenêtre active, ou la fenêtre `N` (`mod+shift+w`). Ses documents qui ne sont affichés dans aucune autre fenêtre sont fermés : s'ils ont des modifications non enregistrées, la commande échoue, sauf avec `--force`. Fermer la dernière fenêtre quitte CuprIDE (option `[window] quit_on_last_close`). |
+| `window focus <N>` | Donne le focus à la fenêtre `N`. |
+| `window list` | Liste les fenêtres : numéro, document actif, nombre de panneaux ; `>` marque la fenêtre active. |
+
+**Numérotation des écrans** : à partir de 1, de gauche à droite, puis de haut en bas, d'après la
+position du coin haut gauche de chaque écran sur le bureau. Un même agencement d'écrans donne
+toujours les mêmes numéros, quel que soit l'ordre dans lequel l'OS les énumère ; brancher un
+écran à gauche décale les numéros des écrans à sa droite. La liste est relue au plus une fois par
+seconde.
+
+Le bouton de fermeture d'une fenêtre fait comme `window close` ; avec des modifications non
+enregistrées, il faut fermer une seconde fois pour confirmer.
 
 ## `split` — diviser l'espace
 
@@ -256,6 +304,7 @@ par un plugin.
 | `panel close [--force]` | Ferme le panneau actif (`mod+w`) ; sa zone disparaît si elle est vide, et sa place revient aux zones voisines. Son document est fermé s'il n'est plus affiché ailleurs : s'il a des modifications non enregistrées, la commande échoue, sauf avec `--force`. |
 | `panel focus <direction>` | Donne le focus à la zone voisine : `left`, `right`, `up` ou `down` (`mod+k` puis `mod+←`, `mod+→`, `mod+↑`, `mod+↓`). Parmi les zones de ce côté, celle qui touche et recouvre le plus la zone active. |
 | `panel move <direction> [--split]` | Déplace le panneau actif (avec son document, ses curseurs et son défilement) dans la zone voisine de ce côté, en onglet ; s'il n'y en a pas, ou avec `--split`, dans une nouvelle zone de ce côté de la zone active. Une zone vidée disparaît. Raccourcis : `mod+k` puis `alt+←`, `→`, `↑`, `↓`. |
+| `panel move --window N` | Envoie le panneau actif dans la fenêtre `N` (voir `window list`), en onglet à côté de son panneau actif, par exemple pour le mettre sur un autre écran. Il garde son document, ses curseurs et son défilement, et le focus le suit. |
 | `panel resize <sens>` | Agrandit ou réduit la zone active de 5 % de la fenêtre : `wider`, `narrower` (largeur), `taller`, `shorter` (hauteur). La place est prise à la zone voisine (la suivante, ou la précédente pour la dernière) ; chaque zone garde une taille minimale (sa barre d'onglets et trois lignes). Raccourcis : `mod+k` puis `mod+shift+→`, `←`, `↓`, `↑`. |
 | `panel list` | Liste les panneaux, zone par zone : `>` marque le panneau actif. |
 

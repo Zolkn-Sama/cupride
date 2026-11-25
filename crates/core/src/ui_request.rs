@@ -14,4 +14,11 @@ pub enum UiRequest {
     QuickOpen,
     /// Montrer ce fichier ou ce dossier dans l'explorateur (dossiers parents dépliés).
     Reveal(std::path::PathBuf),
+    /// Placer la fenêtre sur l'écran `monitor` (numéro, à partir de 1).
+    PlaceWindow {
+        /// Fenêtre à placer.
+        window: cupride_layout::WindowId,
+        /// Numéro de l'écran.
+        monitor: usize,
+    },
 }

@@ -80,6 +80,11 @@ et ignoré. Les plugins pourront ajouter leurs propres éléments.
 |---|---|---|---|
 | `restore` | `true`, `false` | `true` | Au lancement, l'espace de travail du projet est restauré tel qu'il était à la fermeture : zones et proportions, onglets, fichiers, curseurs et défilement. `cupride --no-restore` démarre sans le restaurer. |
 
+Avec plusieurs fenêtres, chacune revient avec son layout, sur son écran, à sa position et à sa
+taille, agrandie ou en plein écran comme elle l'était. Une fenêtre dont l'écran a été débranché
+(ou qui ne serait plus entièrement visible) est rapatriée : sur son écran s'il est toujours là,
+sinon sur l'écran principal, réduite pour y tenir et entièrement visible.
+
 La session est enregistrée à la fermeture, en JSON, dans le dossier de données de l'OS
 (`sessions/`), une par projet (le dossier ouvert avec `cupride <dossier>`). Les documents sans
 fichier n'y sont pas gardés. Un fichier supprimé entre-temps : son panneau est fermé, et une
@@ -90,6 +95,23 @@ notification le signale.
 | Option | Valeurs | Défaut | Effet |
 |---|---|---|---|
 | `ignored` | `"dim"`, `"hide"`, `"show"` | `"dim"` | Fichiers ignorés par `.gitignore` et `.ignore` dans l'explorateur : en gris, masqués, ou comme les autres. Le dossier `.git` n'est jamais affiché. |
+
+### `[window]`
+
+| Option | Valeurs | Défaut | Effet |
+|---|---|---|---|
+| `quit_on_last_close` | `true`, `false` | `true` | Fermer la dernière fenêtre quitte CuprIDE. Avec `false`, CuprIDE reste lancé sans fenêtre. |
+| `wayland_placement` | `"fullscreen"`, `"compositor"` | `"fullscreen"` | Sous Wayland, quand un écran est demandé (`window new --monitor`, `window move`) : plein écran sur cet écran, ou placement laissé au compositeur. Voir [Wayland](#wayland). Sans effet sous X11, Windows et macOS. |
+
+#### Wayland
+
+Le protocole Wayland ne permet pas à une application de choisir la position de ses fenêtres :
+c'est le compositeur qui les place. CuprIDE le détecte au lancement. Quand une commande demande un
+écran précis, la fenêtre passe en plein écran sur cet écran (`fullscreen`, réglage par défaut :
+seul moyen fiable de la mettre sur le bon écran), ou reste là où le compositeur la place
+(`compositor`). Dans les deux cas, une notification indique ce qui a été fait : la demande n'est
+jamais ignorée en silence. Sous X11 (y compris XWayland), Windows et macOS, la fenêtre est
+simplement centrée sur l'écran demandé.
 
 ### `[keys]`
 
@@ -156,6 +178,8 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `split right` | `Ctrl+\` | `Cmd+\` |
 | `split down` | `Ctrl+K Ctrl+\` | `Cmd+K Cmd+\` |
 | `explorer show` | `Ctrl+Maj+E` | `Cmd+Maj+E` |
+| `window new` | `Ctrl+Maj+N` | `Cmd+Maj+N` |
+| `window close` | `Ctrl+Maj+W` | `Cmd+Maj+W` |
 | `panel focus left` | `Ctrl+K Ctrl+←` | `Cmd+K Cmd+←` |
 | `panel focus right` | `Ctrl+K Ctrl+→` | `Cmd+K Cmd+→` |
 | `panel focus up` | `Ctrl+K Ctrl+↑` | `Cmd+K Cmd+↑` |
@@ -289,6 +313,16 @@ Les fichiers des thèmes intégrés servent d'exemples complets :
 # Fichiers ignorés (.gitignore, .ignore) : "dim" (affichés en gris), "hide" (masqués) ou
 # "show" (affichés comme les autres). Le dossier .git n'est jamais affiché.
 # ignored = "dim"
+
+[window]
+# Fermer la dernière fenêtre quitte CuprIDE. Avec false, CuprIDE reste lancé sans fenêtre : la
+# prochaine commande « cupride » en ouvre une, dans la même instance.
+# quit_on_last_close = true
+
+# Sous Wayland, une application ne peut pas placer ses fenêtres. Quand un écran est demandé
+# (window new --monitor, window move) : "fullscreen" (plein écran sur cet écran) ou
+# "compositor" (le compositeur choisit). Une notification le signale. Sans effet ailleurs.
+# wayland_placement = "fullscreen"
 
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les

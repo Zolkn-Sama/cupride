@@ -7,6 +7,7 @@ members = [
     "crates/core",
     "crates/render",
     "crates/ui",
+    "crates/ipc",
     "tools/repl",
 ]
 default-members = ["app"]
@@ -27,6 +28,7 @@ cupride-layout = { path = "crates/layout" }
 cupride-core = { path = "crates/core" }
 cupride-render = { path = "crates/render" }
 cupride-ui = { path = "crates/ui" }
+cupride-ipc = { path = "crates/ipc" }
 
 # Erreurs : thiserror dans les bibliothèques, anyhow dans les binaires.
 anyhow = "1.0.100"
@@ -66,6 +68,9 @@ ignore = "0.4.23"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 tracing-appender = "0.2.3"
+
+# Instance unique : socket local (Unix) ou tube nommé (Windows)
+interprocess = "2.4.9"
 
 # Explorateur : surveillance du disque, corbeille de l'OS
 notify = "9.0.0"

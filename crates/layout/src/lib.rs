@@ -5,7 +5,8 @@
 //!   toujours valide ; il se sérialise en JSON.
 //! - [`Panel`] : modèle d'un panneau, sérialisable — identifiant stable ([`PanelId`]), type
 //!   ([`PanelKind`]) et état. Son affichage (la vue) vit dans l'interface.
-//! - [`Workspace`] : les panneaux, leur arbre et le panneau qui a le focus.
+//! - [`Workspace`] : les fenêtres ([`WindowLayout`], chacune avec son arbre et son panneau
+//!   actif), les panneaux, et la fenêtre qui a le focus.
 //! - [`geometry`] : rectangles, axes et directions ; le layout calcule la place de chaque zone,
 //!   pour que la navigation et le redimensionnement se testent sans interface.
 //!
@@ -22,4 +23,4 @@ pub use tree::{
     Child, DROP_EDGE, Divider, DropTarget, GroupArea, LayoutError, LayoutTree, Node, Placement,
     Split, TabGroup,
 };
-pub use workspace::Workspace;
+pub use workspace::{WindowGeometry, WindowId, WindowLayout, Workspace};

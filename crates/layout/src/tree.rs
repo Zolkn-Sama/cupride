@@ -30,6 +30,9 @@ pub enum LayoutError {
     /// Le panneau est déjà dans le layout.
     #[error("le panneau {0} est déjà dans le layout")]
     AlreadyPresent(PanelId),
+    /// La fenêtre n'existe pas.
+    #[error("fenêtre {0} introuvable")]
+    UnknownWindow(u64),
     /// Le panneau est seul dans sa zone : il ne peut pas être placé à côté de lui-même.
     #[error("le panneau {0} est seul dans sa zone : il ne peut pas être placé à côté de lui-même")]
     AloneInGroup(PanelId),
