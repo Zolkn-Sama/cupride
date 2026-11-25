@@ -20,7 +20,7 @@ use cupride_render::{Acquire, Gpu, Rect, Renderer, TextSystem, WindowSurface};
 use cupride_ui::{
     ClickCounter, ClickModifiers, CommandHistory, CommandLine, CursorBlink, EditorView, Focus,
     MouseSelection, PanelViews, Picker, Pointer, Preedit, StatusBar, StatusContext, StatusElements,
-    Theme, Themes, Toasts, ViewRegistry, ViewSettings, WHEEL_LINES,
+    Theme, Themes, Toasts, ViewAction, ViewRegistry, ViewSettings, WHEEL_LINES,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
@@ -42,6 +42,7 @@ use crate::close::{CloseDecision, CloseGuard};
 use crate::file_index::{AppEvent, FileIndex};
 use crate::input;
 use crate::latency::LatencyStats;
+use crate::watcher::DiskWatcher;
 
 /// Taille initiale de la fenêtre, en pixels logiques.
 const INITIAL_SIZE: LogicalSize<f64> = LogicalSize::new(1_100.0, 720.0);
@@ -128,6 +129,8 @@ pub(crate) struct App {
     picker: Option<(PickerKind, Picker)>,
     /// Fichiers du projet, indexés en arrière-plan pour l'ouverture rapide.
     file_index: FileIndex,
+    /// Dossiers surveillés sur le disque (explorateur).
+    disk: DiskWatcher,
     /// Pour réveiller la boucle d'événements depuis les autres threads.
     proxy: EventLoopProxy<AppEvent>,
     status_bar: StatusBar,
@@ -203,6 +206,7 @@ impl App {
             completion: None,
             picker: None,
             file_index: FileIndex::default(),
+            disk: DiskWatcher::new(proxy.clone()),
             proxy,
             status_bar: StatusBar::default(),
             status_elements: StatusElements::default(),
@@ -259,6 +263,36 @@ impl App {
                 return;
             }
         }
+        // Un panneau qui prend le clavier (explorateur) reçoit les touches ; celles qu'il ne
+        // traite pas vont aux raccourcis, jamais au document.
+        if self.focus.current() == Element::Editor
+            && self.resolver.pending().is_empty()
+            && let Some(panel) = self.keyboard_panel()
+        {
+            let combo = input::combo(
+                &event.logical_key,
+                &event.key_without_modifiers(),
+                self.modifiers,
+            );
+            let action = match (combo, self.window.as_mut()) {
+                (Some(combo), Some(state)) => state
+                    .views
+                    .view_mut(panel)
+                    .map_or(ViewAction::Ignored, |view| view.key(&combo)),
+                _ => ViewAction::Ignored,
+            };
+            if action != ViewAction::Ignored {
+                self.view_action(action, start);
+                return;
+            }
+            if let Some(combo) = combo {
+                match self.resolver.feed(self.editor.keymap(), combo) {
+                    Resolution::Execute(command) => self.execute(&command, start),
+                    Resolution::Pending | Resolution::Unbound => self.request_redraw(),
+                }
+            }
+            return;
+        }
         // Hors séquence en cours, le texte imprimable est inséré directement.
         if self.resolver.pending().is_empty()
             && let Some(text) = input::text_to_insert(event.text.as_deref(), self.modifiers)
@@ -285,6 +319,26 @@ impl App {
         }
     }
 
+    /// Panneau actif, s'il prend le clavier lui-même (explorateur).
+    fn keyboard_panel(&self) -> Option<PanelId> {
+        let panel = self.editor.active_panel()?;
+        let view = self.window.as_ref()?.views.view(panel)?;
+        view.takes_keyboard().then_some(panel)
+    }
+
+    /// Exécute ce qu'une vue demande après une touche ou un clic.
+    fn view_action(&mut self, action: ViewAction, start: Instant) {
+        match action {
+            ViewAction::Ignored => {}
+            ViewAction::Handled => {
+                self.blink.reset(Instant::now());
+                self.request_redraw();
+            }
+            ViewAction::Run(line) => self.execute(&line, start),
+            ViewAction::CommandLine(text) => self.open_command_line(&text),
+        }
+    }
+
     /// Événement de méthode de saisie : composition en cours, ou texte validé.
     fn ime(&mut self, ime: Ime) {
         match ime {
@@ -306,7 +360,7 @@ impl App {
             Ime::Commit(text) => {
                 self.composing = false;
                 self.clear_preedit();
-                if !self.overlay_commit(&text) {
+                if !self.overlay_commit(&text) && self.keyboard_panel().is_none() {
                     self.insert(&text, Instant::now());
                 }
             }
@@ -464,6 +518,24 @@ impl App {
         {
             self.editor.focus_panel(panel);
             self.after_any_command(Instant::now());
+        }
+        // Un panneau qui gère sa souris (explorateur) reçoit le clic.
+        if let Some(panel) = self.keyboard_panel() {
+            let now = Instant::now();
+            let action = match &mut self.window {
+                Some(state) => {
+                    let clicks = self
+                        .clicks
+                        .click(now, x, y, state.window.scale_factor() as f32);
+                    state
+                        .views
+                        .view_mut(panel)
+                        .map_or(ViewAction::Ignored, |view| view.click(x, y, clicks))
+                }
+                None => ViewAction::Ignored,
+            };
+            self.view_action(action, now);
+            return;
         }
         let panel = self.editor.active_panel();
         let (Some(state), Some(document)) = (&self.window, self.editor.active_document_mut())
@@ -892,6 +964,8 @@ impl App {
             self.focused && editor_focused,
             blink_on,
         );
+        // Dossiers affichés par l'explorateur : surveillés sur le disque.
+        self.disk.sync(state.views.watched_dirs());
         // Défilement de chaque vue, pour la session et les layouts nommés.
         for (panel, scroll) in state.views.scroll_positions() {
             self.editor.set_panel_scroll(panel, scroll);
@@ -971,6 +1045,17 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::FilesIndexed => self.files_indexed(),
+            AppEvent::FilesChanged => {
+                let changed = self.disk.take_changed();
+                if let Some(state) = &mut self.window
+                    && !changed.is_empty()
+                {
+                    for view in state.views.views_mut() {
+                        view.files_changed(&changed);
+                    }
+                    state.window.request_redraw();
+                }
+            }
         }
     }
 

@@ -45,6 +45,13 @@ impl App {
                     self.close_overlays();
                     self.open_quick_open();
                 }
+                UiRequest::Reveal(path) => {
+                    if let Some(state) = &mut self.window {
+                        for view in state.views.views_mut() {
+                            view.reveal(&path);
+                        }
+                    }
+                }
             }
         }
     }

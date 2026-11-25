@@ -85,6 +85,12 @@ La session est enregistrée à la fermeture, en JSON, dans le dossier de donnée
 fichier n'y sont pas gardés. Un fichier supprimé entre-temps : son panneau est fermé, et une
 notification le signale.
 
+### `[explorer]`
+
+| Option | Valeurs | Défaut | Effet |
+|---|---|---|---|
+| `ignored` | `"dim"`, `"hide"`, `"show"` | `"dim"` | Fichiers ignorés par `.gitignore` et `.ignore` dans l'explorateur : en gris, masqués, ou comme les autres. Le dossier `.git` n'est jamais affiché. |
+
 ### `[keys]`
 
 Raccourcis : `"touches" = "ligne de commande"`. Ils s'ajoutent aux raccourcis par défaut et les
@@ -149,6 +155,7 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `tab move-left` | `Ctrl+Maj+Page préc.` | `Ctrl+Maj+Page préc.` |
 | `split right` | `Ctrl+\` | `Cmd+\` |
 | `split down` | `Ctrl+K Ctrl+\` | `Cmd+K Cmd+\` |
+| `explorer show` | `Ctrl+Maj+E` | `Cmd+Maj+E` |
 | `panel focus left` | `Ctrl+K Ctrl+←` | `Cmd+K Cmd+←` |
 | `panel focus right` | `Ctrl+K Ctrl+→` | `Cmd+K Cmd+→` |
 | `panel focus up` | `Ctrl+K Ctrl+↑` | `Cmd+K Cmd+↑` |
@@ -277,6 +284,11 @@ Les fichiers des thèmes intégrés servent d'exemples complets :
 # Au lancement, l'espace de travail du projet (zones, onglets, fichiers, curseurs, défilement)
 # est restauré tel qu'il était à la fermeture. « cupride --no-restore » démarre sans le restaurer.
 # restore = true
+
+[explorer]
+# Fichiers ignorés (.gitignore, .ignore) : "dim" (affichés en gris), "hide" (masqués) ou
+# "show" (affichés comme les autres). Le dossier .git n'est jamais affiché.
+# ignored = "dim"
 
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les
