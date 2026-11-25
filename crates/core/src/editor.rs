@@ -1,9 +1,10 @@
 //! État global de l'éditeur.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use cupride_layout::Workspace;
+use cupride_layout::{PanelId, PanelKind, Workspace};
 use slotmap::{SecondaryMap, SlotMap};
 
 use crate::clipboard::{Clipboard, LastCopy, MemoryClipboard};
@@ -21,6 +22,18 @@ slotmap::new_key_type! {
     /// Identifiant stable d'un document ouvert. Il reste valide tant que le document est ouvert,
     /// et n'est jamais réutilisé pour un autre document.
     pub struct DocumentId;
+}
+
+/// Met un fichier ou un dossier à la corbeille de l'OS.
+pub type TrashFn = Box<dyn FnMut(&Path) -> io::Result<()> + Send>;
+
+/// Corbeille fournie par l'application.
+struct Trash(TrashFn);
+
+impl std::fmt::Debug for Trash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Trash")
+    }
 }
 
 /// Crans de zoom de l'interface, de 50 % à 300 %.
@@ -41,17 +54,30 @@ pub struct Editor {
     documents: SlotMap<DocumentId, Document>,
     active: Option<DocumentId>,
     workspace: Workspace,
+    /// Document affiché par chaque panneau éditeur.
+    pub(crate) panel_documents: BTreeMap<PanelId, DocumentId>,
+    /// Défilement à donner aux vues des panneaux (session restaurée, ou mémorisé pour la
+    /// session).
+    pub(crate) panel_scrolls: BTreeMap<PanelId, crate::session::ScrollPosition>,
+    /// Types de panneaux connus (intégrés, puis ceux de l'interface et des plugins).
+    panel_kinds: BTreeSet<String>,
     commands: CommandRegistry,
     keymap: Keymap,
     config: Config,
     config_path: Option<PathBuf>,
+    /// Dossier des layouts nommés (un sous-dossier par projet).
+    layouts_dir: Option<PathBuf>,
     events: EventBus,
     /// État déjà publié : (révision, enregistrements) de chaque document, et document actif.
     published: SecondaryMap<DocumentId, (u64, u64)>,
     published_active: Option<DocumentId>,
     /// Nombre de lignes d'une page, pour `edit move page-up` : fourni par la vue.
     page_lines: usize,
+    /// Géométrie des zones : fournie par l'interface.
+    pub(crate) layout_metrics: crate::panels::LayoutMetrics,
     clipboard: Box<dyn Clipboard>,
+    /// Corbeille de l'OS, fournie par l'application.
+    trash: Trash,
     /// Dernière copie faite dans l'IDE, pour redistribuer ses fragments entre les curseurs.
     last_copy: Option<LastCopy>,
     /// Zoom de l'interface (1 : taille normale), multiplié par l'échelle de l'écran.
@@ -80,6 +106,8 @@ impl Editor {
             .expect("les commandes intégrées ont des noms uniques");
         editor.keymap = Keymap::with_defaults(Platform::current());
         editor.config_path = config::default_path();
+        editor.layouts_dir = directories::ProjectDirs::from("", "", "cupride")
+            .map(|dirs| dirs.data_dir().join("layouts"));
         editor
     }
 
@@ -90,15 +118,29 @@ impl Editor {
             documents: SlotMap::with_key(),
             active: None,
             workspace: Workspace::new(),
+            panel_documents: BTreeMap::new(),
+            panel_scrolls: BTreeMap::new(),
+            panel_kinds: [PanelKind::EDITOR, PanelKind::EXPLORER]
+                .into_iter()
+                .map(ToOwned::to_owned)
+                .collect(),
             commands: CommandRegistry::new(),
             keymap: Keymap::new(),
             config: Config::default(),
             config_path: None,
+            layouts_dir: None,
             events: EventBus::new(),
             published: SecondaryMap::new(),
             published_active: None,
             page_lines: DEFAULT_PAGE_LINES,
+            layout_metrics: crate::panels::LayoutMetrics::default(),
             clipboard: Box::new(MemoryClipboard::default()),
+            trash: Trash(Box::new(|_| {
+                Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "corbeille indisponible",
+                ))
+            })),
             last_copy: None,
             zoom: 1.0,
             project: None,
@@ -109,11 +151,27 @@ impl Editor {
         }
     }
 
-    /// Ouvre le fichier `path` et en fait le document actif. Si ce fichier est déjà ouvert (même
-    /// sous un autre chemin menant au même fichier), le document existant est réutilisé.
+    /// Ouvre le fichier `path` et en fait le document actif, affiché dans la zone active. Si ce
+    /// fichier est déjà ouvert (même sous un autre chemin menant au même fichier), le document
+    /// existant est réutilisé.
     pub fn open(&mut self, path: impl AsRef<Path>) -> Result<DocumentId, DocumentError> {
-        let path = normalize(path.as_ref()).map_err(|source| DocumentError::Io {
-            path: path.as_ref().to_owned(),
+        let id = self.load(path.as_ref())?;
+        self.show_document(id);
+        Ok(id)
+    }
+
+    /// Comme [`Editor::open`], dans l'onglet d'aperçu de la zone active si l'option
+    /// `[tabs] preview` est activée (voir [`Editor::show_document_preview`]).
+    pub fn open_preview(&mut self, path: impl AsRef<Path>) -> Result<DocumentId, DocumentError> {
+        let id = self.load(path.as_ref())?;
+        self.show_document_preview(id);
+        Ok(id)
+    }
+
+    /// Document du fichier `path` : celui déjà ouvert, ou un nouveau, sans l'afficher.
+    pub(crate) fn load(&mut self, path: &Path) -> Result<DocumentId, DocumentError> {
+        let path = normalize(path).map_err(|source| DocumentError::Io {
+            path: path.to_owned(),
             source,
         })?;
         let id = match self.find_by_path(&path) {
@@ -124,27 +182,41 @@ impl Editor {
                 self.documents.insert(document)
             }
         };
-        self.active = Some(id);
-        self.flush_events();
         Ok(id)
     }
 
-    /// Crée un document vide sans fichier et en fait le document actif.
+    /// Crée un document vide sans fichier et en fait le document actif, dans un nouvel onglet.
     pub fn new_document(&mut self) -> DocumentId {
-        let mut document = Document::new();
-        document.set_line_ending(self.config.editor.line_ending.for_new_document());
-        self.configure(&mut document);
-        let id = self.documents.insert(document);
-        self.active = Some(id);
-        self.flush_events();
+        let id = self.create_document();
+        self.show_document(id);
         id
     }
 
-    /// Ajoute un document déjà construit et en fait le document actif.
+    /// Crée un document vide sans fichier, sans l'afficher (le montrer ensuite avec
+    /// [`Editor::show_document`] ou dans un panneau choisi).
+    pub fn create_document(&mut self) -> DocumentId {
+        let mut document = Document::new();
+        document.set_line_ending(self.config.editor.line_ending.for_new_document());
+        self.configure(&mut document);
+        self.documents.insert(document)
+    }
+
+    /// Types de panneaux connus : `editor`, `explorer`, puis ceux ajoutés par l'interface et les
+    /// plugins.
+    pub fn panel_kinds(&self) -> impl Iterator<Item = &str> {
+        self.panel_kinds.iter().map(String::as_str)
+    }
+
+    /// Fait connaître le type de panneau `kind` (fourni par l'interface ou un plugin), pour
+    /// `panel open`.
+    pub fn register_panel_kind(&mut self, kind: impl Into<String>) {
+        self.panel_kinds.insert(kind.into());
+    }
+
+    /// Ajoute un document déjà construit et en fait le document actif, dans un nouvel onglet.
     pub fn insert_document(&mut self, document: Document) -> DocumentId {
         let id = self.documents.insert(document);
-        self.active = Some(id);
-        self.flush_events();
+        self.show_document(id);
         id
     }
 
@@ -157,15 +229,31 @@ impl Editor {
             .map(|(id, _)| id)
     }
 
-    /// Ferme le document `id` et le renvoie. Si c'était le document actif, le dernier document
-    /// ouvert devient actif.
+    /// Ferme le document `id`, et les panneaux qui l'affichent, et le renvoie. Si c'était le
+    /// document actif, celui du panneau qui reçoit le focus le devient.
     pub fn close(&mut self, id: DocumentId) -> Option<Document> {
+        self.documents.get(id)?;
+        for panel in self.panels_showing(id) {
+            self.remove_panel(panel);
+        }
+        let document = self.remove_document(id);
+        self.sync_active_document();
+        self.flush_events();
+        document
+    }
+
+    /// Retire le document `id`, sans toucher aux panneaux.
+    pub(crate) fn remove_document(&mut self, id: DocumentId) -> Option<Document> {
         let document = self.documents.remove(id)?;
         if self.active == Some(id) {
-            self.active = self.documents.keys().last();
+            self.active = None;
         }
-        self.flush_events();
         Some(document)
+    }
+
+    /// Change le document actif, sans toucher aux panneaux.
+    pub(crate) fn set_active_raw(&mut self, id: Option<DocumentId>) {
+        self.active = id;
     }
 
     /// Document `id`.
@@ -203,15 +291,10 @@ impl Editor {
         self.documents.get_mut(self.active?)
     }
 
-    /// Fait de `id` le document actif. Renvoie `false` si ce document n'existe pas.
+    /// Fait de `id` le document actif, affiché dans la zone active. Renvoie `false` si ce
+    /// document n'existe pas.
     pub fn set_active(&mut self, id: DocumentId) -> bool {
-        if self.documents.contains_key(id) {
-            self.active = Some(id);
-            self.flush_events();
-            true
-        } else {
-            false
-        }
+        self.show_document(id).is_some()
     }
 
     /// Registre des commandes.
@@ -269,6 +352,7 @@ impl Editor {
     /// modifiés, enregistrés, fermés, puis changement de document actif. Appelé automatiquement
     /// après chaque commande et chaque ouverture, fermeture ou activation.
     pub fn flush_events(&mut self) {
+        self.keep_modified_previews();
         let mut events = Vec::new();
         for (id, document) in &self.documents {
             let now = (document.revision(), document.save_count());
@@ -329,6 +413,16 @@ impl Editor {
     /// Change l'emplacement du fichier de configuration.
     pub fn set_config_path(&mut self, path: Option<PathBuf>) {
         self.config_path = path;
+    }
+
+    /// Dossier des layouts nommés (par défaut, `layouts/` dans le dossier de données de l'OS).
+    pub fn layouts_dir(&self) -> Option<&Path> {
+        self.layouts_dir.as_deref()
+    }
+
+    /// Change le dossier des layouts nommés.
+    pub fn set_layouts_dir(&mut self, dir: Option<PathBuf>) {
+        self.layouts_dir = dir;
     }
 
     /// Applique une configuration : raccourcis par défaut complétés par ceux de l'utilisateur,
@@ -500,6 +594,16 @@ impl Editor {
         self.clipboard = clipboard;
     }
 
+    /// Met `path` à la corbeille de l'OS.
+    pub fn trash(&mut self, path: &Path) -> io::Result<()> {
+        (self.trash.0)(path)
+    }
+
+    /// Fournit la corbeille : l'application y met celle de l'OS. Sans elle, supprimer est refusé.
+    pub fn set_trash(&mut self, trash: TrashFn) {
+        self.trash = Trash(trash);
+    }
+
     pub(crate) fn last_copy(&self) -> Option<&LastCopy> {
         self.last_copy.as_ref()
     }
@@ -516,6 +620,16 @@ impl Editor {
     /// Change le nombre de lignes d'une page : l'interface y met le nombre de lignes visibles.
     pub fn set_page_lines(&mut self, lines: usize) {
         self.page_lines = lines.max(1);
+    }
+
+    /// Géométrie des zones, pour le redimensionnement au clavier et la navigation.
+    pub fn layout_metrics(&self) -> crate::panels::LayoutMetrics {
+        self.layout_metrics
+    }
+
+    /// Change la géométrie des zones : l'interface y met la place réelle des zones.
+    pub fn set_layout_metrics(&mut self, metrics: crate::panels::LayoutMetrics) {
+        self.layout_metrics = metrics;
     }
 
     /// Fenêtres et layout.

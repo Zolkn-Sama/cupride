@@ -13,6 +13,12 @@ mod registry;
 pub use error::CommandError;
 pub use registry::{CommandDef, CommandRegistry, Handler};
 
+/// Argument entre guillemets si besoin, pour composer une ligne de commande (`file open 'mon
+/// fichier.rs'`).
+pub fn quote(argument: &str) -> String {
+    shlex::try_quote(argument).map_or_else(|_| argument.to_owned(), |q| q.into_owned())
+}
+
 /// Résultat d'une commande.
 pub type CommandResult = Result<CommandOutput, CommandError>;
 

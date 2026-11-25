@@ -68,6 +68,29 @@ colonne, en caractères affichés, et taille de la sélection), `line_ending` (`
 `encoding` (`UTF-8`, `UTF-8 BOM`), `language` (d'après l'extension). Un nom inconnu est signalé
 et ignoré. Les plugins pourront ajouter leurs propres éléments.
 
+### `[tabs]`
+
+| Option | Valeurs | Défaut | Effet |
+|---|---|---|---|
+| `preview` | `true`, `false` | `false` | Onglet d'aperçu : un fichier ouvert depuis l'ouverture rapide ou l'explorateur remplace l'onglet d'aperçu de la zone au lieu d'en ajouter un. L'onglet d'aperçu (nom en gris) est gardé dès que le document est modifié, avec `tab keep` ou un double clic. |
+
+### `[session]`
+
+| Option | Valeurs | Défaut | Effet |
+|---|---|---|---|
+| `restore` | `true`, `false` | `true` | Au lancement, l'espace de travail du projet est restauré tel qu'il était à la fermeture : zones et proportions, onglets, fichiers, curseurs et défilement. `cupride --no-restore` démarre sans le restaurer. |
+
+La session est enregistrée à la fermeture, en JSON, dans le dossier de données de l'OS
+(`sessions/`), une par projet (le dossier ouvert avec `cupride <dossier>`). Les documents sans
+fichier n'y sont pas gardés. Un fichier supprimé entre-temps : son panneau est fermé, et une
+notification le signale.
+
+### `[explorer]`
+
+| Option | Valeurs | Défaut | Effet |
+|---|---|---|---|
+| `ignored` | `"dim"`, `"hide"`, `"show"` | `"dim"` | Fichiers ignorés par `.gitignore` et `.ignore` dans l'explorateur : en gris, masqués, ou comme les autres. Le dossier `.git` n'est jamais affiché. |
+
 ### `[keys]`
 
 Raccourcis : `"touches" = "ligne de commande"`. Ils s'ajoutent aux raccourcis par défaut et les
@@ -125,7 +148,27 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `file save` | `Ctrl+S` | `Cmd+S` |
 | `ui command-line 'file save-as '` | `Ctrl+Maj+S` | `Cmd+Maj+S` |
 | `ui command-line 'file open '` | `Ctrl+O` | `Cmd+O` |
-| `file close` | `Ctrl+W`, `Ctrl+K Ctrl+W` | `Cmd+W`, `Cmd+K Cmd+W` |
+| `panel close` | `Ctrl+W` | `Cmd+W` |
+| `tab next` | `Ctrl+Tab`, `Ctrl+Page suiv.` | `Ctrl+Tab`, `Ctrl+Page suiv.` |
+| `tab previous` | `Ctrl+Maj+Tab`, `Ctrl+Page préc.` | `Ctrl+Maj+Tab`, `Ctrl+Page préc.` |
+| `tab move-right` | `Ctrl+Maj+Page suiv.` | `Ctrl+Maj+Page suiv.` |
+| `tab move-left` | `Ctrl+Maj+Page préc.` | `Ctrl+Maj+Page préc.` |
+| `split right` | `Ctrl+\` | `Cmd+\` |
+| `split down` | `Ctrl+K Ctrl+\` | `Cmd+K Cmd+\` |
+| `explorer show` | `Ctrl+Maj+E` | `Cmd+Maj+E` |
+| `panel focus left` | `Ctrl+K Ctrl+←` | `Cmd+K Cmd+←` |
+| `panel focus right` | `Ctrl+K Ctrl+→` | `Cmd+K Cmd+→` |
+| `panel focus up` | `Ctrl+K Ctrl+↑` | `Cmd+K Cmd+↑` |
+| `panel focus down` | `Ctrl+K Ctrl+↓` | `Cmd+K Cmd+↓` |
+| `panel move left` | `Ctrl+K Alt+←` | `Cmd+K Option+←` |
+| `panel move right` | `Ctrl+K Alt+→` | `Cmd+K Option+→` |
+| `panel move up` | `Ctrl+K Alt+↑` | `Cmd+K Option+↑` |
+| `panel move down` | `Ctrl+K Alt+↓` | `Cmd+K Option+↓` |
+| `panel resize wider` | `Ctrl+K Ctrl+Maj+→` | `Cmd+K Cmd+Maj+→` |
+| `panel resize narrower` | `Ctrl+K Ctrl+Maj+←` | `Cmd+K Cmd+Maj+←` |
+| `panel resize taller` | `Ctrl+K Ctrl+Maj+↓` | `Cmd+K Cmd+Maj+↓` |
+| `panel resize shorter` | `Ctrl+K Ctrl+Maj+↑` | `Cmd+K Cmd+Maj+↑` |
+| `file close` | `Ctrl+K Ctrl+W` | `Cmd+K Cmd+W` |
 | `view zoom-in` | `Ctrl+=`, `Ctrl+Maj+=`, `Ctrl++` | `Cmd+=`, `Cmd+Maj+=`, `Cmd++` |
 | `view zoom-out` | `Ctrl+-` | `Cmd+-` |
 | `view zoom-reset` | `Ctrl+0` | `Cmd+0` |
@@ -230,6 +273,22 @@ Les fichiers des thèmes intégrés servent d'exemples complets :
 # de curseurs), "position" (ligne et colonne), "line_ending", "encoding", "language".
 # left = ["file", "modified", "keys"]
 # right = ["selections", "position", "line_ending", "encoding", "language"]
+
+[tabs]
+# Onglet d'aperçu : un fichier ouvert depuis l'ouverture rapide ou l'explorateur remplace l'onglet
+# d'aperçu de la zone au lieu d'en ajouter un ; l'onglet est gardé dès qu'on modifie le document
+# (ou avec « tab keep »).
+# preview = false
+
+[session]
+# Au lancement, l'espace de travail du projet (zones, onglets, fichiers, curseurs, défilement)
+# est restauré tel qu'il était à la fermeture. « cupride --no-restore » démarre sans le restaurer.
+# restore = true
+
+[explorer]
+# Fichiers ignorés (.gitignore, .ignore) : "dim" (affichés en gris), "hide" (masqués) ou
+# "show" (affichés comme les autres). Le dossier .git n'est jamais affiché.
+# ignored = "dim"
 
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les

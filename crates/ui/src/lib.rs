@@ -14,8 +14,13 @@
 //!
 //! Éléments :
 //!
+//! - [`PanelView`] : interface commune des vues de panneaux ; [`ViewRegistry`] : fabrique de la
+//!   vue de chaque type de panneau ; [`PanelViews`] : une vue par panneau, et place de chaque zone
+//!   du layout dans la fenêtre.
 //! - [`EditorView`] : vue d'un document ; seules les lignes visibles sont mises en forme ;
-//!   sélections, curseurs et ligne courante ; défilement animé et vue qui suit le curseur.
+//!   sélections, curseurs et ligne courante ; défilement animé et vue qui suit le curseur. Un
+//!   même document affiché dans deux panneaux a deux vues, chacune avec son défilement et ses
+//!   curseurs.
 //! - [`GutterMarker`] : marqueur de la gouttière (diagnostic, Git, point d'arrêt), à côté des
 //!   numéros de ligne.
 //! - [`MouseSelection`] : clics simples, doubles et triples, glisser, Maj+clic et Alt+clic.
@@ -23,6 +28,8 @@
 //! - [`StatusBar`] : barre d'état, faite d'éléments nommés ([`StatusElements`]) choisis par la
 //!   configuration.
 //! - [`Toasts`] : notifications affichées quelques secondes en bas à droite.
+//! - [`ExplorerView`] : explorateur de fichiers ; [`ExplorerTree`] : son arborescence, chargée
+//!   à la demande, fichiers ignorés repérés, tenue à jour quand le disque change.
 //! - [`Picker`] : recherche floue ([`Fuzzy`], moteur `nucleo`) dans une liste, pour la palette de
 //!   commandes et l'ouverture rapide.
 //! - [`CursorBlink`] : clignotement du curseur, arrêté au repos.
@@ -30,6 +37,7 @@
 mod blink;
 mod command_line;
 mod editor_view;
+mod explorer;
 mod focus;
 mod fuzzy;
 mod gutter;
@@ -37,6 +45,7 @@ mod history;
 mod label;
 pub mod layout;
 mod mouse;
+mod panels;
 mod picker;
 mod scroll;
 mod status_bar;
@@ -48,12 +57,17 @@ mod toasts;
 pub use blink::{BLINK_IDLE_STOP, CursorBlink};
 pub use command_line::{CommandLine, MessageKind};
 pub use editor_view::{EditorView, Pointer, Preedit, ViewSettings, WHEEL_LINES};
+pub use explorer::{Entry, ExplorerTree, ExplorerView, Row};
 pub use focus::Focus;
 pub use fuzzy::{Found, Fuzzy};
 pub use gutter::GutterMarker;
 pub use history::{CommandHistory, HISTORY_LIMIT};
 pub use label::Label;
 pub use mouse::{ClickCounter, ClickModifiers, MULTI_CLICK_DELAY, MouseSelection};
+pub use panels::{
+    PanelContext, PanelView, PanelViews, Tab, ViewAction, ViewFactory, ViewRegistry, Zone,
+    panel_title,
+};
 pub use picker::{MAX_ROWS, Picker, PickerItem};
 pub use status_bar::{StatusBar, StatusContext, StatusElement, StatusElements};
 pub use style::Style;

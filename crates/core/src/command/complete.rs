@@ -222,7 +222,10 @@ mod tests {
     fn aide_de_la_commande_en_cours() {
         let editor = Editor::new();
         let hint = help_hint(editor.commands(), "file open src").unwrap();
-        assert!(hint.starts_with("file open <chemin> —"), "{hint}");
+        assert!(
+            hint.starts_with("file open <chemin> [--preview] —"),
+            "{hint}"
+        );
         assert_eq!(help_hint(editor.commands(), "file"), None);
     }
 

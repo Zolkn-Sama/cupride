@@ -8,6 +8,7 @@ mod file_index;
 mod input;
 mod latency;
 mod logging;
+mod watcher;
 
 use anyhow::Context;
 use cupride_core::Editor;
@@ -16,8 +17,8 @@ use winit::event_loop::{ControlFlow, EventLoop};
 
 fn main() -> anyhow::Result<()> {
     // La ligne de commande d'abord : --help et --version n'ouvrent ni journal ni fenêtre.
-    let paths = match cli::parse(std::env::args_os().skip(1)) {
-        cli::Cli::Run(paths) => paths,
+    let launch = match cli::parse(std::env::args_os().skip(1)) {
+        cli::Cli::Run(launch) => launch,
         cli::Cli::Print(text) => {
             print!("{text}");
             return Ok(());
@@ -33,13 +34,21 @@ fn main() -> anyhow::Result<()> {
 
     let mut editor = Editor::new();
     editor.set_clipboard(clipboard::SystemClipboard::new_or_memory());
+    // Supprimer depuis l'explorateur met à la corbeille de l'OS.
+    editor.set_trash(Box::new(|path| {
+        trash::delete(path).map_err(std::io::Error::other)
+    }));
     for message in editor.reload_config() {
         tracing::warn!("configuration : {message}");
         editor.notify(Level::Warning, format!("configuration : {message}"));
     }
 
-    // Un fichier ou un dossier illisible n'empêche pas de démarrer : il est signalé.
-    let problems = cli::open(&mut editor, &paths);
+    // Un fichier ou un dossier illisible n'empêche pas de démarrer : il est signalé, comme un
+    // fichier de la session supprimé entre-temps.
+    let sessions = (launch.restore && editor.config().session.restore)
+        .then(cupride_core::session::sessions_dir)
+        .flatten();
+    let problems = cli::open(&mut editor, &launch.paths, sessions.as_deref());
     for problem in problems {
         tracing::warn!("{problem}");
         editor.notify(Level::Warning, problem);

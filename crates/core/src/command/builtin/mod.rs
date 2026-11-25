@@ -2,9 +2,13 @@
 
 mod config;
 mod edit;
+mod explorer;
 mod file;
 mod keys;
+mod layout;
 mod notifications;
+mod panel;
+mod tab;
 mod theme;
 mod ui;
 mod view;
@@ -23,6 +27,10 @@ pub(crate) fn register_all(registry: &mut CommandRegistry) -> Result<(), Command
     notifications::register(registry)?;
     keys::register(registry)?;
     theme::register(registry)?;
+    panel::register(registry)?;
+    tab::register(registry)?;
+    layout::register(registry)?;
+    explorer::register(registry)?;
     Ok(())
 }
 

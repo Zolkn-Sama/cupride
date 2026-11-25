@@ -31,7 +31,11 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
             "Ouvre un fichier (créé au premier enregistrement s'il n'existe pas)",
             |editor, args| {
                 let path: &PathBuf = args.get_one("chemin").expect("argument requis");
-                let id = editor.open(path)?;
+                let id = if args.get_flag("preview") {
+                    editor.open_preview(path)?
+                } else {
+                    editor.open(path)?
+                };
                 let name = editor
                     .document(id)
                     .map(|d| d.display_name())
@@ -39,7 +43,13 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
                 Ok(CommandOutput::message(format!("« {name} » ouvert")))
             },
         )
-        .arg(path_arg("Fichier à ouvrir")),
+        .arg(path_arg("Fichier à ouvrir"))
+        .arg(
+            Arg::new("preview")
+                .long("preview")
+                .action(ArgAction::SetTrue)
+                .help("Ouvre dans l'onglet d'aperçu, si l'option [tabs] preview est activée"),
+        ),
     )?;
 
     registry.register(CommandDef::new(

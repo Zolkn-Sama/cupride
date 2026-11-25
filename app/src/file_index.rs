@@ -24,6 +24,8 @@ const FRESH_FOR: Duration = Duration::from_secs(10);
 pub(crate) enum AppEvent {
     /// Des fichiers ont été indexés.
     FilesIndexed,
+    /// Des fichiers ou dossiers surveillés ont changé sur le disque.
+    FilesChanged,
 }
 
 /// Ce que le thread d'indexation envoie.

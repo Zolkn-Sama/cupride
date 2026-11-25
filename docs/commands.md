@@ -11,16 +11,22 @@ Toute action de CuprIDE est une commande. Une même commande est accessible depu
 ## Lancement
 
 ```
-cupride [chemin…]
+cupride [--no-restore] [chemin…]
 ```
 
 | Appel | Effet |
 |---|---|
-| `cupride` | Document vide. |
+| `cupride` | Session restaurée, sinon document vide. |
 | `cupride src/main.rs` | Ouvre le fichier. Un fichier inexistant ouvre un nouveau document avec ce chemin, créé au premier enregistrement. |
 | `cupride .` | Ouvre le dossier comme projet (son nom s'affiche dans le titre). |
 | `cupride . a.rs b.rs` | Dossier du projet et fichiers ; le premier fichier est actif. |
+| `cupride --no-restore` | Démarre sans restaurer l'espace de travail du projet. |
 | `cupride --help`, `cupride --version` | Aide, version. |
+
+L'espace de travail du projet (zones, onglets, fichiers, curseurs, défilement) est restauré tel
+qu'il était à la fermeture, sauf avec `--no-restore` ou l'option `[session] restore = false` (voir
+la [configuration](configuration.md#session)) ; les fichiers demandés s'y ajoutent, dans la zone
+active. Un fichier supprimé entre-temps : son panneau est fermé, et une notification le signale.
 
 Un fichier illisible (binaire, non UTF-8) n'empêche pas de démarrer : il est signalé dans le
 titre de la fenêtre et dans le journal. Une option inconnue arrête le lancement avec le code 2.
@@ -47,10 +53,10 @@ pendant l'écriture laisse toujours l'ancien fichier intact.
 
 | Commande | Description |
 |---|---|
-| `file open <chemin>` | Ouvre un fichier et en fait le document actif. Un fichier déjà ouvert n'est pas dupliqué : son document redevient actif. Un fichier inexistant est créé au premier enregistrement. Fichier binaire ou non UTF-8 : refusé, jamais modifié. |
+| `file open <chemin> [--preview]` | Ouvre un fichier et en fait le document actif, dans un onglet de la zone active (`--preview` : dans l'onglet d'aperçu, voir [`tab`](#tab--onglets)). Un fichier déjà ouvert n'est pas dupliqué : son document redevient actif. Un fichier inexistant est créé au premier enregistrement. Fichier binaire ou non UTF-8 : refusé, jamais modifié. |
 | `file save` | Enregistre le document actif, en conservant ses fins de ligne. Un document sans fichier demande `file save-as`. |
 | `file save-as <chemin>` | Enregistre le document actif sous `<chemin>`, qui devient son fichier. |
-| `file close [--force]` | Ferme le document actif. S'il a des modifications non enregistrées, la commande échoue, sauf avec `--force`. |
+| `file close [--force]` | Ferme le document actif, et tous les panneaux qui l'affichent. S'il a des modifications non enregistrées, la commande échoue, sauf avec `--force`. |
 | `file reload [--force]` | Relit le document actif depuis le disque ; l'historique est vidé. Mêmes règles que `file close` pour les modifications non enregistrées. |
 | `file list` | Liste les documents ouverts : `>` marque le document actif, `*` un document modifié. |
 
@@ -204,18 +210,126 @@ erreur aussi (erreur), comme les avertissements de configuration et de fermeture
 | `window move --monitor N` | Déplace la fenêtre active sur l'écran `N` | WIN |
 | `window list-monitors` | Liste les écrans : nom, résolution, échelle | WIN |
 
+## `split` — diviser l'espace
+
+Chaque commande divise la zone active en deux : le document actif s'ouvre aussi dans la nouvelle
+zone, qui prend le focus. C'est le même document en mémoire, avec ses propres curseurs et son
+propre défilement dans chaque zone. Sans document, la nouvelle zone reçoit un document vide.
+
+| Commande | Description |
+|---|---|
+| `split right` | Nouvelle zone à droite de la zone active (`mod+\`). |
+| `split down` | Nouvelle zone sous la zone active (`mod+k mod+\`). |
+| `split left` | Nouvelle zone à gauche de la zone active. |
+| `split up` | Nouvelle zone au-dessus de la zone active. |
+
+Une zone est divisée dans le sens de son split quand elle en a déjà un : trois `split right` de
+suite donnent quatre colonnes, pas des splits imbriqués.
+
+## `tab` — onglets
+
+Chaque zone est un groupe d'onglets ; ces commandes agissent sur la zone active. Le titre d'un
+onglet est le nom de son document, suivi de ● s'il a des modifications non enregistrées. Un clic
+affiche l'onglet, un clic du milieu le ferme (comme `panel close`).
+
+| Commande | Description |
+|---|---|
+| `tab next` | Affiche l'onglet suivant ; après le dernier, le premier (`ctrl+tab`, `ctrl+pagedown`). |
+| `tab previous` | Affiche l'onglet précédent (`ctrl+shift+tab`, `ctrl+pageup`). |
+| `tab move-left` | Déplace l'onglet actif d'un rang vers la gauche (`ctrl+shift+pageup`). |
+| `tab move-right` | Déplace l'onglet actif d'un rang vers la droite (`ctrl+shift+pagedown`). |
+| `tab keep` | Garde l'onglet d'aperçu actif (aussi : double clic sur l'onglet, ou modifier le document). |
+
+**Onglet d'aperçu** (option `[tabs] preview`, désactivée par défaut) : un fichier ouvert depuis
+l'ouverture rapide (ou `file open --preview`) remplace l'onglet d'aperçu de la zone au lieu d'en
+ajouter un. Son titre est en italique et en gris. Le document qu'il affichait est fermé s'il
+n'est affiché nulle part ailleurs.
+
 ## `panel` — panneaux
 
-Ouverture, fermeture, découpage et déplacement des panneaux (épic Layout).
+Un panneau a un type : `editor` (un document), `explorer` (fichiers du projet), ou un type fourni
+par un plugin.
+
+| Commande | Description |
+|---|---|
+| `panel open <type> [--split <direction>]` | Ouvre un panneau du type indiqué : en onglet dans la zone active, ou dans une nouvelle zone du côté `left`, `right`, `up` ou `down`. `editor` ouvre le document actif. Un type inconnu est refusé, avec le nom le plus proche. |
+| `panel close [--force]` | Ferme le panneau actif (`mod+w`) ; sa zone disparaît si elle est vide, et sa place revient aux zones voisines. Son document est fermé s'il n'est plus affiché ailleurs : s'il a des modifications non enregistrées, la commande échoue, sauf avec `--force`. |
+| `panel focus <direction>` | Donne le focus à la zone voisine : `left`, `right`, `up` ou `down` (`mod+k` puis `mod+←`, `mod+→`, `mod+↑`, `mod+↓`). Parmi les zones de ce côté, celle qui touche et recouvre le plus la zone active. |
+| `panel move <direction> [--split]` | Déplace le panneau actif (avec son document, ses curseurs et son défilement) dans la zone voisine de ce côté, en onglet ; s'il n'y en a pas, ou avec `--split`, dans une nouvelle zone de ce côté de la zone active. Une zone vidée disparaît. Raccourcis : `mod+k` puis `alt+←`, `→`, `↑`, `↓`. |
+| `panel resize <sens>` | Agrandit ou réduit la zone active de 5 % de la fenêtre : `wider`, `narrower` (largeur), `taller`, `shorter` (hauteur). La place est prise à la zone voisine (la suivante, ou la précédente pour la dernière) ; chaque zone garde une taille minimale (sa barre d'onglets et trois lignes). Raccourcis : `mod+k` puis `mod+shift+→`, `←`, `↓`, `↑`. |
+| `panel list` | Liste les panneaux, zone par zone : `>` marque le panneau actif. |
+
+Le panneau actif se reconnaît à son onglet, souligné en haut de la couleur d'accent ; les titres
+des autres zones sont en gris. Un clic dans une zone lui donne le focus. Les séparations entre
+les zones se glissent à la souris (le pointeur change au-dessus), dans la limite de la taille
+minimale des zones.
+
+Un onglet se déplace aussi par **glisser-déposer** : lâché sur une barre d'onglets ou au centre
+d'une zone, il y devient un onglet ; lâché près d'un bord d'une zone (le quart le plus proche), il
+crée une nouvelle zone de ce côté. Pendant le glisser, la place qu'il prendrait est surlignée.
+
+Exemples :
+
+```
+panel open explorer --split left
+panel open editor --split down
+```
+
+## `explorer` — explorateur de fichiers
+
+L'explorateur affiche l'arborescence du projet (le dossier ouvert avec `cupride <dossier>`, sinon
+le dossier courant). Chaque dossier n'est lu qu'au moment où on le déplie, et l'arborescence se met
+à jour d'elle-même quand le disque change (dossiers affichés surveillés avec `notify`). Les fichiers
+ignorés par `.gitignore` et `.ignore` sont en gris, ou masqués (option `[explorer] ignored`) ; le
+dossier `.git` n'est jamais affiché.
+
+| Commande | Description |
+|---|---|
+| `explorer show` | Affiche l'explorateur et lui donne le focus ; s'il n'est pas ouvert, il s'ouvre à gauche, sur une colonne étroite (`mod+shift+e`). |
+| `explorer reveal` | Montre le document actif dans l'explorateur : dossiers parents dépliés, fichier sélectionné. |
+| `explorer new-file <chemin>` | Crée un fichier vide (jamais par-dessus un fichier existant) et l'ouvre. |
+| `explorer new-folder <chemin>` | Crée un dossier. |
+| `explorer rename <source> <cible>` | Renomme un fichier ou un dossier, jamais par-dessus un fichier existant ; les documents ouverts suivent leur fichier. |
+| `explorer move <source> <cible>` | Déplace un fichier ou un dossier ; une cible qui est un dossier existant le reçoit. Les documents ouverts suivent. |
+| `explorer delete <chemin>` | Met un fichier ou un dossier à la corbeille de l'OS. Les documents de ces fichiers sont fermés, sauf ceux qui ont des modifications non enregistrées. |
+
+Un chemin relatif part du dossier du projet. Dans l'explorateur, tout se fait au clavier :
+
+| Touche | Effet |
+|---|---|
+| `↑`, `↓`, `Page préc.`, `Page suiv.`, `Début`, `Fin` | Déplace la sélection. |
+| `→` | Déplie le dossier, ou descend sur son premier enfant. |
+| `←` | Replie le dossier, ou remonte sur le dossier parent. |
+| `Entrée` | Ouvre le fichier, ou plie et déplie le dossier. |
+| `Espace` | Ouvre le fichier dans l'onglet d'aperçu (option `[tabs] preview`). |
+| `F2` | `explorer rename`, prérempli dans la ligne de commande. |
+| `Suppr` (`Cmd+Retour arrière` sous macOS) | `explorer delete`, prérempli : Entrée confirme. |
+| `n`, `Maj+N` | `explorer new-file` ou `new-folder`, dans le dossier sélectionné. |
+| `m` | `explorer move`, prérempli. |
+
+Les autres raccourcis (`mod+p`, `mod+shift+p`…) restent actifs. À la souris : un clic plie ou
+déplie un dossier, et ouvre un fichier en aperçu ; un double clic l'ouvre dans un onglet gardé.
 
 ## `layout` — layouts nommés
 
-| Commande | Description | Issue |
-|---|---|---|
-| `layout save <nom>` | Enregistre le layout courant | LAYOUT |
-| `layout load <nom>` | Restaure un layout enregistré | LAYOUT |
-| `layout list` | Liste les layouts enregistrés | LAYOUT |
-| `layout delete <nom>` | Supprime un layout enregistré | LAYOUT |
+Un layout nommé garde une disposition complète — zones et proportions, onglets, fichiers,
+curseurs, défilement — pour basculer en une commande entre écriture, débogage et revue. Les
+layouts sont enregistrés en JSON dans le dossier de données de l'OS, par projet
+(`layouts/<projet>/<nom>.json`).
+
+| Commande | Description |
+|---|---|
+| `layout save <nom>` | Enregistre la disposition actuelle sous ce nom (remplace un layout du même nom). Nom : lettres, chiffres, espaces, `-` et `_`. Les documents sans fichier n'y sont pas gardés. |
+| `layout load <nom> [--force]` | Remplace la disposition actuelle par le layout. Les documents qu'il n'affiche pas sont fermés ; un document modifié ne l'est **jamais** sans confirmation : la commande échoue en le nommant, sauf avec `--force`, qui abandonne ses modifications. Un fichier supprimé depuis : son panneau est fermé, avec une notification. |
+| `layout list` | Liste les layouts enregistrés pour ce projet. |
+| `layout delete <nom>` | Supprime un layout enregistré. |
+
+Exemples :
+
+```
+layout save "revue de code"
+layout load écriture
+```
 
 ## `pkg` — paquets
 

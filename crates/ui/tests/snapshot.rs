@@ -265,3 +265,112 @@ fn palette() {
     let pixels = target.read_rgba(&gpu).expect("relecture de l'image");
     save_png("palette", (width, height), &pixels);
 }
+
+/// Fenêtre divisée : deux zones sur le même document (curseurs propres à chacune), des onglets,
+/// un onglet modifié et un onglet d'aperçu.
+#[test]
+fn zones_et_onglets() {
+    use cupride_core::NewPanel;
+    use cupride_core::layout::Direction;
+    use cupride_render::Frame;
+    use cupride_ui::{PanelViews, ViewRegistry};
+
+    let gpu = match Gpu::headless() {
+        Ok(gpu) => gpu,
+        Err(error) => {
+            eprintln!("test ignoré, pas de GPU : {error}");
+            return;
+        }
+    };
+    let (width, height) = (900_u32, 300_u32);
+    let target = OffscreenTarget::new(&gpu, width, height);
+    let mut renderer = Renderer::new(&gpu, OFFSCREEN_FORMAT);
+    let mut text = TextSystem::new();
+    let mut editor = Editor::new();
+    let mut config = editor.config().clone();
+    config.tabs.preview = true;
+    editor.apply_config(config);
+    let doc = editor.insert_document(Document::from_text(
+        "fn main() {\n    let message = \"bonjour\";\n    println!(\"{message}\");\n}\n",
+    ));
+    editor.execute("edit move doc-end").unwrap();
+    editor
+        .open_editor_panel(doc, NewPanel::Split(Direction::Right))
+        .unwrap();
+    editor.execute("edit insert '// modifié'").unwrap();
+    let other = editor.create_document();
+    editor.show_document_preview(other);
+    editor.show_document(doc);
+
+    let mut views = PanelViews::new(ViewRegistry::default(), ViewSettings::default(), 1.0);
+    let theme = Theme::default();
+    views.layout(
+        &mut text,
+        &editor,
+        Rect::new(0.0, 0.0, width as f32, height as f32),
+    );
+    views.prepare(&mut text, &editor, &theme, true, true);
+    let mut frame = Frame::new(theme.background);
+    views.draw(frame.base(), &editor, &theme, true, true);
+    renderer
+        .render(&gpu, &mut text, &target.view, target.size(), &frame)
+        .expect("rendu");
+    let pixels = target.read_rgba(&gpu).expect("relecture de l'image");
+    save_png("zones_et_onglets", (width, height), &pixels);
+    assert_eq!(views.zones().len(), 2);
+    assert_eq!(views.zones()[1].tabs.len(), 2);
+}
+
+/// Explorateur à gauche d'un éditeur : dossier déplié, fichier ignoré en gris, sélection.
+#[test]
+fn explorateur() {
+    use cupride_render::Frame;
+    use cupride_ui::{ExplorerView, PanelViews, ViewRegistry};
+
+    let gpu = match Gpu::headless() {
+        Ok(gpu) => gpu,
+        Err(error) => {
+            eprintln!("test ignoré, pas de GPU : {error}");
+            return;
+        }
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("src/util")).unwrap();
+    std::fs::create_dir_all(root.join("target")).unwrap();
+    std::fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+    std::fs::write(root.join("src/lib.rs"), "").unwrap();
+    std::fs::write(root.join("Cargo.toml"), "").unwrap();
+    std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+
+    let (width, height) = (900_u32, 300_u32);
+    let target = OffscreenTarget::new(&gpu, width, height);
+    let mut renderer = Renderer::new(&gpu, OFFSCREEN_FORMAT);
+    let mut text = TextSystem::new();
+    let mut editor = Editor::new();
+    editor.set_project(&root).unwrap();
+    editor.open(root.join("src/main.rs")).unwrap();
+    editor.execute("explorer show").unwrap();
+    let explorer = editor.active_panel().unwrap();
+
+    let mut views = PanelViews::new(ViewRegistry::default(), ViewSettings::default(), 1.0);
+    let theme = Theme::default();
+    let area = Rect::new(0.0, 0.0, width as f32, height as f32);
+    views.layout(&mut text, &editor, area);
+    views.prepare(&mut text, &editor, &theme, true, true);
+    let view = views
+        .view_mut(explorer)
+        .unwrap()
+        .as_any_mut()
+        .downcast_mut::<ExplorerView>()
+        .unwrap();
+    view.reveal(&root.join("src/main.rs"));
+    views.prepare(&mut text, &editor, &theme, true, true);
+    let mut frame = Frame::new(theme.background);
+    views.draw(frame.base(), &editor, &theme, true, true);
+    renderer
+        .render(&gpu, &mut text, &target.view, target.size(), &frame)
+        .expect("rendu");
+    let pixels = target.read_rgba(&gpu).expect("relecture de l'image");
+    save_png("explorateur", (width, height), &pixels);
+}

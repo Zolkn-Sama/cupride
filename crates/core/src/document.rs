@@ -4,7 +4,10 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use cupride_text::{EditKind, History, Rope, Selections, TextBuffer, TextError, Transaction};
+use std::collections::BTreeMap;
+
+use cupride_layout::PanelId;
+use cupride_text::{Edit, EditKind, History, Rope, Selections, TextBuffer, TextError, Transaction};
 use thiserror::Error;
 
 /// Marque d'ordre des octets UTF-8, conservée si le fichier la contenait.
@@ -120,6 +123,13 @@ fn decode(path: &Path, mut bytes: Vec<u8>) -> Result<Decoded, DocumentError> {
 /// Le texte est conservé tel quel, fins de ligne comprises : un fichier enregistré sans
 /// modification est identique à l'octet près. Les nouvelles lignes insérées utilisent la fin de
 /// ligne détectée à l'ouverture.
+///
+/// # Plusieurs vues
+///
+/// Un document affiché dans plusieurs panneaux a des sélections par panneau. Celles de la **vue
+/// courante** (le dernier panneau actif qui l'affiche) sont [`Document::selections`], sur
+/// lesquelles agissent les commandes ; celles des autres vues sont mises de côté et décalées à
+/// chaque modification, pour rester sur le même texte.
 #[derive(Debug)]
 pub struct Document {
     buffer: Rope,
@@ -129,6 +139,10 @@ pub struct Document {
     bom: bool,
     history: History,
     selections: Selections,
+    /// Panneau dont les sélections sont `selections`.
+    view: Option<PanelId>,
+    /// Sélections des autres panneaux qui affichent le document.
+    other_views: BTreeMap<PanelId, Selections>,
     revision: u64,
     saves: u64,
 }
@@ -155,6 +169,8 @@ impl Document {
             bom: false,
             history: History::new(),
             selections: Selections::cursor(0),
+            view: None,
+            other_views: BTreeMap::new(),
             revision: 0,
             saves: 0,
         }
@@ -190,10 +206,16 @@ impl Document {
             .min(reloaded.buffer.len_bytes());
         let (revision, saves) = (self.revision + 1, self.saves);
         let delay = self.history.group_delay();
+        let (view, other_views) = (self.view, std::mem::take(&mut self.other_views));
         *self = reloaded;
         self.revision = revision;
         self.saves = saves;
         self.history.set_group_delay(delay);
+        self.view = view;
+        for (id, selections) in other_views {
+            let selections = self.clamped(selections);
+            self.other_views.insert(id, selections);
+        }
         // Le curseur reste à peu près au même endroit, sur une frontière de caractère.
         let mut cursor = cursor;
         while !self.buffer.is_char_boundary(cursor) {
@@ -268,6 +290,11 @@ impl Document {
         self.path.as_deref()
     }
 
+    /// Change le fichier du document, sans rien écrire : le fichier a été renommé ou déplacé.
+    pub(crate) fn set_path(&mut self, path: PathBuf) {
+        self.path = Some(path);
+    }
+
     /// Nom affiché : nom du fichier, ou « sans titre ».
     pub fn display_name(&self) -> String {
         self.path.as_deref().and_then(Path::file_name).map_or_else(
@@ -304,7 +331,12 @@ impl Document {
 
     /// Remplace les sélections. Elles sont ramenées dans le texte et sur des frontières de
     /// caractère.
-    pub fn set_selections(&mut self, mut selections: Selections) {
+    pub fn set_selections(&mut self, selections: Selections) {
+        self.selections = self.clamped(selections);
+    }
+
+    /// Sélections ramenées dans le texte et sur des frontières de caractère.
+    fn clamped(&self, mut selections: Selections) -> Selections {
         let len = self.buffer.len_bytes();
         let buffer = &self.buffer;
         let clamp = |offset: usize| {
@@ -315,7 +347,54 @@ impl Document {
             offset
         };
         selections.transform(|s| cupride_text::Selection::new(clamp(s.anchor), clamp(s.head)));
-        self.selections = selections;
+        selections
+    }
+
+    /// Sélections affichées dans le panneau `view` : celles de la vue courante, ou celles mises
+    /// de côté pour ce panneau. Un panneau inconnu du document voit les sélections courantes.
+    pub fn selections_in(&self, view: PanelId) -> &Selections {
+        if self.view == Some(view) {
+            return &self.selections;
+        }
+        self.other_views.get(&view).unwrap_or(&self.selections)
+    }
+
+    /// Panneau dont les sélections sont les sélections courantes.
+    pub fn current_view(&self) -> Option<PanelId> {
+        self.view
+    }
+
+    /// Fait du panneau `view` la vue courante : les sélections courantes sont mises de côté pour
+    /// l'ancienne vue, et celles de `view` les remplacent. Un nouveau panneau reprend les
+    /// sélections courantes.
+    pub fn focus_view(&mut self, view: PanelId) {
+        if self.view == Some(view) {
+            return;
+        }
+        let restored = self.other_views.remove(&view);
+        if let Some(old) = self.view {
+            self.other_views.insert(old, self.selections.clone());
+        }
+        if let Some(selections) = restored {
+            self.selections = selections;
+        }
+        self.view = Some(view);
+    }
+
+    /// Oublie le panneau `view`, qui n'affiche plus le document.
+    pub fn remove_view(&mut self, view: PanelId) {
+        if self.view == Some(view) {
+            self.view = None;
+        } else {
+            self.other_views.remove(&view);
+        }
+    }
+
+    /// Décale les sélections des autres vues après les modifications `edits`.
+    fn map_other_views(&mut self, edits: &[Edit]) {
+        for selections in self.other_views.values_mut() {
+            selections.map_all(edits);
+        }
     }
 
     /// Numéro de révision du texte : augmente à chaque changement du texte (modification,
@@ -358,6 +437,7 @@ impl Document {
         }
         let changed = !transaction.is_empty();
         self.selections = transaction.selections_after().clone();
+        self.map_other_views(transaction.edits());
         if changed {
             self.modified = true;
             self.revision += 1;
@@ -369,10 +449,16 @@ impl Document {
     /// Annule la dernière transaction et restaure ses sélections. Renvoie `false` s'il n'y avait
     /// rien à annuler.
     pub fn undo(&mut self) -> Result<bool, TextError> {
+        let edits: Vec<Edit> = self
+            .history
+            .peek_undo()
+            .map(|t| t.edits().iter().rev().map(Edit::inverse).collect())
+            .unwrap_or_default();
         let Some(selections) = self.history.undo(&mut self.buffer)? else {
             return Ok(false);
         };
         self.selections = selections;
+        self.map_other_views(&edits);
         self.modified = true;
         self.revision += 1;
         Ok(true)
@@ -380,10 +466,16 @@ impl Document {
 
     /// Rétablit la dernière transaction annulée. Renvoie `false` s'il n'y avait rien à rétablir.
     pub fn redo(&mut self) -> Result<bool, TextError> {
+        let edits: Vec<Edit> = self
+            .history
+            .peek_redo()
+            .map(|t| t.edits().to_vec())
+            .unwrap_or_default();
         let Some(selections) = self.history.redo(&mut self.buffer)? else {
             return Ok(false);
         };
         self.selections = selections;
+        self.map_other_views(&edits);
         self.modified = true;
         self.revision += 1;
         Ok(true)
@@ -563,6 +655,43 @@ mod tests {
         assert!(doc.redo().unwrap());
         assert_eq!(doc.buffer().to_text(), "abcd");
         assert!(!doc.redo().unwrap());
+    }
+
+    #[test]
+    fn selections_par_vue() {
+        let (a, b) = (PanelId::new(1), PanelId::new(2));
+        let mut doc = Document::from_text("un deux trois");
+        doc.focus_view(a);
+        doc.set_selections(Selections::cursor(13));
+        // Une nouvelle vue reprend les sélections courantes, puis s'en sépare.
+        doc.focus_view(b);
+        assert_eq!(doc.selections(), &Selections::cursor(13));
+        doc.set_selections(Selections::cursor(0));
+        assert_eq!(doc.selections_in(a), &Selections::cursor(13));
+        assert_eq!(doc.selections_in(b), &Selections::cursor(0));
+        // Une frappe dans b décale le curseur de a.
+        type_at_cursor(&mut doc, ">> ");
+        assert_eq!(doc.selections_in(a), &Selections::cursor(16));
+        assert_eq!(doc.selections_in(b), &Selections::cursor(3));
+        doc.undo().unwrap();
+        assert_eq!(
+            doc.selections_in(a),
+            &Selections::cursor(13),
+            "annuler aussi"
+        );
+        doc.redo().unwrap();
+        assert_eq!(
+            doc.selections_in(a),
+            &Selections::cursor(16),
+            "rétablir aussi"
+        );
+        // Retour à a : ses sélections reviennent.
+        doc.focus_view(a);
+        assert_eq!(doc.selections(), &Selections::cursor(16));
+        assert_eq!(doc.selections_in(b), &Selections::cursor(3));
+        doc.remove_view(b);
+        assert_eq!(doc.selections_in(b), &Selections::cursor(16), "vue oubliée");
+        assert_eq!(doc.current_view(), Some(a));
     }
 
     #[test]

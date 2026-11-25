@@ -258,6 +258,16 @@ impl History {
         Ok(Some(selections))
     }
 
+    /// Transaction que [`History::undo`] annulerait.
+    pub fn peek_undo(&self) -> Option<&Transaction> {
+        self.undo.last()
+    }
+
+    /// Transaction que [`History::redo`] rétablirait.
+    pub fn peek_redo(&self) -> Option<&Transaction> {
+        self.redo.last()
+    }
+
     /// Indique s'il y a une transaction à annuler.
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()

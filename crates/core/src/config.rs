@@ -85,6 +85,22 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # left = ["file", "modified", "keys"]
 # right = ["selections", "position", "line_ending", "encoding", "language"]
 
+[tabs]
+# Onglet d'aperçu : un fichier ouvert depuis l'ouverture rapide ou l'explorateur remplace l'onglet
+# d'aperçu de la zone au lieu d'en ajouter un ; l'onglet est gardé dès qu'on modifie le document
+# (ou avec « tab keep »).
+# preview = false
+
+[session]
+# Au lancement, l'espace de travail du projet (zones, onglets, fichiers, curseurs, défilement)
+# est restauré tel qu'il était à la fermeture. « cupride --no-restore » démarre sans le restaurer.
+# restore = true
+
+[explorer]
+# Fichiers ignorés (.gitignore, .ignore) : "dim" (affichés en gris), "hide" (masqués) ou
+# "show" (affichés comme les autres). Le dossier .git n'est jamais affiché.
+# ignored = "dim"
+
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les
 # remplacent pour les mêmes touches. Une chaîne vide retire un raccourci par défaut.
@@ -274,6 +290,49 @@ impl Default for StatusBarConfig {
     }
 }
 
+/// Section `[tabs]` : onglets.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct TabsConfig {
+    /// Onglet d'aperçu, remplacé par le prochain fichier ouvert en aperçu.
+    pub preview: bool,
+}
+
+/// Section `[session]` : espace de travail entre deux lancements.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct SessionConfig {
+    /// Restaurer la session du projet au lancement.
+    pub restore: bool,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self { restore: true }
+    }
+}
+
+/// Affichage des fichiers ignorés dans l'explorateur.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IgnoredFiles {
+    /// Affichés en gris.
+    #[default]
+    Dim,
+    /// Masqués.
+    Hide,
+    /// Affichés comme les autres.
+    Show,
+}
+
+/// Section `[explorer]` : explorateur de fichiers.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct ExplorerConfig {
+    /// Fichiers ignorés par `.gitignore` et `.ignore`.
+    pub ignored: IgnoredFiles,
+}
+
 /// Configuration complète.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
@@ -288,12 +347,18 @@ pub struct Config {
     pub notifications: NotificationsConfig,
     /// Section `[status_bar]`.
     pub status_bar: StatusBarConfig,
+    /// Section `[tabs]`.
+    pub tabs: TabsConfig,
+    /// Section `[session]`.
+    pub session: SessionConfig,
+    /// Section `[explorer]`.
+    pub explorer: ExplorerConfig,
     /// Section `[keys]` : touches → ligne de commande (vide pour retirer un raccourci).
     pub keys: BTreeMap<String, String>,
 }
 
 /// Clés connues, pour signaler les fautes de frappe.
-const KNOWN_KEYS: [(&str, &[&str]); 6] = [
+const KNOWN_KEYS: [(&str, &[&str]); 9] = [
     (
         "editor",
         &["line_ending", "undo_group_delay_ms", "primary_selection"],
@@ -311,6 +376,9 @@ const KNOWN_KEYS: [(&str, &[&str]); 6] = [
     ),
     ("notifications", &["timeout_ms", "error_timeout_ms"]),
     ("status_bar", &["left", "right"]),
+    ("tabs", &["preview"]),
+    ("session", &["restore"]),
+    ("explorer", &["ignored"]),
     ("keys", &[]),
 ];
 

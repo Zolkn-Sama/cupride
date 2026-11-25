@@ -1,5 +1,6 @@
 //! Erreurs des commandes.
 
+use cupride_layout::LayoutError;
 use cupride_text::TextError;
 use thiserror::Error;
 
@@ -57,6 +58,14 @@ pub enum CommandError {
     /// Erreur sur le texte (position invalide…).
     #[error(transparent)]
     Text(#[from] TextError),
+
+    /// Erreur sur le layout (panneau introuvable…).
+    #[error(transparent)]
+    Layout(#[from] LayoutError),
+
+    /// Aucun panneau n'a le focus.
+    #[error("aucun panneau actif")]
+    NoActivePanel,
 
     /// Autre échec, avec un message pour l'utilisateur.
     #[error("{0}")]
