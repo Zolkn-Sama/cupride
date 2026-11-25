@@ -229,6 +229,17 @@ nouvelle ligne commence par les mêmes espaces et tabulations, jusqu'au curseur.
 Toutes les commandes d'édition (frappe, effacement, déplacements, couper, copier, coller)
 agissent à chaque curseur.
 
+## Sélection structurelle
+
+D'après l'arbre syntaxique du document (langages qui ont une grammaire : Rust, C, Markdown).
+
+| Commande | Description |
+|---|---|
+| `edit expand-selection` | Étend chaque sélection au nœud qui la contient : identifiant, expression, instruction, bloc, fonction… (`Alt+Maj+→` ; `Ctrl+Maj+Cmd+→` sous macOS). |
+| `edit shrink-selection` | Réduit chaque sélection : défait les extensions précédentes dans l'ordre, sinon sélectionne le nœud enfant qui contient le curseur (`Alt+Maj+←` ; `Ctrl+Maj+Cmd+←`). |
+| `edit next-function` | Chaque curseur va au début de la fonction suivante ; en Markdown, au titre suivant (`Ctrl+Maj+↓`). |
+| `edit previous-function` | Au début de la fonction (ou du titre) précédente (`Ctrl+Maj+↑`). |
+
 ## `recovery` — récupération après plantage
 
 Les documents qui ont des modifications non enregistrées sont copiés toutes les 15 secondes (s'ils
