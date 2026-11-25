@@ -23,6 +23,15 @@ cupride [--no-restore] [chemin…]
 | `cupride --no-restore` | Démarre sans restaurer l'espace de travail du projet. |
 | `cupride --help`, `cupride --version` | Aide, version. |
 
+**Instance unique** : un seul CuprIDE tourne par utilisateur ; toutes ses fenêtres partagent les
+documents. Lancer `cupride` quand il tourne déjà lui transmet la ligne de commande (les chemins
+relatifs partent du dossier du terminal) : les fichiers s'ouvrent dans sa fenêtre active, qui
+passe au premier plan, et le nouveau processus se termine aussitôt, avec le code de sortie que
+l'instance renvoie. La communication passe par un socket local privé (Unix : dans un dossier
+`0700` de l'utilisateur, sous `$XDG_RUNTIME_DIR` ou le dossier temporaire ; Windows : un tube
+nommé propre à l'utilisateur, fermé aux autres utilisateurs en écriture et aux clients distants).
+Après un plantage, le socket orphelin est détecté et remplacé au lancement suivant.
+
 L'espace de travail du projet (zones, onglets, fichiers, curseurs, défilement) est restauré tel
 qu'il était à la fermeture, sauf avec `--no-restore` ou l'option `[session] restore = false` (voir
 la [configuration](configuration.md#session)) ; les fichiers demandés s'y ajoutent, dans la zone

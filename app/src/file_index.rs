@@ -26,6 +26,8 @@ pub(crate) enum AppEvent {
     FilesIndexed,
     /// Des fichiers ou dossiers surveillés ont changé sur le disque.
     FilesChanged,
+    /// Un autre `cupride` a transmis sa ligne de commande (instance unique).
+    Remote,
 }
 
 /// Ce que le thread d'indexation envoie.
