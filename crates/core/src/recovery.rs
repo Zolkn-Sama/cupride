@@ -143,7 +143,7 @@ impl Editor {
             });
         }
         // Copies des documents enregistrés ou fermés depuis : retirées.
-        for (id, _) in &self.recovery.copied {
+        for id in self.recovery.copied.keys() {
             if !copied.contains_key(id) {
                 let _ = fs::remove_file(dir.join(format!("{}.txt", document_key(*id))));
             }
