@@ -96,6 +96,17 @@ notification le signale.
 | Option | Valeurs | Défaut | Effet |
 |---|---|---|---|
 | `quit_on_last_close` | `true`, `false` | `true` | Fermer la dernière fenêtre quitte CuprIDE. Avec `false`, CuprIDE reste lancé sans fenêtre. |
+| `wayland_placement` | `"fullscreen"`, `"compositor"` | `"fullscreen"` | Sous Wayland, quand un écran est demandé (`window new --monitor`, `window move`) : plein écran sur cet écran, ou placement laissé au compositeur. Voir [Wayland](#wayland). Sans effet sous X11, Windows et macOS. |
+
+#### Wayland
+
+Le protocole Wayland ne permet pas à une application de choisir la position de ses fenêtres :
+c'est le compositeur qui les place. CuprIDE le détecte au lancement. Quand une commande demande un
+écran précis, la fenêtre passe en plein écran sur cet écran (`fullscreen`, réglage par défaut :
+seul moyen fiable de la mettre sur le bon écran), ou reste là où le compositeur la place
+(`compositor`). Dans les deux cas, une notification indique ce qui a été fait : la demande n'est
+jamais ignorée en silence. Sous X11 (y compris XWayland), Windows et macOS, la fenêtre est
+simplement centrée sur l'écran demandé.
 
 ### `[keys]`
 
@@ -302,6 +313,11 @@ Les fichiers des thèmes intégrés servent d'exemples complets :
 # Fermer la dernière fenêtre quitte CuprIDE. Avec false, CuprIDE reste lancé sans fenêtre : la
 # prochaine commande « cupride » en ouvre une, dans la même instance.
 # quit_on_last_close = true
+
+# Sous Wayland, une application ne peut pas placer ses fenêtres. Quand un écran est demandé
+# (window new --monitor, window move) : "fullscreen" (plein écran sur cet écran) ou
+# "compositor" (le compositeur choisit). Une notification le signale. Sans effet ailleurs.
+# wayland_placement = "fullscreen"
 
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les

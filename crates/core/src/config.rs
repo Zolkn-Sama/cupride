@@ -106,6 +106,11 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # prochaine commande « cupride » en ouvre une, dans la même instance.
 # quit_on_last_close = true
 
+# Sous Wayland, une application ne peut pas placer ses fenêtres. Quand un écran est demandé
+# (window new --monitor, window move) : "fullscreen" (plein écran sur cet écran) ou
+# "compositor" (le compositeur choisit). Une notification le signale. Sans effet ailleurs.
+# wayland_placement = "fullscreen"
+
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les
 # remplacent pour les mêmes touches. Une chaîne vide retire un raccourci par défaut.
@@ -344,12 +349,15 @@ pub struct ExplorerConfig {
 pub struct WindowConfig {
     /// Fermer la dernière fenêtre quitte l'application.
     pub quit_on_last_close: bool,
+    /// Placement d'une fenêtre sur un écran demandé, sous Wayland.
+    pub wayland_placement: crate::monitors::WaylandPlacement,
 }
 
 impl Default for WindowConfig {
     fn default() -> Self {
         Self {
             quit_on_last_close: true,
+            wayland_placement: crate::monitors::WaylandPlacement::default(),
         }
     }
 }
@@ -402,7 +410,7 @@ const KNOWN_KEYS: [(&str, &[&str]); 10] = [
     ("tabs", &["preview"]),
     ("session", &["restore"]),
     ("explorer", &["ignored"]),
-    ("window", &["quit_on_last_close"]),
+    ("window", &["quit_on_last_close", "wayland_placement"]),
     ("keys", &[]),
 ];
 

@@ -18,7 +18,7 @@ use cupride_core::clipboard::ClipboardKind;
 use cupride_core::command::CommandOutput;
 use cupride_core::keymap::{KeyResolver, Resolution};
 use cupride_core::layout::{Axis, Divider, DropTarget, PanelId, WindowId as LayoutWindowId};
-use cupride_core::monitors::{MonitorInfo, Placement};
+use cupride_core::monitors::{MonitorInfo, Placement, PlacementStrategy};
 use cupride_core::notifications::Level;
 use cupride_core::text::{Selections, TextBuffer};
 use cupride_core::{DocumentId, Editor};
@@ -38,7 +38,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::ModifiersState;
 use winit::monitor::MonitorHandle;
 use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
-use winit::window::{CursorIcon, Window, WindowId};
+use winit::window::{CursorIcon, Fullscreen, Window, WindowId};
 
 mod overlays;
 mod pickers;
@@ -120,6 +120,8 @@ pub(crate) struct App {
     monitors_checked: Option<Instant>,
     /// Écran demandé pour une fenêtre pas encore ouverte.
     pending_placement: HashMap<LayoutWindowId, usize>,
+    /// Session Wayland : les fenêtres ne peuvent pas être positionnées.
+    wayland: bool,
     close_guard: CloseGuard,
     blink: CursorBlink,
     /// La fenêtre a-t-elle le focus clavier ? Sans focus, les curseurs sont masqués et ne
@@ -256,6 +258,7 @@ impl App {
             monitors: Vec::new(),
             monitors_checked: None,
             pending_placement: HashMap::new(),
+            wayland: false,
             close_guard: CloseGuard::default(),
             toasts: Toasts::default(),
             fatal: None,
@@ -968,9 +971,10 @@ impl App {
         let mut attributes = Window::default_attributes()
             .with_title(self.title(id))
             .with_inner_size(INITIAL_SIZE);
-        if let Some(placement) = self
-            .pending_placement
-            .remove(&id)
+        // Sous Wayland, la position est ignorée : l'écran demandé est traité après l'ouverture.
+        let pending = self.pending_placement.remove(&id);
+        if let Some(placement) = pending
+            .filter(|_| !self.wayland)
             .and_then(|monitor| self.placement_on(monitor, None))
         {
             // Écran demandé (window new --monitor N) : centrée dessus.
@@ -1044,6 +1048,9 @@ impl App {
                 window,
             },
         );
+        if let Some(monitor) = pending.filter(|_| self.wayland) {
+            self.place_window(id, monitor);
+        }
         Ok(())
     }
 
@@ -1178,13 +1185,38 @@ impl App {
             return;
         };
         let os = &state.window;
-        os.set_fullscreen(None);
-        os.set_maximized(false);
-        os.set_outer_position(PhysicalPosition::new(placement.x, placement.y));
-        if (placement.width, placement.height) != (size.width, size.height) {
-            let _ = os.request_inner_size(PhysicalSize::new(placement.width, placement.height));
+        let setting = self.editor.config().window.wayland_placement;
+        match cupride_core::monitors::strategy(self.wayland, setting, placement) {
+            PlacementStrategy::Position(placement) => {
+                os.set_fullscreen(None);
+                os.set_maximized(false);
+                os.set_outer_position(PhysicalPosition::new(placement.x, placement.y));
+                if (placement.width, placement.height) != (size.width, size.height) {
+                    let _ =
+                        os.request_inner_size(PhysicalSize::new(placement.width, placement.height));
+                }
+                tracing::info!(fenetre = %window, ecran = monitor, "fenêtre placée");
+            }
+            PlacementStrategy::Fullscreen => {
+                let handle = self.monitors.get(monitor - 1).map(|(_, h)| h.clone());
+                os.set_fullscreen(Some(Fullscreen::Borderless(handle)));
+                let message = format!(
+                    "Wayland : les fenêtres ne peuvent pas être positionnées ; la fenêtre {window} \
+                     passe en plein écran sur l'écran {monitor} ([window] wayland_placement)"
+                );
+                tracing::info!("{message}");
+                self.editor.notify(Level::Info, message);
+            }
+            PlacementStrategy::Compositor => {
+                let message = format!(
+                    "Wayland : les fenêtres ne peuvent pas être positionnées ; la fenêtre {window} \
+                     reste où le compositeur l'a placée, pas sur l'écran {monitor} \
+                     ([window] wayland_placement)"
+                );
+                tracing::info!("{message}");
+                self.editor.notify(Level::Info, message);
+            }
         }
-        tracing::info!(fenetre = %window, ecran = monitor, "fenêtre placée");
     }
 
     /// Une fenêtre reçoit le clavier ou la souris : elle devient la fenêtre courante, et la
@@ -1368,6 +1400,26 @@ impl App {
     }
 }
 
+/// La session graphique est-elle Wayland (et non X11) ? Toujours faux hors Linux et BSD.
+fn is_wayland(event_loop: &ActiveEventLoop) -> bool {
+    #[cfg(all(
+        unix,
+        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+    ))]
+    {
+        use winit::platform::wayland::ActiveEventLoopExtWayland;
+        event_loop.is_wayland()
+    }
+    #[cfg(not(all(
+        unix,
+        not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+    )))]
+    {
+        let _ = event_loop;
+        false
+    }
+}
+
 impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
@@ -1390,6 +1442,10 @@ impl ApplicationHandler<AppEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if !self.windows.is_empty() {
             return;
+        }
+        self.wayland = is_wayland(event_loop);
+        if self.wayland {
+            tracing::info!("session Wayland : placement des fenêtres laissé au compositeur");
         }
         self.refresh_monitors(event_loop, true);
         self.sync_windows(event_loop);
