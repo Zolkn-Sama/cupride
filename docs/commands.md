@@ -249,10 +249,13 @@ par un plugin.
 | `panel open <type> [--split <direction>]` | Ouvre un panneau du type indiqué : en onglet dans la zone active, ou dans une nouvelle zone du côté `left`, `right`, `up` ou `down`. `editor` ouvre le document actif. Un type inconnu est refusé, avec le nom le plus proche. |
 | `panel close [--force]` | Ferme le panneau actif (`mod+w`) ; sa zone disparaît si elle est vide, et sa place revient aux zones voisines. Son document est fermé s'il n'est plus affiché ailleurs : s'il a des modifications non enregistrées, la commande échoue, sauf avec `--force`. |
 | `panel focus <direction>` | Donne le focus à la zone voisine : `left`, `right`, `up` ou `down` (`mod+k` puis `mod+←`, `mod+→`, `mod+↑`, `mod+↓`). Parmi les zones de ce côté, celle qui touche et recouvre le plus la zone active. |
+| `panel resize <sens>` | Agrandit ou réduit la zone active de 5 % de la fenêtre : `wider`, `narrower` (largeur), `taller`, `shorter` (hauteur). La place est prise à la zone voisine (la suivante, ou la précédente pour la dernière) ; chaque zone garde une taille minimale (sa barre d'onglets et trois lignes). Raccourcis : `mod+k` puis `mod+shift+→`, `←`, `↓`, `↑`. |
 | `panel list` | Liste les panneaux, zone par zone : `>` marque le panneau actif. |
 
 Le panneau actif se reconnaît à son onglet, souligné en haut de la couleur d'accent ; les titres
-des autres zones sont en gris. Un clic dans une zone lui donne le focus.
+des autres zones sont en gris. Un clic dans une zone lui donne le focus. Les séparations entre
+les zones se glissent à la souris (le pointeur change au-dessus), dans la limite de la taille
+minimale des zones.
 
 Exemples :
 

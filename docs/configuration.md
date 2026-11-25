@@ -142,6 +142,10 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `panel focus right` | `Ctrl+K Ctrl+→` | `Cmd+K Cmd+→` |
 | `panel focus up` | `Ctrl+K Ctrl+↑` | `Cmd+K Cmd+↑` |
 | `panel focus down` | `Ctrl+K Ctrl+↓` | `Cmd+K Cmd+↓` |
+| `panel resize wider` | `Ctrl+K Ctrl+Maj+→` | `Cmd+K Cmd+Maj+→` |
+| `panel resize narrower` | `Ctrl+K Ctrl+Maj+←` | `Cmd+K Cmd+Maj+←` |
+| `panel resize taller` | `Ctrl+K Ctrl+Maj+↓` | `Cmd+K Cmd+Maj+↓` |
+| `panel resize shorter` | `Ctrl+K Ctrl+Maj+↑` | `Cmd+K Cmd+Maj+↑` |
 | `file close` | `Ctrl+K Ctrl+W` | `Cmd+K Cmd+W` |
 | `view zoom-in` | `Ctrl+=`, `Ctrl+Maj+=`, `Ctrl++` | `Cmd+=`, `Cmd+Maj+=`, `Cmd++` |
 | `view zoom-out` | `Ctrl+-` | `Cmd+-` |

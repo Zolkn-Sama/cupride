@@ -11,7 +11,7 @@ use std::time::Instant;
 use cupride_core::clipboard::ClipboardKind;
 use cupride_core::command::CommandOutput;
 use cupride_core::keymap::{KeyResolver, Resolution};
-use cupride_core::layout::PanelId;
+use cupride_core::layout::{Axis, Divider, PanelId};
 use cupride_core::notifications::Level;
 use cupride_core::text::{Selections, TextBuffer};
 use cupride_core::{DocumentId, Editor};
@@ -99,6 +99,8 @@ pub(crate) struct App {
     mouse_position: (f32, f32),
     clicks: ClickCounter,
     mouse: MouseSelection,
+    /// Séparation entre deux zones, saisie à la souris.
+    divider_drag: Option<Divider>,
     /// Forme actuelle du pointeur.
     pointer: Pointer,
     /// Dernier texte envoyé à la sélection primaire, pour ne pas le renvoyer à chaque image.
@@ -180,6 +182,7 @@ impl App {
             mouse_position: (0.0, 0.0),
             clicks: ClickCounter::default(),
             mouse: MouseSelection::default(),
+            divider_drag: None,
             pointer: Pointer::Default,
             last_primary: None,
             focus: Focus::new(Element::Editor),
@@ -437,6 +440,10 @@ impl App {
         }
         // Un clic dans l'éditeur ferme les couches et lui rend le focus.
         self.close_overlays();
+        if let Some(divider) = self.window.as_ref().and_then(|s| s.views.divider_at(x, y)) {
+            self.divider_drag = Some(divider.clone());
+            return;
+        }
         if self.tab_pressed(x, y) {
             return;
         }
@@ -578,11 +585,22 @@ impl App {
         let Some(state) = &self.window else {
             return;
         };
-        let pointer = state
-            .views
-            .panel_at(x, y)
-            .and_then(|panel| state.views.view(panel))
-            .map_or(Pointer::Default, |view| view.pointer_at(x, y));
+        if let Some(divider) = &self.divider_drag {
+            if state.views.drag_divider(&mut self.editor, divider, x, y) {
+                state.window.request_redraw();
+            }
+            return;
+        }
+        let pointer = match state.views.divider_at(x, y).map(|d| d.axis) {
+            // Les zones d'un split horizontal sont côte à côte : la séparation est verticale.
+            Some(Axis::Horizontal) => Pointer::ResizeHorizontal,
+            Some(Axis::Vertical) => Pointer::ResizeVertical,
+            None => state
+                .views
+                .panel_at(x, y)
+                .and_then(|panel| state.views.view(panel))
+                .map_or(Pointer::Default, |view| view.pointer_at(x, y)),
+        };
         if pointer != self.pointer {
             self.pointer = pointer;
             state.window.set_cursor(match pointer {
@@ -755,6 +773,7 @@ impl App {
             ],
         );
         state.views.layout(&mut self.text, &self.editor, parts[0]);
+        self.editor.set_layout_metrics(state.views.metrics());
         let pending_keys: Vec<String> = self
             .resolver
             .pending()
@@ -926,6 +945,7 @@ impl ApplicationHandler<AppEvent> for App {
             } => match state {
                 ElementState::Pressed => self.mouse_pressed(),
                 ElementState::Released => {
+                    self.divider_drag = None;
                     self.mouse.release();
                     self.update_primary_selection();
                 }
