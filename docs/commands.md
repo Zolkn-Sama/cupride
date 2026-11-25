@@ -215,10 +215,18 @@ panneau actif. Seules les fenêtres qui affichent ce qui a changé sont redessin
 
 | Commande | Description |
 |---|---|
-| `window new` | Ouvre une nouvelle fenêtre, avec un document vide (`mod+shift+n`). |
+| `window new [--monitor N]` | Ouvre une nouvelle fenêtre, avec un document vide (`mod+shift+n`) ; avec `--monitor`, centrée sur l'écran `N`. |
+| `window move --monitor N [fenêtre]` | Déplace la fenêtre active (ou la fenêtre donnée) sur l'écran `N` : centrée, réduite à 90 % de l'écran au plus pour y tenir, sortie du plein écran. |
+| `window list-monitors` | Liste les écrans : numéro, nom, résolution (pixels physiques), échelle ; l'écran principal est signalé. |
 | `window close [N] [--force]` | Ferme la fenêtre active, ou la fenêtre `N` (`mod+shift+w`). Ses documents qui ne sont affichés dans aucune autre fenêtre sont fermés : s'ils ont des modifications non enregistrées, la commande échoue, sauf avec `--force`. Fermer la dernière fenêtre quitte CuprIDE (option `[window] quit_on_last_close`). |
 | `window focus <N>` | Donne le focus à la fenêtre `N`. |
 | `window list` | Liste les fenêtres : numéro, document actif, nombre de panneaux ; `>` marque la fenêtre active. |
+
+**Numérotation des écrans** : à partir de 1, de gauche à droite, puis de haut en bas, d'après la
+position du coin haut gauche de chaque écran sur le bureau. Un même agencement d'écrans donne
+toujours les mêmes numéros, quel que soit l'ordre dans lequel l'OS les énumère ; brancher un
+écran à gauche décale les numéros des écrans à sa droite. La liste est relue au plus une fois par
+seconde.
 
 Le bouton de fermeture d'une fenêtre fait comme `window close` ; avec des modifications non
 enregistrées, il faut fermer une seconde fois pour confirmer.
