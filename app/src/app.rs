@@ -217,8 +217,7 @@ impl App {
             view.cursor_blink_interval(),
             Instant::now(),
         );
-        let history_path = directories::ProjectDirs::from("", "", "cupride")
-            .map(|dirs| dirs.data_dir().join("command-history"));
+        let history_path = editor.data_dir().map(|dir| dir.join("command-history"));
         let history = history_path
             .as_deref()
             .map(|path| {
@@ -970,7 +969,7 @@ impl App {
             };
             self.editor.workspace_mut().set_geometry(*id, geometry);
         }
-        let Some(dir) = cupride_core::session::sessions_dir() else {
+        let Some(dir) = self.editor.sessions_dir() else {
             tracing::warn!("dossier de données introuvable : session non enregistrée");
             return;
         };

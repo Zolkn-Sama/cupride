@@ -97,11 +97,6 @@ pub enum SessionError {
     },
 }
 
-/// Dossier des sessions, dans le dossier de données de l'OS.
-pub fn sessions_dir() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "cupride").map(|d| d.data_dir().join("sessions"))
-}
-
 /// Nom du fichier de session d'un projet : son nom de dossier et une empreinte de son chemin
 /// complet (deux projets de même nom ont deux sessions) ; `default.json` sans projet.
 pub fn session_file_name(project: Option<&Path>) -> String {
