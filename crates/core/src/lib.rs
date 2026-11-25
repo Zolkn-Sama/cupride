@@ -27,6 +27,7 @@ pub mod language;
 pub mod monitors;
 pub mod notifications;
 mod panels;
+pub mod search;
 pub mod session;
 mod ui_request;
 mod windows;

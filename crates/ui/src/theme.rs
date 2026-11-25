@@ -92,6 +92,11 @@ pub struct Theme {
 }
 
 impl Theme {
+    /// Surlignage des occurrences de la recherche : la couleur d'accent, translucide.
+    pub fn search_match(&self) -> Color {
+        Color::rgba(self.accent.r, self.accent.g, self.accent.b, 0x55)
+    }
+
     /// Padparadscha, le thème par défaut : un saphir rose-orangé sur fond sombre. Aussi la base
     /// des autres thèmes pour les couleurs qu'ils ne donnent pas.
     pub fn padparadscha() -> Self {

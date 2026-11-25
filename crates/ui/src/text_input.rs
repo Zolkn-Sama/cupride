@@ -69,6 +69,12 @@ impl TextInput {
         self.anchor = self.cursor;
     }
 
+    /// Sélectionne tout le texte : la prochaine frappe le remplace.
+    pub fn select_all(&mut self) {
+        self.anchor = 0;
+        self.cursor = self.text.len();
+    }
+
     /// Insère `text` au curseur, à la place de la sélection.
     pub fn insert(&mut self, text: &str) {
         let text = text.replace("\r\n", " ").replace(['\r', '\n'], " ");

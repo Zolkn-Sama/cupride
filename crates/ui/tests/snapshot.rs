@@ -376,3 +376,50 @@ fn explorateur() {
     let pixels = target.read_rgba(&gpu).expect("relecture de l'image");
     save_png("explorateur", (width, height), &pixels);
 }
+
+/// Recherche : occurrences surlignées, l'occurrence courante sélectionnée, barre en haut à droite.
+#[test]
+fn recherche() {
+    use cupride_core::search::SearchQuery;
+    use cupride_render::Frame;
+    use cupride_ui::FindBar;
+
+    let gpu = match Gpu::headless() {
+        Ok(gpu) => gpu,
+        Err(error) => {
+            eprintln!("test ignoré, pas de GPU : {error}");
+            return;
+        }
+    };
+    let (width, height) = (800_u32, 200_u32);
+    let target = OffscreenTarget::new(&gpu, width, height);
+    let mut renderer = Renderer::new(&gpu, OFFSCREEN_FORMAT);
+    let mut text = TextSystem::new();
+    let mut editor = Editor::new();
+    editor.insert_document(Document::from_text(
+        "let message = \"bonjour\";\nprintln!(\"{message}\");\n// message de fin\n",
+    ));
+    editor.execute("search find message").unwrap();
+    let id = editor.active_id().unwrap();
+    let matches = std::sync::Arc::new(editor.search_matches(id).unwrap().to_vec());
+    assert_eq!(matches.len(), 3);
+    let document = editor.document(id).unwrap();
+
+    let mut view = EditorView::new(ViewSettings::default(), 1.0);
+    view.set_bounds(Rect::new(0.0, 0.0, width as f32, height as f32));
+    view.set_highlights(matches);
+    view.prepare(&mut text, document);
+    let theme = Theme::default();
+    let style = view.style();
+    let mut frame = Frame::new(theme.background);
+    view.draw(frame.base(), &theme, document, true);
+    let mut bar = FindBar::new(&SearchQuery::new("message"));
+    bar.set_status(Some("1/3".into()), false);
+    bar.prepare(&mut text, &style, Rect::new(0.0, 0.0, width as f32, height as f32));
+    bar.draw(frame.push_layer(), &style, &theme, true);
+    renderer
+        .render(&gpu, &mut text, &target.view, target.size(), &frame)
+        .expect("rendu");
+    let pixels = target.read_rgba(&gpu).expect("relecture de l'image");
+    save_png("recherche", (width, height), &pixels);
+}

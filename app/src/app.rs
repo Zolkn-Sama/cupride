@@ -27,9 +27,9 @@ use cupride_core::{DocumentId, Editor};
 use cupride_render::Frame;
 use cupride_render::{Acquire, Gpu, Rect, Renderer, TextSystem, WindowSurface};
 use cupride_ui::{
-    ClickCounter, ClickModifiers, CommandHistory, CommandLine, CursorBlink, EditorView, Focus,
-    MouseSelection, PanelViews, Picker, Pointer, Preedit, StatusBar, StatusContext, StatusElements,
-    Theme, Themes, Toasts, ViewAction, ViewRegistry, ViewSettings, WHEEL_LINES,
+    ClickCounter, ClickModifiers, CommandHistory, CommandLine, CursorBlink, EditorView, FindBar,
+    Focus, MouseSelection, PanelViews, Picker, Pointer, Preedit, StatusBar, StatusContext,
+    StatusElements, Theme, Themes, Toasts, ViewAction, ViewRegistry, ViewSettings, WHEEL_LINES,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
@@ -42,6 +42,7 @@ use winit::monitor::MonitorHandle;
 use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::window::{CursorIcon, Fullscreen, Window, WindowId};
 
+mod find;
 mod overlays;
 mod pickers;
 
@@ -53,6 +54,7 @@ use crate::file_index::{AppEvent, FileIndex};
 use crate::input;
 use crate::latency::LatencyStats;
 use crate::redraw::Stamp;
+use crate::search_worker::SearchWorker;
 use crate::watcher::DiskWatcher;
 
 /// Taille initiale de la fenêtre, en pixels logiques.
@@ -85,6 +87,9 @@ impl WindowState {
         self.views.editor_view_mut(panel?)
     }
 }
+
+/// Occurrences de la recherche partagées par les vues : (document, révision, occurrences).
+type SharedMatches = (DocumentId, u64, Arc<Vec<std::ops::Range<usize>>>);
 
 /// Onglet saisi à la souris : il devient un glisser-déposer au-delà de quelques pixels.
 struct TabDrag {
@@ -170,6 +175,16 @@ pub(crate) struct App {
     completion: Option<CompletionCycle>,
     /// Sélecteur ouvert (palette de commandes…).
     picker: Option<(PickerKind, Picker)>,
+    /// Barre de recherche, quand elle est ouverte.
+    find: Option<FindBar>,
+    /// Recherches en arrière-plan.
+    search: SearchWorker,
+    /// Point de départ de la recherche incrémentale, et sélection de la première occurrence
+    /// trouvée à la prochaine réponse.
+    search_origin: Option<usize>,
+    search_jump: bool,
+    /// Occurrences surlignées, partagées par les vues : (document, révision, occurrences).
+    highlights: Option<SharedMatches>,
     /// Fichiers du projet, indexés en arrière-plan pour l'ouverture rapide.
     file_index: FileIndex,
     /// Dossiers surveillés sur le disque (explorateur).
@@ -250,6 +265,11 @@ impl App {
             history_path,
             completion: None,
             picker: None,
+            find: None,
+            search: SearchWorker::default(),
+            search_origin: None,
+            search_jump: false,
+            highlights: None,
             file_index: FileIndex::default(),
             disk: DiskWatcher::new(proxy.clone()),
             proxy,
@@ -486,6 +506,11 @@ impl App {
     /// rechargés, curseur rallumé et nouvelle image.
     fn after_any_command(&mut self, start: Instant) {
         self.process_ui_requests();
+        // Barre de recherche ouverte : le texte ou le document actif ont pu changer.
+        if self.find.is_some() {
+            self.start_search();
+            self.refresh_highlights();
+        }
         self.sync_config();
         self.update_primary_selection();
         self.blink.reset(Instant::now());
@@ -578,6 +603,10 @@ impl App {
             if item.is_some() {
                 self.choose(item);
             }
+            return;
+        }
+        if self.find_clicked(x, y) {
+            self.request_redraw();
             return;
         }
         // Un clic dans l'éditeur ferme les couches et lui rend le focus.
@@ -1470,6 +1499,20 @@ impl App {
             picker.prepare(&mut self.text, &style, &self.theme, parts[0]);
             ime_area = Some(picker.cursor_rect(&style));
         }
+        if let Some(bar) = self.find.as_mut().filter(|_| current) {
+            // En haut à droite de la zone du panneau actif.
+            let zone = panel
+                .and_then(|p| state.views.zones().iter().find(|z| z.active == Some(p)))
+                .map_or(parts[0], |z| z.content);
+            bar.prepare(&mut self.text, &style, zone);
+            if self.focus.is_focused(Element::Find) {
+                ime_area = Some(bar.cursor_rect(&style));
+            }
+        }
+        if let Some(bar) = self.find.as_ref().filter(|_| current) {
+            let focused = self.focus.is_focused(Element::Find);
+            bar.draw(scene.push_layer(), &style, &self.theme, blink_on && focused);
+        }
         if let Some((_, picker)) = self.picker.as_ref().filter(|_| current) {
             picker.draw(scene.push_layer(), &style, &self.theme, blink_on);
         }
@@ -1542,6 +1585,7 @@ impl ApplicationHandler<AppEvent> for App {
         match event {
             AppEvent::FilesIndexed => self.files_indexed(),
             AppEvent::Remote => self.remote_requests(event_loop),
+            AppEvent::SearchDone => self.search_done(),
             AppEvent::FilesChanged => {
                 let changed = self.disk.take_changed();
                 if changed.is_empty() {

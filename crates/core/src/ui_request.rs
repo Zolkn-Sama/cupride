@@ -12,6 +12,8 @@ pub enum UiRequest {
     Palette,
     /// Ouvrir l'ouverture rapide de fichiers.
     QuickOpen,
+    /// Ouvrir la barre de recherche, préremplie avec ce motif.
+    Find(String),
     /// Montrer ce fichier ou ce dossier dans l'explorateur (dossiers parents dépliés).
     Reveal(std::path::PathBuf),
     /// Placer la fenêtre sur l'écran `monitor` (numéro, à partir de 1).
