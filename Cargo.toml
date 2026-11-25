@@ -64,6 +64,8 @@ arboard = "3.7.0"
 regex = "1.12.2"
 grep-regex = "0.1.14"
 grep-searcher = "0.1.17"
+# Différences entre deux textes (fichier modifié hors de l'IDE)
+similar = "2.7.0"
 
 # Recherche floue (palette, ouverture rapide) et parcours des fichiers du projet
 nucleo-matcher = "0.3.1"

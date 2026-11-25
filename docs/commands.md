@@ -81,11 +81,20 @@ pendant l'écriture laisse toujours l'ancien fichier intact.
 | Commande | Description |
 |---|---|
 | `file open <chemin> [--preview] [--line N [--column N]]` | Ouvre un fichier et en fait le document actif, dans un onglet de la zone active (`--preview` : dans l'onglet d'aperçu, voir [`tab`](#tab--onglets)) ; `--line` et `--column` (à partir de 1, colonne en caractères) y placent le curseur. Un fichier déjà ouvert n'est pas dupliqué : son document redevient actif. Un fichier inexistant est créé au premier enregistrement. Fichier binaire ou non UTF-8 : refusé, jamais modifié. |
-| `file save` | Enregistre le document actif, en conservant ses fins de ligne. Un document sans fichier demande `file save-as`. |
+| `file save [--force]` | Enregistre le document actif, en conservant ses fins de ligne. Un document sans fichier demande `file save-as`. Si le fichier a été modifié par un autre programme depuis l'ouverture, la commande refuse de l'écraser, sauf avec `--force`. |
+| `file keep` | Garde la version de l'éditeur d'un fichier modifié ailleurs : le prochain enregistrement l'écrasera. |
+| `file compare` | Ouvre, dans un nouveau document, les différences entre le fichier sur le disque (lignes `-`) et le document actif (lignes `+`). |
 | `file save-as <chemin>` | Enregistre le document actif sous `<chemin>`, qui devient son fichier. |
 | `file close [--force]` | Ferme le document actif, et tous les panneaux qui l'affichent. S'il a des modifications non enregistrées, la commande échoue, sauf avec `--force`. |
 | `file reload [--force]` | Relit le document actif depuis le disque ; l'historique est vidé. Mêmes règles que `file close` pour les modifications non enregistrées. |
 | `file list` | Liste les documents ouverts : `>` marque le document actif, `*` un document modifié. |
+
+**Fichier modifié hors de l'IDE** : les dossiers des documents ouverts sont surveillés (`notify`),
+et tout est revérifié quand l'IDE reprend le focus. Un document sans modification est rechargé.
+Un document modifié n'est jamais écrasé : une notification propose `file compare`, `file keep`
+(garder la sienne) ou `file reload --force` (prendre celle du disque). Un fichier supprimé ou
+déplacé est signalé ; le document reste ouvert, et `file save` le recrée. Réécrire le même contenu
+(ou seulement changer la date du fichier) ne déclenche rien.
 
 Exemples :
 
