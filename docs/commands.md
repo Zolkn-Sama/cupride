@@ -50,7 +50,7 @@ pendant l'écriture laisse toujours l'ancien fichier intact.
 | `file open <chemin>` | Ouvre un fichier et en fait le document actif. Un fichier déjà ouvert n'est pas dupliqué : son document redevient actif. Un fichier inexistant est créé au premier enregistrement. Fichier binaire ou non UTF-8 : refusé, jamais modifié. |
 | `file save` | Enregistre le document actif, en conservant ses fins de ligne. Un document sans fichier demande `file save-as`. |
 | `file save-as <chemin>` | Enregistre le document actif sous `<chemin>`, qui devient son fichier. |
-| `file close [--force]` | Ferme le document actif. S'il a des modifications non enregistrées, la commande échoue, sauf avec `--force`. |
+| `file close [--force]` | Ferme le document actif, et tous les panneaux qui l'affichent. S'il a des modifications non enregistrées, la commande échoue, sauf avec `--force`. |
 | `file reload [--force]` | Relit le document actif depuis le disque ; l'historique est vidé. Mêmes règles que `file close` pour les modifications non enregistrées. |
 | `file list` | Liste les documents ouverts : `>` marque le document actif, `*` un document modifié. |
 
@@ -204,9 +204,39 @@ erreur aussi (erreur), comme les avertissements de configuration et de fermeture
 | `window move --monitor N` | Déplace la fenêtre active sur l'écran `N` | WIN |
 | `window list-monitors` | Liste les écrans : nom, résolution, échelle | WIN |
 
+## `split` — diviser l'espace
+
+Chaque commande divise la zone active en deux : le document actif s'ouvre aussi dans la nouvelle
+zone, qui prend le focus. C'est le même document en mémoire, avec ses propres curseurs et son
+propre défilement dans chaque zone. Sans document, la nouvelle zone reçoit un document vide.
+
+| Commande | Description |
+|---|---|
+| `split right` | Nouvelle zone à droite de la zone active (`mod+\`). |
+| `split down` | Nouvelle zone sous la zone active (`mod+k mod+\`). |
+| `split left` | Nouvelle zone à gauche de la zone active. |
+| `split up` | Nouvelle zone au-dessus de la zone active. |
+
+Une zone est divisée dans le sens de son split quand elle en a déjà un : trois `split right` de
+suite donnent quatre colonnes, pas des splits imbriqués.
+
 ## `panel` — panneaux
 
-Ouverture, fermeture, découpage et déplacement des panneaux (épic Layout).
+Un panneau a un type : `editor` (un document), `explorer` (fichiers du projet), ou un type fourni
+par un plugin.
+
+| Commande | Description |
+|---|---|
+| `panel open <type> [--split <direction>]` | Ouvre un panneau du type indiqué : en onglet dans la zone active, ou dans une nouvelle zone du côté `left`, `right`, `up` ou `down`. `editor` ouvre le document actif. Un type inconnu est refusé, avec le nom le plus proche. |
+| `panel close [--force]` | Ferme le panneau actif (`mod+w`) ; sa zone disparaît si elle est vide, et sa place revient aux zones voisines. Son document est fermé s'il n'est plus affiché ailleurs : s'il a des modifications non enregistrées, la commande échoue, sauf avec `--force`. |
+| `panel list` | Liste les panneaux, zone par zone : `>` marque le panneau actif. |
+
+Exemples :
+
+```
+panel open explorer --split left
+panel open editor --split down
+```
 
 ## `layout` — layouts nommés
 
