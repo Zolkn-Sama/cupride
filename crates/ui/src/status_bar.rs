@@ -6,10 +6,12 @@
 
 use std::collections::BTreeMap;
 
-use cupride_core::Editor;
 use cupride_core::language::language_of;
+use cupride_core::layout::PanelId;
+use cupride_core::text::Selections;
 use cupride_core::text::TextBuffer;
 use cupride_core::text::position::offset_to_grapheme_point;
+use cupride_core::{Document, Editor};
 use cupride_render::{Layer, Quad, Rect, TextSystem};
 
 use crate::label::Label;
@@ -23,6 +25,37 @@ pub struct StatusContext<'a> {
     pub editor: &'a Editor,
     /// Séquence de touches en cours (`ctrl+k …`), vide sinon.
     pub pending_keys: &'a str,
+    /// Panneau actif de la fenêtre dont c'est la barre d'état ; `None` : le document actif.
+    pub panel: Option<PanelId>,
+}
+
+impl<'a> StatusContext<'a> {
+    /// Document décrit par la barre : celui du panneau de la fenêtre. Un panneau sans document
+    /// (explorateur) qui a le focus décrit le document actif ; dans une autre fenêtre, rien.
+    pub fn document(&self) -> Option<&'a Document> {
+        let Some(panel) = self.panel else {
+            return self.editor.active_document();
+        };
+        match self.editor.panel_document(panel) {
+            Some(id) => self.editor.document(id),
+            None if self.editor.active_panel() == Some(panel) => self.editor.active_document(),
+            None => None,
+        }
+    }
+
+    /// Sélections décrites par la barre : celles du panneau de la fenêtre.
+    pub fn selections(&self) -> Option<&'a Selections> {
+        let document = self.document()?;
+        Some(
+            match self
+                .panel
+                .filter(|p| self.editor.panel_document(*p).is_some())
+            {
+                Some(panel) => document.selections_in(panel),
+                None => document.selections(),
+            },
+        )
+    }
 }
 
 /// Calcule le texte d'un élément, ou `None` pour ne rien afficher.
@@ -44,23 +77,20 @@ impl Default for StatusElements {
         let mut elements = Self {
             elements: BTreeMap::new(),
         };
-        elements.register("file", |c| Some(c.editor.active_document()?.display_name()));
+        elements.register("file", |c| Some(c.document()?.display_name()));
         elements.register("modified", |c| {
-            c.editor
-                .active_document()?
-                .is_modified()
-                .then(|| "●".to_owned())
+            c.document()?.is_modified().then(|| "●".to_owned())
         });
         elements.register("keys", |c| {
             (!c.pending_keys.is_empty()).then(|| format!("{} …", c.pending_keys))
         });
         elements.register("selections", |c| {
-            let count = c.editor.active_document()?.selections().len();
+            let count = c.selections()?.len();
             (count > 1).then(|| format!("{count} curseurs"))
         });
         elements.register("position", |c| {
-            let document = c.editor.active_document()?;
-            let selection = document.selections().primary();
+            let document = c.document()?;
+            let selection = c.selections()?.primary();
             let point = offset_to_grapheme_point(document.buffer(), selection.head).ok()?;
             let mut text = format!("{}:{}", point.line + 1, point.column + 1);
             if !selection.is_empty() {
@@ -70,20 +100,20 @@ impl Default for StatusElements {
             Some(text)
         });
         elements.register("line_ending", |c| {
-            Some(match c.editor.active_document()?.line_ending() {
+            Some(match c.document()?.line_ending() {
                 cupride_core::LineEnding::Lf => "LF".to_owned(),
                 cupride_core::LineEnding::Crlf => "CRLF".to_owned(),
             })
         });
         elements.register("encoding", |c| {
-            Some(if c.editor.active_document()?.has_bom() {
+            Some(if c.document()?.has_bom() {
                 "UTF-8 BOM".to_owned()
             } else {
                 "UTF-8".to_owned()
             })
         });
         elements.register("language", |c| {
-            let path = c.editor.active_document()?.path()?;
+            let path = c.document()?.path()?;
             Some(language_of(path).unwrap_or("Texte brut").to_owned())
         });
         elements
@@ -224,6 +254,7 @@ mod tests {
         let context = StatusContext {
             editor: &editor,
             pending_keys: "ctrl+k",
+            panel: None,
         };
         let text = |name| elements.text(name, &context);
         assert_eq!(text("file").as_deref(), Some("main.rs"));
@@ -253,6 +284,7 @@ mod tests {
         let context = StatusContext {
             editor: &editor,
             pending_keys: "",
+            panel: None,
         };
         assert_eq!(elements.text("position", &context).as_deref(), Some("1:3"));
         assert_eq!(elements.text("language", &context), None, "sans fichier");

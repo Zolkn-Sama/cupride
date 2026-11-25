@@ -8,6 +8,7 @@ mod file_index;
 mod input;
 mod latency;
 mod logging;
+mod redraw;
 mod watcher;
 
 use anyhow::Context;

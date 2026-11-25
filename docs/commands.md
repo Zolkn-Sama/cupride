@@ -208,6 +208,11 @@ Les fenêtres sont numérotées à partir de 1, dans l'ordre de leur ouverture ;
 qu'une fois par session. La ligne de commande, la palette et les notifications s'affichent dans
 la fenêtre qui a le focus.
 
+Un document n'existe qu'une fois en mémoire : une modification apparaît aussitôt dans toutes les
+fenêtres qui l'affichent, et annuler ou rétablir agit sur ce document où qu'il soit affiché.
+Chaque fenêtre garde ses propres curseurs et son défilement, et sa barre d'état décrit son propre
+panneau actif. Seules les fenêtres qui affichent ce qui a changé sont redessinées.
+
 | Commande | Description |
 |---|---|
 | `window new` | Ouvre une nouvelle fenêtre, avec un document vide (`mod+shift+n`). |
