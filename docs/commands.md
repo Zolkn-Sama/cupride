@@ -277,12 +277,24 @@ panel open editor --split down
 
 ## `layout` — layouts nommés
 
-| Commande | Description | Issue |
-|---|---|---|
-| `layout save <nom>` | Enregistre le layout courant | LAYOUT |
-| `layout load <nom>` | Restaure un layout enregistré | LAYOUT |
-| `layout list` | Liste les layouts enregistrés | LAYOUT |
-| `layout delete <nom>` | Supprime un layout enregistré | LAYOUT |
+Un layout nommé garde une disposition complète — zones et proportions, onglets, fichiers,
+curseurs, défilement — pour basculer en une commande entre écriture, débogage et revue. Les
+layouts sont enregistrés en JSON dans le dossier de données de l'OS, par projet
+(`layouts/<projet>/<nom>.json`).
+
+| Commande | Description |
+|---|---|
+| `layout save <nom>` | Enregistre la disposition actuelle sous ce nom (remplace un layout du même nom). Nom : lettres, chiffres, espaces, `-` et `_`. Les documents sans fichier n'y sont pas gardés. |
+| `layout load <nom> [--force]` | Remplace la disposition actuelle par le layout. Les documents qu'il n'affiche pas sont fermés ; un document modifié ne l'est **jamais** sans confirmation : la commande échoue en le nommant, sauf avec `--force`, qui abandonne ses modifications. Un fichier supprimé depuis : son panneau est fermé, avec une notification. |
+| `layout list` | Liste les layouts enregistrés pour ce projet. |
+| `layout delete <nom>` | Supprime un layout enregistré. |
+
+Exemples :
+
+```
+layout save "revue de code"
+layout load écriture
+```
 
 ## `pkg` — paquets
 
