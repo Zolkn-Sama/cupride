@@ -116,6 +116,47 @@ impl MonitorInfo {
     }
 }
 
+/// Place d'une fenêtre restaurée : là où elle était si elle y est encore entièrement visible ;
+/// sinon rapatriée sur un écran disponible (son écran d'avant s'il est toujours là, sinon
+/// l'écran principal, sinon le premier), réduite pour y tenir, et entièrement visible.
+pub fn rescue(saved: Placement, monitor: Option<&str>, monitors: &[MonitorInfo]) -> Placement {
+    if monitors.is_empty() {
+        return saved;
+    }
+    let by_name = |m: &&MonitorInfo| monitor.is_some_and(|name| m.name == name);
+    // L'écran qui contient le coin haut gauche : la fenêtre y reste, poussée à l'intérieur.
+    let holder = monitors
+        .iter()
+        .filter(|m| m.contains(saved.x, saved.y))
+        .max_by_key(|m| by_name(m));
+    if let Some(screen) = holder {
+        return screen.fit(saved);
+    }
+    // Sinon, rapatriée et centrée.
+    let target = monitors
+        .iter()
+        .find(by_name)
+        .or_else(|| monitors.iter().find(|m| m.primary))
+        .unwrap_or(&monitors[0]);
+    target.center(saved.width, saved.height)
+}
+
+impl MonitorInfo {
+    /// `placement` réduite et déplacée pour être entièrement sur l'écran.
+    pub fn fit(&self, placement: Placement) -> Placement {
+        let width = placement.width.clamp(1, self.width.max(1));
+        let height = placement.height.clamp(1, self.height.max(1));
+        let max_x = self.x + (self.width - width) as i32;
+        let max_y = self.y + (self.height - height) as i32;
+        Placement {
+            x: placement.x.clamp(self.x, max_x),
+            y: placement.y.clamp(self.y, max_y),
+            width,
+            height,
+        }
+    }
+}
+
 /// Échelle sans zéros inutiles : `2`, `1,5`, `1,25`.
 fn format_scale(scale: f64) -> String {
     let text = format!("{:.2}", (scale * 100.0).round() / 100.0);
@@ -209,5 +250,37 @@ mod tests {
             strategy(true, WaylandPlacement::Compositor, placement),
             PlacementStrategy::Compositor
         );
+    }
+
+    #[test]
+    fn fenetre_rapatriee() {
+        let main = MonitorInfo {
+            primary: true,
+            ..monitor("principal", 0, 0, 1920, 1080)
+        };
+        let side = monitor("côté", 1920, 0, 1280, 1024);
+        let monitors = [main.clone(), side.clone()];
+        let at = |x, y, width, height| Placement {
+            x,
+            y,
+            width,
+            height,
+        };
+        // Toujours là, entièrement visible : inchangée.
+        let saved = at(2000, 100, 1000, 700);
+        assert_eq!(rescue(saved, Some("côté"), &monitors), saved);
+        // Dépasse de son écran : poussée à l'intérieur, réduite s'il le faut.
+        assert_eq!(
+            rescue(at(2800, 600, 1000, 1200), Some("côté"), &monitors),
+            at(2200, 0, 1000, 1024)
+        );
+        // Écran disparu (coin sur un bureau qui n'existe plus) : centrée sur le principal.
+        let lost = rescue(at(5000, 200, 1000, 700), Some("ancien"), &monitors);
+        assert_eq!(lost, main.center(1000, 700));
+        // Écran toujours branché mais déplacé : rejoint son écran par son nom.
+        let moved = rescue(at(-1500, 0, 800, 600), Some("côté"), &monitors);
+        assert_eq!(moved, side.center(800, 600));
+        // Sans écrans connus : telle quelle.
+        assert_eq!(rescue(saved, None, &[]), saved);
     }
 }

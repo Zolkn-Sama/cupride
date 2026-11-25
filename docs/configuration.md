@@ -80,6 +80,11 @@ et ignoré. Les plugins pourront ajouter leurs propres éléments.
 |---|---|---|---|
 | `restore` | `true`, `false` | `true` | Au lancement, l'espace de travail du projet est restauré tel qu'il était à la fermeture : zones et proportions, onglets, fichiers, curseurs et défilement. `cupride --no-restore` démarre sans le restaurer. |
 
+Avec plusieurs fenêtres, chacune revient avec son layout, sur son écran, à sa position et à sa
+taille, agrandie ou en plein écran comme elle l'était. Une fenêtre dont l'écran a été débranché
+(ou qui ne serait plus entièrement visible) est rapatriée : sur son écran s'il est toujours là,
+sinon sur l'écran principal, réduite pour y tenir et entièrement visible.
+
 La session est enregistrée à la fermeture, en JSON, dans le dossier de données de l'OS
 (`sessions/`), une par projet (le dossier ouvert avec `cupride <dossier>`). Les documents sans
 fichier n'y sont pas gardés. Un fichier supprimé entre-temps : son panneau est fermé, et une
