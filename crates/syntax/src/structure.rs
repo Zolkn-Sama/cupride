@@ -79,6 +79,55 @@ impl Syntax {
     }
 }
 
+impl Syntax {
+    /// Parenthèse (crochet, accolade) qui correspond à celle qui commence à `offset`, d'après
+    /// l'arbre. `None` si le caractère n'est pas une parenthèse de l'arbre (dans une chaîne, un
+    /// commentaire, ou sans arbre) ; `Some(None)` si elle n'a pas de partenaire (code
+    /// incomplet) ; sinon `Some(Some(position))`.
+    pub fn matching_bracket(&self, offset: usize) -> Option<Option<usize>> {
+        let root = self.tree()?.root_node();
+        let node = root.descendant_for_byte_range(offset, offset + 1)?;
+        if node.start_byte() != offset || node.end_byte() != offset + 1 || node.is_named() {
+            return None;
+        }
+        let kind = node.kind();
+        let partner = partner(kind.chars().next()?)?;
+        let opening = matches!(kind, "(" | "[" | "{");
+        let mut sibling = node;
+        loop {
+            let next = if opening {
+                sibling.next_sibling()
+            } else {
+                sibling.prev_sibling()
+            };
+            let Some(next) = next else {
+                return Some(None);
+            };
+            sibling = next;
+            if !sibling.is_named()
+                && sibling.kind().starts_with(partner)
+                && sibling.kind().len() == 1
+            {
+                // Une parenthèse manquante est insérée par Tree-sitter, de longueur nulle.
+                return Some((!sibling.is_missing()).then(|| sibling.start_byte()));
+            }
+        }
+    }
+}
+
+/// Parenthèse qui correspond à `c`, ou `None` si `c` n'en est pas une.
+pub fn partner(c: char) -> Option<char> {
+    Some(match c {
+        '(' => ')',
+        ')' => '(',
+        '[' => ']',
+        ']' => '[',
+        '{' => '}',
+        '}' => '{',
+        _ => return None,
+    })
+}
+
 fn contains(node: Node<'_>, range: &Range<usize>) -> bool {
     node.start_byte() <= range.start && range.end <= node.end_byte()
 }
@@ -125,6 +174,26 @@ mod tests {
             None,
             "un identifiant n'a pas d'enfant"
         );
+    }
+
+    #[test]
+    fn parentheses_correspondantes() {
+        let text = "fn f(a: [u8; 2]) {\n    g(\")\", (1));\n}\n";
+        let s = syntax("Rust", text);
+        let at = |pattern: &str| text.find(pattern).unwrap();
+        let m = |offset| s.matching_bracket(offset).flatten();
+        assert_eq!(m(at("(a")), Some(at(") {")));
+        assert_eq!(m(at(") {")), Some(at("(a")));
+        assert_eq!(m(at("[u8")), Some(at("]")));
+        assert_eq!(m(at("{\n")), Some(text.rfind('}').unwrap()));
+        let call = at("g(") + 1;
+        assert_eq!(m(call), Some(at("));") + 1));
+        // La parenthèse de la chaîne n'est pas une parenthèse de l'arbre.
+        assert_eq!(s.matching_bracket(at("\")\"") + 1), None);
+        assert_eq!(s.matching_bracket(at("fn")), None);
+        // Code incomplet : pas de partenaire.
+        let s = syntax("C", "int f(void) { return (1; }\n");
+        assert_eq!(s.matching_bracket(21), Some(None));
     }
 
     #[test]

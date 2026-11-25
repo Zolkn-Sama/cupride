@@ -3,6 +3,7 @@
 //! - [`Editor`] : état global de l'éditeur (documents ouverts, document actif, workspace).
 //!   Chaque document affiché l'est dans un panneau ; le panneau actif décide du document actif
 //!   ([`NewPanel`] : où placer un nouveau panneau).
+//! - [`brackets`] : parenthèse correspondante, paires fermées automatiquement.
 //! - [`clipboard`] : presse-papiers, fourni par l'application (mémoire par défaut).
 //! - [`command`] : registre unique des commandes, utilisé par toutes les sources d'actions.
 //! - [`config`] : configuration TOML de l'utilisateur.
@@ -17,6 +18,7 @@
 //! Ne dépend jamais de `render`, `ui` ou `app` : tout le noyau se teste avec `cargo test` et se
 //! pilote depuis le REPL console.
 
+pub mod brackets;
 pub mod clipboard;
 pub mod command;
 pub mod config;

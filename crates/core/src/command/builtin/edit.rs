@@ -195,11 +195,22 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
     registry.register(CommandDef::new(
         "edit",
         "delete-backward",
-        "Supprime la sélection, ou le caractère avant chaque curseur (retour arrière)",
+        "Supprime la sélection, ou le caractère avant chaque curseur (retour arrière) ; une \
+         paire vide autour du curseur, « (|) », est effacée d'un coup",
         |editor, _| {
+            let language = editor.active_document().and_then(|d| d.language());
+            let pairs = super::pairs::active_pairs(editor, language);
             let (_, document) = active(editor)?;
             document.transact(EditKind::Delete, |buffer, tx| {
-                delete_each(buffer, tx, movement::delete_backward_range)
+                delete_each(
+                    buffer,
+                    tx,
+                    |buffer: &Rope, head| match super::pairs::empty_pair_around(buffer, head, pairs)
+                    {
+                        Some(range) => Ok(range),
+                        None => movement::delete_backward_range(buffer, head),
+                    },
+                )
             })?;
             Ok(CommandOutput::None)
         },
@@ -583,7 +594,7 @@ fn replace_selections(
 fn delete_each(
     buffer: &mut Rope,
     tx: &mut Transaction,
-    range_for: fn(&Rope, usize) -> Result<std::ops::Range<usize>, TextError>,
+    range_for: impl Fn(&Rope, usize) -> Result<std::ops::Range<usize>, TextError>,
 ) -> Result<(), TextError> {
     let mut i = 0;
     // Des curseurs voisins peuvent fusionner pendant la boucle : la longueur est relue à chaque tour.

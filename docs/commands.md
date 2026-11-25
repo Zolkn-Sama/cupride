@@ -240,6 +240,19 @@ D'après l'arbre syntaxique du document (langages qui ont une grammaire : Rust, 
 | `edit next-function` | Chaque curseur va au début de la fonction suivante ; en Markdown, au titre suivant (`Ctrl+Maj+↓`). |
 | `edit previous-function` | Au début de la fonction (ou du titre) précédente (`Ctrl+Maj+↑`). |
 
+## Parenthèses et paires
+
+La parenthèse (crochet, accolade) à côté du curseur principal et sa correspondante sont
+surlignées. La correspondance vient de l'arbre syntaxique quand il y en a un (les parenthèses des
+chaînes et des commentaires ne comptent pas), sinon du texte (64 Ko au plus de part et d'autre).
+
+| Commande | Description |
+|---|---|
+| `edit goto-bracket` | Chaque curseur va à la parenthèse qui correspond à celle à côté de lui (`Ctrl+Maj+\` ; `Cmd+Maj+\`). |
+| `edit type <texte>` | Tape du texte comme au clavier (c'est ce que fait la frappe) : avec `[editor] auto_close`, `(` insère `()`, une fermante devant la même fermante passe par-dessus, une sélection est entourée. `edit insert` insère le texte tel quel. |
+
+Retour arrière entre deux caractères d'une paire vide (`(|)`) efface les deux.
+
 ## `recovery` — récupération après plantage
 
 Les documents qui ont des modifications non enregistrées sont copiés toutes les 15 secondes (s'ils

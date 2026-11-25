@@ -28,6 +28,7 @@ options, commentées, avec leur valeur par défaut. `config reload` l'applique s
 | `primary_selection` | `true`, `false` | `false` | Sélection primaire (Linux, X11 et Wayland) : le texte sélectionné y est copié, et le clic du milieu le colle. Sans effet sous Windows et macOS. |
 | `indent_style` | `"auto"`, `"spaces"`, `"tabs"` | `"auto"` | Indentation. `auto` : détectée dans chaque fichier existant (tabulations si la plupart des lignes indentées en commencent par une ; sinon espaces, de la largeur la plus fréquente entre deux niveaux) ; espaces pour un fichier sans indentation. |
 | `indent_width` | entier, de 1 à 16 | `4` | Largeur d'un niveau d'indentation, et largeur affichée d'une tabulation. |
+| `auto_close` | `true`, `false` | `true` | Paires fermées automatiquement : taper `(` insère `()` (devant une espace, une fin de ligne, une fermante ou une ponctuation), taper `)` devant un `)` passe par-dessus, retour arrière entre les deux les efface, et une sélection tapée `(` est entourée. Paires : `()`, `[]`, `{}`, `""`, plus `''` dans les langages de code sauf Rust (durées de vie), et ` `` ` en Markdown. Un guillemet ne se ferme pas juste après une lettre. |
 
 ### `[languages.<Nom>]`
 
@@ -41,6 +42,7 @@ d'état (`Rust`, `Python`, `Makefile`…).
 | `comment` | texte | Début d'un commentaire de ligne, pour `edit toggle-comment` (`"//"`, `"#"`…). |
 | `wrap` | `true`, `false` | Retour à la ligne pour ce langage (par exemple pour Markdown). |
 | `rulers` | liste de colonnes | Règles verticales pour ce langage. |
+| `auto_close` | `true`, `false` | Paires fermées automatiquement pour ce langage. |
 
 ```toml
 [languages.Makefile]
@@ -219,6 +221,7 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `edit delete-lines` | `Ctrl+Maj+K` | `Cmd+Maj+K` |
 | `edit join-lines` | `Ctrl+J` | `Cmd+J` |
 | `edit toggle-comment` | `Ctrl+/` | `Cmd+/` |
+| `edit goto-bracket` | `Ctrl+Maj+\` | `Cmd+Maj+\` |
 | `edit expand-selection` | `Alt+Maj+→` | `Ctrl+Maj+Cmd+→` |
 | `edit shrink-selection` | `Alt+Maj+←` | `Ctrl+Maj+Cmd+←` |
 | `edit next-function` | `Ctrl+Maj+↓` | `Ctrl+Maj+↓` |

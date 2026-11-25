@@ -8,6 +8,7 @@ mod keys;
 mod layout;
 mod lines;
 mod notifications;
+mod pairs;
 mod panel;
 mod recovery;
 mod search;
@@ -45,6 +46,7 @@ pub(crate) fn register_all(registry: &mut CommandRegistry) -> Result<(), Command
     lines::register(registry)?;
     syntax::register(registry)?;
     structure::register(registry)?;
+    pairs::register(registry)?;
     Ok(())
 }
 
