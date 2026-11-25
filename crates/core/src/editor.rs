@@ -94,6 +94,8 @@ pub struct Editor {
     notifications: Notifications,
     /// Recherche en cours.
     pub(crate) search: crate::search::SearchState,
+    /// Recherche dans le projet.
+    pub(crate) project_search: Option<crate::project_search::ProjectSearch>,
     /// Écrans, dans l'ordre de leur numérotation (fournis par l'interface).
     monitors: Vec<crate::monitors::MonitorInfo>,
     /// Thème en cours, et thèmes disponibles (fournis par l'interface).
@@ -131,7 +133,7 @@ impl Editor {
             workspace: Workspace::new(),
             panel_documents: BTreeMap::new(),
             panel_scrolls: BTreeMap::new(),
-            panel_kinds: [PanelKind::EDITOR, PanelKind::EXPLORER]
+            panel_kinds: [PanelKind::EDITOR, PanelKind::EXPLORER, PanelKind::SEARCH]
                 .into_iter()
                 .map(ToOwned::to_owned)
                 .collect(),
@@ -161,6 +163,7 @@ impl Editor {
             notifications: Notifications::default(),
             monitors: Vec::new(),
             search: crate::search::SearchState::default(),
+            project_search: None,
             theme: crate::config::ViewConfig::default().theme,
             themes: Vec::new(),
         }
@@ -606,6 +609,26 @@ impl Editor {
         result
     }
 
+    /// Place le curseur du document actif à la ligne `line` et à la colonne `column` (à partir
+    /// de 1, colonne en caractères affichés), bornées au texte.
+    pub fn goto(&mut self, line: usize, column: usize) -> Result<(), CommandError> {
+        use cupride_text::TextBuffer;
+        let document = self
+            .active_document_mut()
+            .ok_or(CommandError::NoActiveDocument)?;
+        let buffer = document.buffer();
+        let line = line.max(1).min(buffer.len_lines()) - 1;
+        let range = buffer.line_content_range(line)?;
+        let start = cupride_text::position::grapheme_point_to_offset(
+            buffer,
+            cupride_text::Point::new(line, column.max(1) - 1),
+        )
+        .unwrap_or(range.end)
+        .min(range.end);
+        document.set_selections(cupride_text::Selections::cursor(start));
+        Ok(())
+    }
+
     /// Chemin absolu : un chemin relatif part du dossier de la commande en cours (terminal), sinon
     /// du dossier courant.
     pub fn resolve_path(&self, path: &Path) -> PathBuf {
@@ -827,5 +850,24 @@ mod tests {
             .unwrap();
         assert!(dir.path().join("mon fichier'.txt").exists());
         assert!(editor.run_in(dir.path(), &args(&["nope", "x"])).is_err());
+    }
+
+    #[test]
+    fn aller_a_une_ligne() {
+        let mut editor = Editor::new();
+        editor.insert_document(Document::from_text("un\ndéjà vu\ntrois"));
+        let head = |e: &Editor| e.active_document().unwrap().selections().primary().head;
+        editor.goto(2, 3).unwrap();
+        assert_eq!(
+            head(&editor),
+            6,
+            "colonne en caractères : après « dé » (é : 2 octets)"
+        );
+        editor.goto(2, 99).unwrap();
+        assert_eq!(head(&editor), 12, "fin de la ligne");
+        editor.goto(99, 1).unwrap();
+        assert_eq!(head(&editor), 13, "dernière ligne");
+        editor.goto(0, 0).unwrap();
+        assert_eq!(head(&editor), 0);
     }
 }

@@ -373,4 +373,37 @@ impl App {
         self.focus.push(Element::Find);
         true
     }
+
+    /// Lance dans un thread la recherche dans le projet `generation`, préparée par
+    /// `search project`.
+    pub(super) fn start_project_search(&mut self, generation: u64) {
+        let Some(search) = self
+            .editor
+            .project_search()
+            .filter(|s| s.generation == generation)
+        else {
+            return;
+        };
+        let (root, query) = (search.root.clone(), search.query.clone());
+        let proxy = self.proxy.clone();
+        let wake = move || {
+            let _ = proxy.send_event(crate::file_index::AppEvent::ProjectResults);
+        };
+        self.project_search.start(wake, generation, root, query);
+    }
+
+    /// Résultats de la recherche dans le projet arrivés du thread : ajoutés, et affichés.
+    pub(super) fn project_results(&mut self) {
+        let mut changed = false;
+        while let Some((generation, files, summary)) = self.project_search.take() {
+            self.editor.add_project_results(generation, files);
+            if let Some(summary) = summary {
+                self.editor.finish_project_search(generation, summary);
+            }
+            changed = true;
+        }
+        if changed {
+            self.redraw_all();
+        }
+    }
 }

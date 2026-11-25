@@ -223,7 +223,7 @@ mod tests {
         let editor = Editor::new();
         let hint = help_hint(editor.commands(), "file open src").unwrap();
         assert!(
-            hint.starts_with("file open <chemin> [--preview] —"),
+            hint.starts_with("file open <chemin> [--preview] [--line <N>]"),
             "{hint}"
         );
         assert_eq!(help_hint(editor.commands(), "file"), None);

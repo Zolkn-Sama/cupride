@@ -39,6 +39,8 @@ impl PanelKind {
     pub const EDITOR: &'static str = "editor";
     /// Explorateur de fichiers du projet.
     pub const EXPLORER: &'static str = "explorer";
+    /// Résultats de la recherche dans le projet.
+    pub const SEARCH: &'static str = "search";
 
     /// Type nommé `name`.
     pub fn new(name: impl Into<String>) -> Self {

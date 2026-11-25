@@ -49,6 +49,7 @@ mod mouse;
 mod panels;
 mod picker;
 mod scroll;
+mod search_view;
 mod status_bar;
 mod style;
 mod text_input;
@@ -71,6 +72,7 @@ pub use panels::{
     panel_title,
 };
 pub use picker::{MAX_ROWS, Picker, PickerItem};
+pub use search_view::{ResultRow, SearchResultsView, result_rows};
 pub use status_bar::{StatusBar, StatusContext, StatusElement, StatusElements};
 pub use style::Style;
 pub use text_input::{InputEvent, TextInput};

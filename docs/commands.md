@@ -80,7 +80,7 @@ pendant l'écriture laisse toujours l'ancien fichier intact.
 
 | Commande | Description |
 |---|---|
-| `file open <chemin> [--preview]` | Ouvre un fichier et en fait le document actif, dans un onglet de la zone active (`--preview` : dans l'onglet d'aperçu, voir [`tab`](#tab--onglets)). Un fichier déjà ouvert n'est pas dupliqué : son document redevient actif. Un fichier inexistant est créé au premier enregistrement. Fichier binaire ou non UTF-8 : refusé, jamais modifié. |
+| `file open <chemin> [--preview] [--line N [--column N]]` | Ouvre un fichier et en fait le document actif, dans un onglet de la zone active (`--preview` : dans l'onglet d'aperçu, voir [`tab`](#tab--onglets)) ; `--line` et `--column` (à partir de 1, colonne en caractères) y placent le curseur. Un fichier déjà ouvert n'est pas dupliqué : son document redevient actif. Un fichier inexistant est créé au premier enregistrement. Fichier binaire ou non UTF-8 : refusé, jamais modifié. |
 | `file save` | Enregistre le document actif, en conservant ses fins de ligne. Un document sans fichier demande `file save-as`. |
 | `file save-as <chemin>` | Enregistre le document actif sous `<chemin>`, qui devient son fichier. |
 | `file close [--force]` | Ferme le document actif, et tous les panneaux qui l'affichent. S'il a des modifications non enregistrées, la commande échoue, sauf avec `--force`. |
@@ -157,8 +157,17 @@ edit add-cursor down
 | `search replace <texte>` | Remplace l'occurrence sélectionnée par le texte, puis sélectionne la suivante. Avec `--regex` dans la recherche, `$1`, `${nom}` et `$0` reprennent les groupes de capture (`$$` pour un `$`) ; sinon le texte est pris tel quel. |
 | `search replace-all <texte>` | Remplace toutes les occurrences, en une seule modification : un seul `edit undo` les rétablit toutes. |
 | `search clear` | Arrête la recherche en cours. |
+| `search project <motif> [--case] [--word] [--regex]` | Cherche dans tous les fichiers du projet (le dossier ouvert, sinon le dossier courant), en arrière-plan. Les résultats s'affichent au fil de l'eau dans le panneau de recherche, qui s'ouvre à gauche (en onglet à côté de l'explorateur s'il est ouvert). Les fichiers ignorés par `.gitignore` et `.ignore`, les fichiers cachés et les fichiers binaires sont sautés ; au-delà de 10 000 occurrences, la recherche s'arrête. |
+| `search project-replace <texte>` | Aperçu : chaque ligne des résultats s'affiche dans le panneau telle qu'elle deviendrait. Rien n'est modifié. |
+| `search project-apply` | Confirme le remplacement en aperçu. Un fichier ouvert est modifié dans son document (une seule modification, annulable, à enregistrer) ; les autres sont réécrits sur le disque. |
+| `ui search-project` | Prépare `search project` dans la ligne de commande, avec la sélection (`mod+shift+f`). |
 | `ui find` | Ouvre la barre de recherche (`mod+f`), préremplie avec la sélection (sur une ligne) ou le motif en cours. |
 | `ui replace` | Ouvre la barre avec la ligne de remplacement (`Ctrl+H`, `Option+Cmd+F` sous macOS). |
+
+**Panneau de recherche** : en tête, le bilan (« 12 résultats dans 3 fichiers ») ; puis chaque
+fichier et ses lignes, les occurrences en couleur. Flèches, pages, Début et Fin pour se déplacer ;
+Entrée ou double clic ouvre le fichier à la ligne et à la colonne de l'occurrence ; Espace ou clic
+l'ouvre dans l'onglet d'aperçu.
 
 **Barre de recherche** : en haut à droite de la zone active. La recherche est incrémentale :
 chaque frappe sélectionne la première occurrence à partir du point de départ, et toutes les

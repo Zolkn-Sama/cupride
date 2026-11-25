@@ -53,6 +53,7 @@ use crate::close::{CloseDecision, CloseGuard};
 use crate::file_index::{AppEvent, FileIndex};
 use crate::input;
 use crate::latency::LatencyStats;
+use crate::project_worker::ProjectWorker;
 use crate::redraw::Stamp;
 use crate::search_worker::SearchWorker;
 use crate::watcher::DiskWatcher;
@@ -185,6 +186,8 @@ pub(crate) struct App {
     search_jump: bool,
     /// Dernier texte de remplacement saisi.
     last_replacement: String,
+    /// Recherche dans le projet, en arrière-plan.
+    project_search: ProjectWorker,
     /// Occurrences surlignées, partagées par les vues : (document, révision, occurrences).
     highlights: Option<SharedMatches>,
     /// Fichiers du projet, indexés en arrière-plan pour l'ouverture rapide.
@@ -272,6 +275,7 @@ impl App {
             search_origin: None,
             search_jump: false,
             last_replacement: String::new(),
+            project_search: ProjectWorker::default(),
             highlights: None,
             file_index: FileIndex::default(),
             disk: DiskWatcher::new(proxy.clone()),
@@ -1589,6 +1593,7 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::FilesIndexed => self.files_indexed(),
             AppEvent::Remote => self.remote_requests(event_loop),
             AppEvent::SearchDone => self.search_done(),
+            AppEvent::ProjectResults => self.project_results(),
             AppEvent::FilesChanged => {
                 let changed = self.disk.take_changed();
                 if changed.is_empty() {

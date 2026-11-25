@@ -183,6 +183,63 @@ impl Editor {
         panel
     }
 
+    /// Affiche le panneau latéral de type `kind` (explorateur, recherche…) et lui donne le
+    /// focus : celui qui existe déjà, sinon un nouveau, en onglet à côté d'un autre panneau
+    /// latéral s'il y en a un, sinon dans une colonne étroite à gauche (`width` : part de la
+    /// fenêtre).
+    pub fn show_side_panel(&mut self, kind: &str, width: f32) -> PanelId {
+        let existing = self
+            .workspace()
+            .panels()
+            .find(|p| p.kind().as_str() == kind)
+            .map(|p| p.id());
+        if let Some(panel) = existing {
+            self.focus_panel(panel);
+            return panel;
+        }
+        let side = [PanelKind::EXPLORER, PanelKind::SEARCH];
+        let neighbor = self.workspace().tree().panels().into_iter().find(|p| {
+            self.workspace()
+                .panel(*p)
+                .is_some_and(|m| side.contains(&m.kind().as_str()))
+        });
+        if let Some(neighbor) = neighbor {
+            let panel = self.workspace_mut().create(PanelKind::new(kind));
+            if let Err(error) = self.workspace_mut().tree_mut().add(panel, Some(neighbor)) {
+                debug_assert!(false, "panneau neuf non placé : {error}");
+            }
+            self.focus_panel(panel);
+            return panel;
+        }
+        let had_panels = !self.workspace().tree().is_empty();
+        let place = if had_panels {
+            NewPanel::Split(Direction::Left)
+        } else {
+            NewPanel::Tab
+        };
+        let panel = self.open_panel(PanelKind::new(kind), place);
+        if had_panels {
+            let metrics = self.layout_metrics();
+            let total = metrics.area.width;
+            let current = self
+                .workspace()
+                .tree()
+                .areas(metrics.area, metrics.gap)
+                .iter()
+                .find(|a| a.group.contains(panel))
+                .map_or(total / 2.0, |a| a.bounds.width);
+            self.workspace_mut().tree_mut().resize(
+                panel,
+                cupride_layout::Axis::Horizontal,
+                total * width - current,
+                metrics.area,
+                metrics.gap,
+                metrics.min_size,
+            );
+        }
+        panel
+    }
+
     /// Crée le panneau éditeur et le place, sans lui donner le focus.
     fn place_editor(&mut self, document: DocumentId, place: NewPanel) -> PanelId {
         let panel = self

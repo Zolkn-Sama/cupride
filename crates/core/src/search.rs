@@ -51,8 +51,8 @@ impl SearchQuery {
         }
     }
 
-    /// Expression régulière équivalente.
-    pub fn compile(&self) -> Result<Regex, SearchError> {
+    /// Texte de l'expression régulière équivalente (sans l'option de casse).
+    pub fn regex_source(&self) -> Result<String, SearchError> {
         if self.pattern.is_empty() {
             return Err(SearchError::Empty);
         }
@@ -61,11 +61,16 @@ impl SearchQuery {
         } else {
             regex::escape(&self.pattern)
         };
-        let pattern = if self.whole_word {
+        Ok(if self.whole_word {
             format!(r"\b(?:{pattern})\b")
         } else {
             pattern
-        };
+        })
+    }
+
+    /// Expression régulière équivalente.
+    pub fn compile(&self) -> Result<Regex, SearchError> {
+        let pattern = self.regex_source()?;
         RegexBuilder::new(&pattern)
             .case_insensitive(!self.case_sensitive)
             .multi_line(true)
@@ -228,7 +233,11 @@ impl Editor {
 
 /// Texte qui remplace une occurrence : en mode expression régulière, `$1`, `${nom}` et `$0`
 /// reprennent les groupes de capture (`$$` pour un `$`) ; sinon, le texte tel quel.
-fn replacement(query: &SearchQuery, captures: &regex::Captures<'_>, with: &str) -> String {
+pub(crate) fn replacement(
+    query: &SearchQuery,
+    captures: &regex::Captures<'_>,
+    with: &str,
+) -> String {
     if query.regex {
         let mut text = String::new();
         captures.expand(with, &mut text);

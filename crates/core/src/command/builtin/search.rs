@@ -15,6 +15,19 @@ fn flag(name: &'static str, help: &'static str) -> Arg {
         .help(help)
 }
 
+/// Part de la fenêtre donnée au panneau de recherche quand il s'ouvre.
+const SEARCH_WIDTH: f32 = 0.3;
+
+/// Motif et options des arguments `motif`, `--case`, `--word`, `--regex`.
+fn query_from(args: &clap::ArgMatches) -> SearchQuery {
+    SearchQuery {
+        pattern: args.get_one::<String>("motif").cloned().unwrap_or_default(),
+        case_sensitive: args.get_flag("case"),
+        whole_word: args.get_flag("word"),
+        regex: args.get_flag("regex"),
+    }
+}
+
 /// « 3/12 ».
 fn position((index, count): (usize, usize)) -> CommandOutput {
     CommandOutput::message(format!("{index}/{count}"))
@@ -27,12 +40,7 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
             "find",
             "Cherche un motif dans le document actif et sélectionne l'occurrence suivante",
             |editor, args| {
-                let query = SearchQuery {
-                    pattern: args.get_one::<String>("motif").cloned().unwrap_or_default(),
-                    case_sensitive: args.get_flag("case"),
-                    whole_word: args.get_flag("word"),
-                    regex: args.get_flag("regex"),
-                };
+                let query = query_from(args);
                 query
                     .compile()
                     .map_err(|e| CommandError::Failed(e.to_string()))?;
@@ -115,6 +123,75 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
         },
     ))?;
 
+    registry.register(
+        CommandDef::new(
+            "search",
+            "project",
+            "Cherche un motif dans tous les fichiers du projet ; résultats dans le panneau de recherche",
+            |editor, args| {
+                let query = query_from(args);
+                query
+                    .compile()
+                    .map_err(|e| CommandError::Failed(e.to_string()))?;
+                let root = editor
+                    .search_root()
+                    .ok_or_else(|| CommandError::Failed("aucun dossier où chercher".into()))?;
+                let message = format!("recherche de « {} » dans {}", query.pattern, root.display());
+                let generation = editor.start_project_search(query, root);
+                editor.request_ui(UiRequest::ProjectSearch(generation));
+                editor.show_side_panel(crate::layout::PanelKind::SEARCH, SEARCH_WIDTH);
+                Ok(CommandOutput::message(message))
+            },
+        )
+        .arg(Arg::new("motif").required(true).help("Texte (ou expression régulière avec --regex)"))
+        .arg(flag("case", "Respecte la casse"))
+        .arg(flag("word", "Mot entier seulement"))
+        .arg(flag("regex", "Le motif est une expression régulière")),
+    )?;
+
+    registry.register(
+        CommandDef::new(
+            "search",
+            "project-replace",
+            "Montre dans le panneau de recherche les résultats remplacés par le texte, sans rien modifier",
+            |editor, args| {
+                let with = args.get_one::<String>("texte").cloned().unwrap_or_default();
+                Ok(CommandOutput::message(editor.preview_project_replace(&with)?))
+            },
+        )
+        .arg(Arg::new("texte").required(true).help("Texte de remplacement")),
+    )?;
+
+    registry.register(CommandDef::new(
+        "search",
+        "project-apply",
+        "Applique le remplacement montré par « search project-replace » à tous les fichiers",
+        |editor, _| {
+            let (count, files) = editor.apply_project_replace()?;
+            Ok(CommandOutput::message(format!(
+                "{count} remplacement{} dans {files} fichier{}",
+                if count > 1 { "s" } else { "" },
+                if files > 1 { "s" } else { "" }
+            )))
+        },
+    ))?;
+
+    registry.register(CommandDef::new(
+        "ui",
+        "search-project",
+        "Prépare une recherche dans le projet dans la ligne de commande",
+        |editor, _| {
+            let prefill = prefill(editor);
+            let line = if prefill.is_empty() {
+                "search project ".to_owned()
+            } else {
+                format!("search project {}", crate::command::quote(&prefill))
+            };
+            editor.request_ui(UiRequest::CommandLine(line));
+            Ok(CommandOutput::None)
+        },
+    ))?;
+
     registry.register(CommandDef::new(
         "search",
         "clear",
@@ -186,5 +263,34 @@ mod tests {
         e.execute("search clear").unwrap();
         e.execute("ui find").unwrap();
         assert_eq!(e.take_ui_requests(), [UiRequest::Find("vert".into())]);
+    }
+
+    #[test]
+    fn recherche_dans_le_projet() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "vert\nbleu vert\n").unwrap();
+        let mut e = Editor::new();
+        e.set_project(dir.path()).unwrap();
+        e.new_document();
+        let output = e.execute("search project vert").unwrap();
+        assert!(matches!(output, CommandOutput::Message(m) if m.contains("« vert »")));
+        assert!(matches!(
+            e.take_ui_requests()[..],
+            [UiRequest::ProjectSearch(1)]
+        ));
+        let panel = e.active_panel().unwrap();
+        assert_eq!(
+            e.workspace().panel(panel).unwrap().kind().as_str(),
+            "search"
+        );
+        // Le panneau de recherche existe déjà : il reprend le focus.
+        e.execute("panel focus right").unwrap();
+        e.execute("search project bleu").unwrap();
+        assert_eq!(e.active_panel(), Some(panel));
+        assert!(e.execute("search project-apply").is_err(), "rien en aperçu");
+        e.execute("ui search-project").unwrap();
+        assert!(
+            matches!(&e.take_ui_requests()[..], [_, UiRequest::CommandLine(l)] if l.starts_with("search project"))
+        );
     }
 }

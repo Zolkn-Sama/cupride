@@ -37,6 +37,10 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
                 } else {
                     editor.open(&path)?
                 };
+                if let Some(&line) = args.get_one::<usize>("line") {
+                    let column = args.get_one::<usize>("column").copied().unwrap_or(1);
+                    editor.goto(line, column)?;
+                }
                 let name = editor
                     .document(id)
                     .map(|d| d.display_name())
@@ -50,6 +54,21 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
                 .long("preview")
                 .action(ArgAction::SetTrue)
                 .help("Ouvre dans l'onglet d'aperçu, si l'option [tabs] preview est activée"),
+        )
+        .arg(
+            Arg::new("line")
+                .long("line")
+                .value_name("N")
+                .value_parser(clap::value_parser!(usize))
+                .help("Place le curseur à la ligne N (à partir de 1)"),
+        )
+        .arg(
+            Arg::new("column")
+                .long("column")
+                .value_name("N")
+                .value_parser(clap::value_parser!(usize))
+                .requires("line")
+                .help("Et à la colonne N (en caractères, à partir de 1)"),
         ),
     )?;
 
