@@ -5,7 +5,7 @@ use clap::{Arg, ArgAction};
 
 use crate::command::{CommandDef, CommandError, CommandOutput, CommandRegistry};
 use crate::editor::Editor;
-use crate::layout::{Axis, Direction, PanelKind};
+use crate::layout::{Axis, Direction, LayoutError, PanelKind};
 use crate::panels::NewPanel;
 
 /// Noms des directions, tels qu'on les tape.
@@ -106,15 +106,7 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
                     .tree()
                     .neighbor(panel, direction, metrics.area, metrics.gap)
                     .ok_or_else(|| {
-                        CommandError::Failed(format!(
-                            "aucune zone {}",
-                            match direction {
-                                Direction::Left => "à gauche",
-                                Direction::Right => "à droite",
-                                Direction::Up => "au-dessus",
-                                Direction::Down => "en dessous",
-                            }
-                        ))
+                        CommandError::Failed(format!("aucune zone {}", direction_name(direction)))
                     })?;
                 editor.focus_panel(neighbor);
                 Ok(CommandOutput::None)
@@ -176,6 +168,41 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
         ),
     )?;
 
+    registry.register(
+        CommandDef::new(
+            "panel",
+            "move",
+            "Déplace le panneau actif dans la zone voisine, ou dans une nouvelle zone de ce côté",
+            |editor, args| {
+                let direction = direction(args, "direction").expect("argument requis");
+                editor
+                    .move_active_panel(direction, args.get_flag("split"))
+                    .map_err(|error| match error {
+                        CommandError::Layout(LayoutError::AloneInGroup(_)) => {
+                            CommandError::Failed(format!(
+                                "aucune zone {} : le panneau est déjà seul dans la sienne",
+                                direction_name(direction)
+                            ))
+                        }
+                        other => other,
+                    })?;
+                Ok(CommandOutput::None)
+            },
+        )
+        .arg(
+            Arg::new("direction")
+                .required(true)
+                .value_parser(PossibleValuesParser::new(DIRECTIONS))
+                .help("left, right, up ou down"),
+        )
+        .arg(
+            Arg::new("split")
+                .long("split")
+                .action(ArgAction::SetTrue)
+                .help("Toujours dans une nouvelle zone, de ce côté de la zone active"),
+        ),
+    )?;
+
     registry.register(CommandDef::new(
         "panel",
         "list",
@@ -184,6 +211,16 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
     ))?;
 
     Ok(())
+}
+
+/// « à gauche », « à droite »…
+fn direction_name(direction: Direction) -> &'static str {
+    match direction {
+        Direction::Left => "à gauche",
+        Direction::Right => "à droite",
+        Direction::Up => "au-dessus",
+        Direction::Down => "en dessous",
+    }
 }
 
 /// Part de la fenêtre gagnée ou perdue par `panel resize`.
@@ -402,5 +439,37 @@ mod tests {
         assert_eq!(weights(&e), vec![92.0, 8.0]);
         let error = e.execute("panel resize narrower").unwrap_err();
         assert_eq!(error.to_string(), "la zone ne peut pas être rétrécie");
+    }
+
+    #[test]
+    fn deplacer_un_panneau() {
+        let groups = |e: &Editor| -> Vec<Vec<u64>> {
+            e.workspace()
+                .tree()
+                .groups()
+                .iter()
+                .map(|g| g.panels().iter().map(|p| p.get()).collect())
+                .collect()
+        };
+        let mut e = Editor::new();
+        e.new_document();
+        e.new_document();
+        assert_eq!(groups(&e), vec![vec![1, 2]]);
+        // Pas de zone à droite : une nouvelle zone.
+        e.execute("panel move right").unwrap();
+        assert_eq!(groups(&e), vec![vec![1], vec![2]]);
+        assert_eq!(e.active_panel().unwrap().get(), 2, "garde le focus");
+        // Seul dans sa zone, sans voisine en bas : rien à faire.
+        let error = e.execute("panel move down").unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "aucune zone en dessous : le panneau est déjà seul dans la sienne"
+        );
+        // Vers la zone de gauche : en onglet ; la zone vidée disparaît.
+        e.execute("panel move left").unwrap();
+        assert_eq!(groups(&e), vec![vec![1, 2]]);
+        e.execute("panel move up --split").unwrap();
+        assert_eq!(groups(&e), vec![vec![2], vec![1]]);
+        assert!(e.workspace().is_valid());
     }
 }

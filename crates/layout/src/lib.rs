@@ -19,6 +19,7 @@ mod workspace;
 pub use geometry::{Axis, Bounds, Direction};
 pub use panel::{Panel, PanelId, PanelKind};
 pub use tree::{
-    Child, Divider, GroupArea, LayoutError, LayoutTree, Node, Placement, Split, TabGroup,
+    Child, DROP_EDGE, Divider, DropTarget, GroupArea, LayoutError, LayoutTree, Node, Placement,
+    Split, TabGroup,
 };
 pub use workspace::Workspace;

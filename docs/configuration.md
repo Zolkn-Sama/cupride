@@ -142,6 +142,10 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `panel focus right` | `Ctrl+K Ctrl+→` | `Cmd+K Cmd+→` |
 | `panel focus up` | `Ctrl+K Ctrl+↑` | `Cmd+K Cmd+↑` |
 | `panel focus down` | `Ctrl+K Ctrl+↓` | `Cmd+K Cmd+↓` |
+| `panel move left` | `Ctrl+K Alt+←` | `Cmd+K Option+←` |
+| `panel move right` | `Ctrl+K Alt+→` | `Cmd+K Option+→` |
+| `panel move up` | `Ctrl+K Alt+↑` | `Cmd+K Option+↑` |
+| `panel move down` | `Ctrl+K Alt+↓` | `Cmd+K Option+↓` |
 | `panel resize wider` | `Ctrl+K Ctrl+Maj+→` | `Cmd+K Cmd+Maj+→` |
 | `panel resize narrower` | `Ctrl+K Ctrl+Maj+←` | `Cmd+K Cmd+Maj+←` |
 | `panel resize taller` | `Ctrl+K Ctrl+Maj+↓` | `Cmd+K Cmd+Maj+↓` |

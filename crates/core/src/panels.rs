@@ -5,7 +5,7 @@
 //! du document actif : les commandes d'édition agissent sur le document du panneau qui a le
 //! focus, avec les sélections de ce panneau.
 
-use cupride_layout::{Bounds, Direction, LayoutError, PanelId, PanelKind};
+use cupride_layout::{Bounds, Direction, LayoutError, PanelId, PanelKind, Placement};
 
 use crate::command::CommandError;
 use crate::editor::{DocumentId, Editor};
@@ -203,6 +203,42 @@ impl Editor {
         if let Err(error) = placed {
             debug_assert!(false, "panneau neuf non placé : {error}");
         }
+    }
+
+    /// Déplace le panneau `panel` par rapport à `target` (en onglet dans sa zone, ou dans une
+    /// nouvelle zone à côté), et lui donne le focus. Le panneau garde son identité, son document
+    /// et ses sélections.
+    pub fn move_panel(
+        &mut self,
+        panel: PanelId,
+        target: PanelId,
+        placement: Placement,
+    ) -> Result<(), LayoutError> {
+        self.workspace_mut()
+            .tree_mut()
+            .move_panel(panel, target, placement)?;
+        self.focus_panel(panel);
+        Ok(())
+    }
+
+    /// Déplace le panneau actif vers la zone voisine dans la direction `direction`, en onglet ;
+    /// s'il n'y en a pas, ou avec `new_zone`, dans une nouvelle zone de ce côté.
+    pub fn move_active_panel(
+        &mut self,
+        direction: Direction,
+        new_zone: bool,
+    ) -> Result<(), CommandError> {
+        let panel = self.active_panel().ok_or(CommandError::NoActivePanel)?;
+        let metrics = self.layout_metrics;
+        let neighbor =
+            self.workspace()
+                .tree()
+                .neighbor(panel, direction, metrics.area, metrics.gap);
+        match neighbor {
+            Some(neighbor) if !new_zone => self.move_panel(panel, neighbor, Placement::Tab)?,
+            _ => self.move_panel(panel, panel, Placement::Side(direction))?,
+        }
+        Ok(())
     }
 
     /// Ferme le panneau `panel`. Un document qui n'est plus affiché nulle part est fermé avec

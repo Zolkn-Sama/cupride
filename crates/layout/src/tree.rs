@@ -175,6 +175,21 @@ pub enum Placement {
     Side(Direction),
 }
 
+/// Part de la largeur (ou de la hauteur) d'une zone, depuis chaque bord, où lâcher un panneau
+/// l'installe dans une nouvelle zone de ce côté plutôt qu'en onglet.
+pub const DROP_EDGE: f32 = 0.25;
+
+/// Où un panneau lâché à la souris serait placé.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DropTarget {
+    /// Panneau affiché dans la zone visée : la cible de [`LayoutTree::move_panel`].
+    pub anchor: PanelId,
+    /// Placement par rapport à cette zone.
+    pub placement: Placement,
+    /// Place que prendrait le panneau : toute la zone en onglet, sa moitié de ce côté sinon.
+    pub preview: Bounds,
+}
+
 /// Zone d'onglets et sa place dans la fenêtre.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GroupArea<'a> {
@@ -593,6 +608,59 @@ impl LayoutTree {
             }
         });
         found
+    }
+
+    /// Où `panel`, lâché au point (`x`, `y`), serait placé : en onglet au centre d'une zone, dans
+    /// une nouvelle zone près de ses bords. `None` hors des zones, ou si le déplacement ne
+    /// changerait rien (le panneau seul dans sa zone, lâché sur elle).
+    pub fn drop_target(
+        &self,
+        panel: PanelId,
+        x: f32,
+        y: f32,
+        area: Bounds,
+        gap: f32,
+    ) -> Option<DropTarget> {
+        let areas = self.areas(area, gap);
+        let zone = areas.iter().find(|a| a.bounds.contains(x, y))?;
+        let anchor = zone.group.active()?;
+        let b = zone.bounds;
+        // Distance relative à chaque bord ; le plus proche l'emporte s'il est assez près.
+        let edges = [
+            (Direction::Left, (x - b.x) / b.width.max(1.0)),
+            (Direction::Right, (b.right() - x) / b.width.max(1.0)),
+            (Direction::Up, (y - b.y) / b.height.max(1.0)),
+            (Direction::Down, (b.bottom() - y) / b.height.max(1.0)),
+        ];
+        let side = edges
+            .into_iter()
+            .filter(|(_, distance)| *distance < DROP_EDGE)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(direction, _)| direction);
+        let own_zone = zone.group.contains(panel);
+        match side {
+            None if own_zone => None,
+            None => Some(DropTarget {
+                anchor,
+                placement: Placement::Tab,
+                preview: b,
+            }),
+            Some(_) if own_zone && zone.group.len() == 1 => None,
+            Some(direction) => {
+                let axis = direction.axis();
+                let half = b.length(axis) / 2.0;
+                let start = if direction.is_forward() {
+                    b.start(axis) + half
+                } else {
+                    b.start(axis)
+                };
+                Some(DropTarget {
+                    anchor,
+                    placement: Placement::Side(direction),
+                    preview: b.with_span(axis, start, half),
+                })
+            }
+        }
     }
 
     /// Zone sous le point (`x`, `y`).
@@ -1169,5 +1237,29 @@ mod tests {
             let back: LayoutTree = serde_json::from_str(&json).unwrap();
             proptest::prop_assert_eq!(back.panels(), tree.panels());
         }
+    }
+
+    #[test]
+    fn cible_du_glisser_deposer() {
+        let tree = two_columns();
+        let area = Bounds::new(0.0, 0.0, 1000.0, 400.0);
+        let target = |x, y| tree.drop_target(p(1), x, y, area, 0.0);
+        // Centre de l'autre zone : en onglet.
+        let center = target(750.0, 200.0).unwrap();
+        assert_eq!(center.placement, Placement::Tab);
+        assert_eq!(center.anchor, p(2));
+        assert_eq!(center.preview, Bounds::new(500.0, 0.0, 500.0, 400.0));
+        // Près du bord bas de l'autre zone : nouvelle zone en dessous.
+        let below = target(750.0, 390.0).unwrap();
+        assert_eq!(below.placement, Placement::Side(Direction::Down));
+        assert_eq!(below.preview, Bounds::new(500.0, 200.0, 500.0, 200.0));
+        assert_eq!(
+            target(510.0, 200.0).unwrap().placement,
+            Placement::Side(Direction::Left)
+        );
+        // Sa propre zone, où il est seul : rien à faire.
+        assert_eq!(target(250.0, 200.0), None);
+        assert_eq!(target(10.0, 200.0), None);
+        assert_eq!(target(2000.0, 200.0), None, "hors des zones");
     }
 }
