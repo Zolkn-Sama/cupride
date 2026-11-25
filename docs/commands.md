@@ -180,6 +180,19 @@ l'autre ; dans le champ de remplacement, Entrée remplace l'occurrence sélectio
 suivante, `mod+Entrée` remplace tout. Au-delà de 100 000 occurrences, seules les
 100 000 premières sont gardées (« limite »).
 
+## Indentation
+
+| Commande | Description |
+|---|---|
+| `edit indent` | Sans sélection sur plusieurs lignes : insère jusqu'au prochain niveau, à chaque curseur (une tabulation, ou les espaces jusqu'à la prochaine colonne multiple de la largeur). Avec une sélection sur plusieurs lignes : un niveau au début de chaque ligne (`Tab`). |
+| `edit outdent` | Retire un niveau (une tabulation, ou jusqu'à la largeur en espaces) au début de chaque ligne des sélections (`Maj+Tab`). |
+| `edit indentation <tabs\|spaces> [--width N]` | Change l'indentation du document actif, pour la session : la configuration ne la change plus. |
+
+L'indentation de chaque document vient de la configuration (`[editor] indent_style`,
+`indent_width`, et `[languages.<Nom>]`) ; avec `auto`, elle est détectée à l'ouverture. La barre
+d'état l'affiche (`Espaces : 4`). Entrée (`edit newline`) garde l'indentation de la ligne : la
+nouvelle ligne commence par les mêmes espaces et tabulations, jusqu'au curseur.
+
 ## Multi-curseurs
 
 | Commande | Description |

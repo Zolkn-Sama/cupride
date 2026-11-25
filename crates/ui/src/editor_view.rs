@@ -22,9 +22,6 @@ use crate::theme::Theme;
 /// Marge intérieure de la zone de texte, en pixels logiques.
 const PADDING: f32 = 8.0;
 
-/// Largeur d'une tabulation, en espaces.
-const TAB_WIDTH: u16 = 4;
-
 /// Épaisseur du curseur, en pixels logiques.
 const CURSOR_WIDTH: f32 = 2.0;
 
@@ -163,6 +160,9 @@ pub struct EditorView {
     cursor_line: usize,
     lines: HashMap<usize, CachedLine>,
     visible: Range<usize>,
+    /// Largeur d'une tabulation (celle de l'indentation du document) : les lignes sont remises en
+    /// forme quand elle change.
+    tab_width: u16,
 }
 
 impl std::fmt::Debug for EditorView {
@@ -196,6 +196,7 @@ impl EditorView {
             cursor_line: 0,
             lines: HashMap::new(),
             visible: 0..0,
+            tab_width: 4,
         }
     }
 
@@ -313,6 +314,12 @@ impl EditorView {
     /// Met en forme les lignes visibles de `document`. À appeler avant [`EditorView::frame`].
     pub fn prepare(&mut self, text: &mut TextSystem, document: &Document) {
         let buffer = document.buffer();
+        let tab_width = u16::try_from(document.indent().width.clamp(1, 16)).unwrap_or(4);
+        if tab_width != self.tab_width {
+            self.tab_width = tab_width;
+            self.lines.clear();
+            self.content_width = 0.0;
+        }
         self.line_count = buffer.len_lines();
         self.scroll.clamp(self.max_scroll());
         let head = self.selections(document).primary().head;
@@ -354,7 +361,7 @@ impl EditorView {
             }
             let mut shaped = Buffer::new(text.font_system(), metrics);
             shaped.set_wrap(Wrap::None);
-            shaped.set_tab_width(TAB_WIDTH);
+            shaped.set_tab_width(self.tab_width);
             shaped.set_size(None, Some(metrics.line_height));
             shaped.set_text(&content, &attrs(&family), Shaping::Advanced, None);
             shaped.shape_until_scroll(text.font_system(), false);

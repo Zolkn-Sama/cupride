@@ -139,6 +139,11 @@ pub struct Document {
     bom: bool,
     history: History,
     selections: Selections,
+    /// Indentation : tabulations ou espaces, et largeur.
+    indent: crate::indent::Indent,
+    /// L'indentation a été choisie à la main (`edit indentation`) : la configuration ne la
+    /// change plus.
+    indent_set: bool,
     /// Panneau dont les sélections sont `selections`.
     view: Option<PanelId>,
     /// Sélections des autres panneaux qui affichent le document.
@@ -169,6 +174,8 @@ impl Document {
             bom: false,
             history: History::new(),
             selections: Selections::cursor(0),
+            indent: crate::indent::Indent::default(),
+            indent_set: false,
             view: None,
             other_views: BTreeMap::new(),
             revision: 0,
@@ -207,10 +214,13 @@ impl Document {
         let (revision, saves) = (self.revision + 1, self.saves);
         let delay = self.history.group_delay();
         let (view, other_views) = (self.view, std::mem::take(&mut self.other_views));
+        let (indent, indent_set) = (self.indent, self.indent_set);
         *self = reloaded;
         self.revision = revision;
         self.saves = saves;
         self.history.set_group_delay(delay);
+        self.indent = indent;
+        self.indent_set = indent_set;
         self.view = view;
         for (id, selections) in other_views {
             let selections = self.clamped(selections);
@@ -322,6 +332,19 @@ impl Document {
     /// l'enregistrement.
     pub fn has_bom(&self) -> bool {
         self.bom
+    }
+
+    /// Indentation du document.
+    pub fn indent(&self) -> crate::indent::Indent {
+        self.indent
+    }
+
+    /// Change l'indentation ; avec `manual`, la configuration ne la changera plus.
+    pub fn set_indent(&mut self, indent: crate::indent::Indent, manual: bool) {
+        if manual || !self.indent_set {
+            self.indent = indent;
+            self.indent_set |= manual;
+        }
     }
 
     /// Sélections du document.

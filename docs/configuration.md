@@ -26,6 +26,26 @@ options, commentées, avec leur valeur par défaut. `config reload` l'applique s
 | `line_ending` | `"auto"`, `"lf"`, `"crlf"` | `"auto"` | Fin de ligne des **nouveaux** documents (`auto` : LF). Un fichier existant garde toujours ses fins de ligne. |
 | `undo_group_delay_ms` | entier ≥ 0 | `1000` | Pause, en millisecondes, au-delà de laquelle une nouvelle frappe commence un nouveau bloc d'annulation. `0` : chaque frappe s'annule séparément. |
 | `primary_selection` | `true`, `false` | `false` | Sélection primaire (Linux, X11 et Wayland) : le texte sélectionné y est copié, et le clic du milieu le colle. Sans effet sous Windows et macOS. |
+| `indent_style` | `"auto"`, `"spaces"`, `"tabs"` | `"auto"` | Indentation. `auto` : détectée dans chaque fichier existant (tabulations si la plupart des lignes indentées en commencent par une ; sinon espaces, de la largeur la plus fréquente entre deux niveaux) ; espaces pour un fichier sans indentation. |
+| `indent_width` | entier, de 1 à 16 | `4` | Largeur d'un niveau d'indentation, et largeur affichée d'une tabulation. |
+
+### `[languages.<Nom>]`
+
+Réglages propres à un langage, prioritaires sur `[editor]`. Le nom est celui affiché dans la barre
+d'état (`Rust`, `Python`, `Makefile`…).
+
+| Option | Valeurs | Effet |
+|---|---|---|
+| `indent_style` | `"auto"`, `"spaces"`, `"tabs"` | Indentation pour ce langage. |
+| `indent_width` | entier, de 1 à 16 | Largeur pour ce langage. |
+
+```toml
+[languages.Makefile]
+indent_style = "tabs"
+
+[languages.YAML]
+indent_width = 2
+```
 
 ### `[font]`
 
@@ -60,11 +80,12 @@ L'historique se consulte avec `notifications list`.
 | Option | Valeurs | Défaut | Effet |
 |---|---|---|---|
 | `left` | liste d'éléments | `["file", "modified", "keys"]` | Éléments à gauche de la barre d'état, dans l'ordre. |
-| `right` | liste d'éléments | `["selections", "position", "line_ending", "encoding", "language"]` | Éléments à droite. |
+| `right` | liste d'éléments | `["selections", "position", "indent", "line_ending", "encoding", "language"]` | Éléments à droite. |
 
 Éléments : `file` (nom du fichier), `modified` (● si modifié), `keys` (séquence de touches en
 cours, `ctrl+k …`), `selections` (nombre de curseurs, s'il y en a plusieurs), `position` (ligne et
-colonne, en caractères affichés, et taille de la sélection), `line_ending` (`LF`, `CRLF`),
+colonne, en caractères affichés, et taille de la sélection), `indent` (`Espaces : 4`,
+`Tabulations : 4`), `line_ending` (`LF`, `CRLF`),
 `encoding` (`UTF-8`, `UTF-8 BOM`), `language` (d'après l'extension). Un nom inconnu est signalé
 et ignoré. Les plugins pourront ajouter leurs propres éléments.
 
@@ -156,7 +177,8 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `edit move page-up --extend` | `Maj+Page préc.` | `Maj+Page préc.` |
 | `edit move page-down --extend` | `Maj+Page suiv.` | `Maj+Page suiv.` |
 | `edit newline` | `Entrée` | `Entrée` |
-| `edit insert '\t'` | `Tab` | `Tab` |
+| `edit indent` | `Tab` | `Tab` |
+| `edit outdent` | `Maj+Tab` | `Maj+Tab` |
 | `edit delete-backward` | `Retour arrière` | `Retour arrière` |
 | `edit delete-forward` | `Suppr` | `Suppr` |
 | `edit keep-primary` | `Échap` | `Échap` |
@@ -259,6 +281,11 @@ Les fichiers des thèmes intégrés servent d'exemples complets :
 # primaire, et le clic du milieu le colle. Sans effet sous Windows et macOS.
 # primary_selection = false
 
+# Indentation : "auto" (détectée dans chaque fichier ; espaces pour un fichier sans
+# indentation), "spaces" ou "tabs". Largeur d'un niveau, et d'une tabulation affichée.
+# indent_style = "auto"
+# indent_width = 4
+
 [font]
 # Famille de police : "monospace" (police à chasse fixe du système) ou un nom de famille
 # installée, par exemple "JetBrains Mono" ou "Fira Code" (ligatures).
@@ -299,9 +326,10 @@ Les fichiers des thèmes intégrés servent d'exemples complets :
 [status_bar]
 # Éléments de la barre d'état, à gauche et à droite : "file" (nom du fichier), "modified"
 # (modifications non enregistrées), "keys" (séquence de touches en cours), "selections" (nombre
-# de curseurs), "position" (ligne et colonne), "line_ending", "encoding", "language".
+# de curseurs), "position" (ligne et colonne), "indent" (tabulations ou espaces), "line_ending",
+# "encoding", "language".
 # left = ["file", "modified", "keys"]
-# right = ["selections", "position", "line_ending", "encoding", "language"]
+# right = ["selections", "position", "indent", "line_ending", "encoding", "language"]
 
 [tabs]
 # Onglet d'aperçu : un fichier ouvert depuis l'ouverture rapide ou l'explorateur remplace l'onglet
@@ -328,6 +356,11 @@ Les fichiers des thèmes intégrés servent d'exemples complets :
 # (window new --monitor, window move) : "fullscreen" (plein écran sur cet écran) ou
 # "compositor" (le compositeur choisit). Une notification le signale. Sans effet ailleurs.
 # wayland_placement = "fullscreen"
+
+# [languages.Makefile]
+# Réglages par langage (nom affiché dans la barre d'état), prioritaires sur [editor].
+# indent_style = "tabs"
+# indent_width = 8
 
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les

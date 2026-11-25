@@ -22,6 +22,7 @@ pub mod config;
 mod document;
 mod editor;
 pub mod events;
+pub mod indent;
 pub mod keymap;
 pub mod language;
 pub mod monitors;
