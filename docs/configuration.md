@@ -39,6 +39,8 @@ d'état (`Rust`, `Python`, `Makefile`…).
 | `indent_style` | `"auto"`, `"spaces"`, `"tabs"` | Indentation pour ce langage. |
 | `indent_width` | entier, de 1 à 16 | Largeur pour ce langage. |
 | `comment` | texte | Début d'un commentaire de ligne, pour `edit toggle-comment` (`"//"`, `"#"`…). |
+| `wrap` | `true`, `false` | Retour à la ligne pour ce langage (par exemple pour Markdown). |
+| `rulers` | liste de colonnes | Règles verticales pour ce langage. |
 
 ```toml
 [languages.Makefile]
@@ -65,6 +67,10 @@ indent_width = 2
 | `highlight_current_line` | `true`, `false` | `true` | Surligne la ligne du curseur principal. |
 | `line_numbers` | `"absolute"`, `"relative"`, `"off"` | `"absolute"` | Numéros de ligne dans la gouttière. `relative` : distance à la ligne du curseur, et numéro réel sur cette ligne. Avec `off`, la colonne des marqueurs (diagnostics, Git, points d'arrêt) reste réservée. |
 | `theme` | identifiant de thème | `"padparadscha"` | Thème de couleurs : `padparadscha`, `clair`, `sombre`, ou un thème de l'utilisateur (voir [Thèmes](#thèmes)). |
+| `wrap` | `true`, `false` | `false` | Retour à la ligne visuel : une ligne plus large que la zone continue sur les rangées suivantes, coupée de préférence après une espace ; le fichier n'est pas modifié. Désactivé pour les fichiers de plus de 4 Mo. `view wrap` le bascule pour la session. |
+| `whitespace` | `true`, `false` | `false` | Espaces (points) et tabulations (traits) visibles. |
+| `line_endings` | `true`, `false` | `false` | Fins de ligne visibles. |
+| `rulers` | liste de colonnes | `[]` | Règles verticales aux colonnes indiquées, par exemple `[80, 100]`. |
 
 ### `[notifications]`
 
@@ -213,6 +219,7 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `edit delete-lines` | `Ctrl+Maj+K` | `Cmd+Maj+K` |
 | `edit join-lines` | `Ctrl+J` | `Cmd+J` |
 | `edit toggle-comment` | `Ctrl+/` | `Cmd+/` |
+| `view wrap` | `Alt+Z` | — (Option+Z tape un caractère) |
 | `window new` | `Ctrl+Maj+N` | `Cmd+Maj+N` |
 | `window close` | `Ctrl+Maj+W` | `Cmd+Maj+W` |
 | `panel focus left` | `Ctrl+K Ctrl+←` | `Cmd+K Cmd+←` |
@@ -323,6 +330,16 @@ Les fichiers des thèmes intégrés servent d'exemples complets :
 # Thème : "padparadscha", "clair", "sombre", ou un thème du dossier themes/ de la configuration
 # (son nom de fichier, sans .toml).
 # theme = "padparadscha"
+
+# Retour à la ligne visuel des lignes plus larges que la zone (le fichier n'est pas modifié).
+# wrap = false
+
+# Espaces et tabulations visibles (points et flèches discrets), fins de ligne visibles.
+# whitespace = false
+# line_endings = false
+
+# Règles verticales aux colonnes indiquées, par exemple [80, 100].
+# rulers = []
 
 [notifications]
 # Durée d'affichage des informations et avertissements, en millisecondes. 0 : jusqu'à un clic.

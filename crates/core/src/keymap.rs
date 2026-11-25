@@ -623,6 +623,7 @@ pub fn default_bindings(platform: Platform) -> Vec<(&'static str, &'static str)>
             ("ctrl+alt+up", "edit add-cursor up"),
             ("ctrl+alt+down", "edit add-cursor down"),
             ("ctrl+h", "ui replace"),
+            ("alt+z", "view wrap"),
         ]),
     }
     bindings
