@@ -258,6 +258,7 @@ Voir [`configuration.md`](configuration.md) pour les options.
 | `view zoom-in` | Agrandit l'interface d'un cran (raccourcis `mod+=`, `mod+plus`). |
 | `view zoom-out` | Réduit l'interface d'un cran (`mod+-`). |
 | `view zoom-reset` | Revient à 100 % (`mod+0`). |
+| `view wrap [on\|off\|toggle]` | Retour à la ligne visuel pour la session, à la place de l'option `[view] wrap` (`Alt+Z` sous Windows et Linux). |
 
 Crans : 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250 et 300 %. Le zoom multiplie
 l'échelle de l'écran : le texte est remis en forme à la nouvelle taille, net, sans redémarrage ;

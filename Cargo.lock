@@ -754,6 +754,7 @@ dependencies = [
  "tempfile",
  "toml",
  "tracing",
+ "unicode-segmentation",
 ]
 
 [[package]]

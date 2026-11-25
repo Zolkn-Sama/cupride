@@ -84,6 +84,8 @@ pub struct Editor {
     last_copy: Option<LastCopy>,
     /// Zoom de l'interface (1 : taille normale), multiplié par l'échelle de l'écran.
     zoom: f32,
+    /// Retour à la ligne imposé pour la session (`view wrap`), à la place de la configuration.
+    wrap_override: Option<bool>,
     /// Dossier ouvert comme projet, s'il y en a un.
     project: Option<PathBuf>,
     /// Dossier d'où partent les chemins relatifs de la commande en cours (commande venue d'un
@@ -161,6 +163,7 @@ impl Editor {
             })),
             last_copy: None,
             zoom: 1.0,
+            wrap_override: None,
             project: None,
             base_dir: None,
             ui_requests: Vec::new(),
@@ -676,6 +679,18 @@ impl Editor {
         }
         self.project = Some(path);
         Ok(())
+    }
+
+    /// Retour à la ligne pour un document de langage `language` : celui imposé par `view wrap`,
+    /// sinon la configuration.
+    pub fn wrap_for(&self, language: Option<&str>) -> bool {
+        self.wrap_override
+            .unwrap_or_else(|| self.config.display_for(language).0)
+    }
+
+    /// Impose le retour à la ligne pour la session (`None` : celui de la configuration).
+    pub fn set_wrap_override(&mut self, wrap: Option<bool>) {
+        self.wrap_override = wrap;
     }
 
     /// Zoom de l'interface : 1 pour la taille normale.

@@ -76,6 +76,16 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # (son nom de fichier, sans .toml).
 # theme = "padparadscha"
 
+# Retour à la ligne visuel des lignes plus larges que la zone (le fichier n'est pas modifié).
+# wrap = false
+
+# Espaces et tabulations visibles (points et flèches discrets), fins de ligne visibles.
+# whitespace = false
+# line_endings = false
+
+# Règles verticales aux colonnes indiquées, par exemple [80, 100].
+# rulers = []
+
 [notifications]
 # Durée d'affichage des informations et avertissements, en millisecondes. 0 : jusqu'à un clic.
 # timeout_ms = 4000
@@ -238,6 +248,14 @@ pub struct ViewConfig {
     pub line_numbers: LineNumbers,
     /// Identifiant du thème.
     pub theme: String,
+    /// Retour à la ligne visuel des lignes trop longues.
+    pub wrap: bool,
+    /// Espaces et tabulations visibles.
+    pub whitespace: bool,
+    /// Fins de ligne visibles.
+    pub line_endings: bool,
+    /// Règles verticales, aux colonnes indiquées.
+    pub rulers: Vec<usize>,
 }
 
 impl Default for ViewConfig {
@@ -248,6 +266,10 @@ impl Default for ViewConfig {
             highlight_current_line: true,
             line_numbers: LineNumbers::Absolute,
             theme: "padparadscha".to_owned(),
+            wrap: false,
+            whitespace: false,
+            line_endings: false,
+            rulers: Vec::new(),
         }
     }
 }
@@ -335,6 +357,17 @@ pub struct SessionConfig {
 }
 
 impl Config {
+    /// Retour à la ligne et règles pour le langage `language`.
+    pub fn display_for(&self, language: Option<&str>) -> (bool, Vec<usize>) {
+        let specific = language.and_then(|l| self.languages.get(l));
+        (
+            specific.and_then(|l| l.wrap).unwrap_or(self.view.wrap),
+            specific
+                .and_then(|l| l.rulers.clone())
+                .unwrap_or_else(|| self.view.rulers.clone()),
+        )
+    }
+
     /// Indentation réglée pour le langage `language` : celle de `[languages.<Nom>]`, sinon celle
     /// de `[editor]`.
     pub fn indent_for(&self, language: Option<&str>) -> (crate::indent::IndentStyle, usize) {
@@ -406,10 +439,14 @@ pub struct LanguageConfig {
     pub indent_width: Option<usize>,
     /// Début d'un commentaire de ligne (`//`, `#`…), pour `edit toggle-comment`.
     pub comment: Option<String>,
+    /// Retour à la ligne visuel, à la place de `[view] wrap`.
+    pub wrap: Option<bool>,
+    /// Règles verticales, à la place de `[view] rulers`.
+    pub rulers: Option<Vec<usize>>,
 }
 
 /// Clés connues d'une section `[languages.<Nom>]`.
-const LANGUAGE_KEYS: [&str; 3] = ["indent_style", "indent_width", "comment"];
+const LANGUAGE_KEYS: [&str; 5] = ["indent_style", "indent_width", "comment", "wrap", "rulers"];
 
 /// Configuration complète.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -461,6 +498,10 @@ const KNOWN_KEYS: [(&str, &[&str]); 11] = [
             "highlight_current_line",
             "line_numbers",
             "theme",
+            "wrap",
+            "whitespace",
+            "line_endings",
+            "rulers",
         ],
     ),
     ("notifications", &["timeout_ms", "error_timeout_ms"]),

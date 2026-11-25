@@ -55,10 +55,11 @@ mod style;
 mod text_input;
 mod theme;
 mod toasts;
+pub mod wrap;
 
 pub use blink::{BLINK_IDLE_STOP, CursorBlink};
 pub use command_line::{CommandLine, MessageKind};
-pub use editor_view::{EditorView, Pointer, Preedit, ViewSettings, WHEEL_LINES};
+pub use editor_view::{DisplayOptions, EditorView, Pointer, Preedit, ViewSettings, WHEEL_LINES};
 pub use explorer::{Entry, ExplorerTree, ExplorerView, Row};
 pub use find_bar::{FindBar, FindOption};
 pub use focus::Focus;
