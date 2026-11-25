@@ -125,7 +125,10 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `file save` | `Ctrl+S` | `Cmd+S` |
 | `ui command-line 'file save-as '` | `Ctrl+Maj+S` | `Cmd+Maj+S` |
 | `ui command-line 'file open '` | `Ctrl+O` | `Cmd+O` |
-| `file close` | `Ctrl+W`, `Ctrl+K Ctrl+W` | `Cmd+W`, `Cmd+K Cmd+W` |
+| `panel close` | `Ctrl+W` | `Cmd+W` |
+| `split right` | `Ctrl+\` | `Cmd+\` |
+| `split down` | `Ctrl+K Ctrl+\` | `Cmd+K Cmd+\` |
+| `file close` | `Ctrl+K Ctrl+W` | `Cmd+K Cmd+W` |
 | `view zoom-in` | `Ctrl+=`, `Ctrl+Maj+=`, `Ctrl++` | `Cmd+=`, `Cmd+Maj+=`, `Cmd++` |
 | `view zoom-out` | `Ctrl+-` | `Cmd+-` |
 | `view zoom-reset` | `Ctrl+0` | `Cmd+0` |

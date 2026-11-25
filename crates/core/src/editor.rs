@@ -1,10 +1,10 @@
 //! État global de l'éditeur.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use cupride_layout::{PanelId, Workspace};
+use cupride_layout::{PanelId, PanelKind, Workspace};
 use slotmap::{SecondaryMap, SlotMap};
 
 use crate::clipboard::{Clipboard, LastCopy, MemoryClipboard};
@@ -44,6 +44,8 @@ pub struct Editor {
     workspace: Workspace,
     /// Document affiché par chaque panneau éditeur.
     pub(crate) panel_documents: BTreeMap<PanelId, DocumentId>,
+    /// Types de panneaux connus (intégrés, puis ceux de l'interface et des plugins).
+    panel_kinds: BTreeSet<String>,
     commands: CommandRegistry,
     keymap: Keymap,
     config: Config,
@@ -94,6 +96,10 @@ impl Editor {
             active: None,
             workspace: Workspace::new(),
             panel_documents: BTreeMap::new(),
+            panel_kinds: [PanelKind::EDITOR, PanelKind::EXPLORER]
+                .into_iter()
+                .map(ToOwned::to_owned)
+                .collect(),
             commands: CommandRegistry::new(),
             keymap: Keymap::new(),
             config: Config::default(),
@@ -135,12 +141,29 @@ impl Editor {
 
     /// Crée un document vide sans fichier et en fait le document actif, dans un nouvel onglet.
     pub fn new_document(&mut self) -> DocumentId {
+        let id = self.create_document();
+        self.show_document(id);
+        id
+    }
+
+    /// Crée un document vide sans fichier, sans l'afficher.
+    pub(crate) fn create_document(&mut self) -> DocumentId {
         let mut document = Document::new();
         document.set_line_ending(self.config.editor.line_ending.for_new_document());
         self.configure(&mut document);
-        let id = self.documents.insert(document);
-        self.show_document(id);
-        id
+        self.documents.insert(document)
+    }
+
+    /// Types de panneaux connus : `editor`, `explorer`, puis ceux ajoutés par l'interface et les
+    /// plugins.
+    pub fn panel_kinds(&self) -> impl Iterator<Item = &str> {
+        self.panel_kinds.iter().map(String::as_str)
+    }
+
+    /// Fait connaître le type de panneau `kind` (fourni par l'interface ou un plugin), pour
+    /// `panel open`.
+    pub fn register_panel_kind(&mut self, kind: impl Into<String>) {
+        self.panel_kinds.insert(kind.into());
     }
 
     /// Ajoute un document déjà construit et en fait le document actif, dans un nouvel onglet.
