@@ -45,6 +45,7 @@ impl App {
                 }
                 UiRequest::Find(pattern) => self.open_find(&pattern),
                 UiRequest::Replace(pattern) => self.open_replace(&pattern),
+                UiRequest::ProjectSearch(generation) => self.start_project_search(generation),
                 UiRequest::QuickOpen => {
                     self.close_overlays();
                     self.open_quick_open();

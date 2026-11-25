@@ -16,6 +16,8 @@ pub enum UiRequest {
     Find(String),
     /// Ouvrir la barre de recherche avec le champ de remplacement.
     Replace(String),
+    /// Lancer la recherche dans le projet en cours (dans un thread), de ce numéro.
+    ProjectSearch(u64),
     /// Montrer ce fichier ou ce dossier dans l'explorateur (dossiers parents dépliés).
     Reveal(std::path::PathBuf),
     /// Placer la fenêtre sur l'écran `monitor` (numéro, à partir de 1).

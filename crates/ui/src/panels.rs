@@ -227,6 +227,16 @@ impl Default for ViewRegistry {
             }),
         );
         registry.register(
+            PanelKind::SEARCH,
+            Box::new(|panel, settings, scale| {
+                Box::new(crate::search_view::SearchResultsView::new(
+                    panel,
+                    settings.clone(),
+                    scale,
+                ))
+            }),
+        );
+        registry.register(
             PanelKind::EXPLORER,
             Box::new(|panel, settings, scale| {
                 Box::new(crate::explorer::ExplorerView::new(
@@ -317,6 +327,7 @@ pub fn panel_title(editor: &Editor, panel: PanelId) -> String {
     }
     match editor.workspace().panel(panel).map(|p| p.kind().as_str()) {
         Some(PanelKind::EXPLORER) => "Explorateur".to_owned(),
+        Some(PanelKind::SEARCH) => "Recherche".to_owned(),
         Some(kind) => kind.to_owned(),
         None => String::new(),
     }
@@ -871,7 +882,7 @@ mod tests {
         assert!(registry.contains("editor"));
         assert_eq!(
             registry.kinds().collect::<Vec<_>>(),
-            vec!["editor", "explorer"]
+            vec!["editor", "explorer", "search"]
         );
         let settings = ViewSettings::default();
         let view = registry

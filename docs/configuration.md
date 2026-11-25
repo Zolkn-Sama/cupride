@@ -180,6 +180,7 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `explorer show` | `Ctrl+Maj+E` | `Cmd+Maj+E` |
 | `ui find` | `Ctrl+F` | `Cmd+F` |
 | `ui replace` | `Ctrl+H` | `Option+Cmd+F` |
+| `ui search-project` | `Ctrl+Maj+F` | `Cmd+Maj+F` |
 | `search next` | `F3`, `Ctrl+G` | `F3`, `Cmd+G` |
 | `search previous` | `Maj+F3`, `Ctrl+Maj+G` | `Maj+F3`, `Cmd+Maj+G` |
 | `window new` | `Ctrl+Maj+N` | `Cmd+Maj+N` |

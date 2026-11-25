@@ -30,6 +30,8 @@ pub(crate) enum AppEvent {
     Remote,
     /// Une recherche en arrière-plan est terminée.
     SearchDone,
+    /// Des résultats de la recherche dans le projet attendent.
+    ProjectResults,
 }
 
 /// Ce que le thread d'indexation envoie.

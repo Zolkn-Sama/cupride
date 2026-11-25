@@ -13,6 +13,9 @@ clap.workspace = true
 cupride-layout.workspace = true
 cupride-text.workspace = true
 directories.workspace = true
+grep-regex.workspace = true
+grep-searcher.workspace = true
+ignore.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -22,6 +25,7 @@ strsim.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 toml.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

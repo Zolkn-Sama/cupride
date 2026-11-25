@@ -8,6 +8,7 @@ mod file_index;
 mod input;
 mod latency;
 mod logging;
+mod project_worker;
 mod redraw;
 mod remote;
 mod search_worker;

@@ -427,3 +427,52 @@ fn recherche() {
     let pixels = target.read_rgba(&gpu).expect("relecture de l'image");
     save_png("recherche", (width, height), &pixels);
 }
+
+/// Panneau de recherche dans le projet, à côté d'un éditeur.
+#[test]
+fn recherche_dans_le_projet() {
+    use cupride_core::search::SearchQuery;
+    use cupride_render::Frame;
+    use cupride_ui::{PanelViews, ViewRegistry};
+
+    let gpu = match Gpu::headless() {
+        Ok(gpu) => gpu,
+        Err(error) => {
+            eprintln!("test ignoré, pas de GPU : {error}");
+            return;
+        }
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("src/main.rs"),
+        "fn main() {\n    let message = 1;\n    dbg!(message);\n}\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("README.md"), "Le message du projet.\n").unwrap();
+    let (width, height) = (900_u32, 260_u32);
+    let target = OffscreenTarget::new(&gpu, width, height);
+    let mut renderer = Renderer::new(&gpu, OFFSCREEN_FORMAT);
+    let mut text = TextSystem::new();
+    let mut editor = Editor::new();
+    editor.set_project(&root).unwrap();
+    editor.open(root.join("src/main.rs")).unwrap();
+    editor
+        .run_project_search(SearchQuery::new("message"))
+        .unwrap();
+    editor.show_side_panel("search", 0.4);
+
+    let mut views = PanelViews::new(ViewRegistry::default(), ViewSettings::default(), 1.0);
+    let theme = Theme::default();
+    let area = Rect::new(0.0, 0.0, width as f32, height as f32);
+    views.layout(&mut text, &editor, area);
+    views.prepare(&mut text, &editor, &theme, true, true);
+    let mut frame = Frame::new(theme.background);
+    views.draw(frame.base(), &editor, &theme, true, true);
+    renderer
+        .render(&gpu, &mut text, &target.view, target.size(), &frame)
+        .expect("rendu");
+    let pixels = target.read_rgba(&gpu).expect("relecture de l'image");
+    save_png("recherche_projet", (width, height), &pixels);
+}
