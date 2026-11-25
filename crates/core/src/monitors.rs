@@ -36,6 +36,42 @@ pub struct Placement {
     pub height: u32,
 }
 
+/// Comment placer une fenêtre sur un écran demandé.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlacementStrategy {
+    /// À cette position et à cette taille.
+    Position(Placement),
+    /// En plein écran sur l'écran demandé (Wayland : une application ne peut pas se placer).
+    Fullscreen,
+    /// Là où le compositeur le décide (Wayland).
+    Compositor,
+}
+
+/// Comment honorer, sous Wayland, la demande d'un écran précis (`[window] wayland_placement`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WaylandPlacement {
+    /// Plein écran sur l'écran demandé.
+    #[default]
+    Fullscreen,
+    /// Placement laissé au compositeur.
+    Compositor,
+}
+
+/// Stratégie de placement : la position calculée, sauf sous Wayland, où l'application ne peut
+/// pas positionner ses fenêtres : plein écran ou compositeur, selon la configuration.
+pub fn strategy(
+    wayland: bool,
+    setting: WaylandPlacement,
+    placement: Placement,
+) -> PlacementStrategy {
+    match (wayland, setting) {
+        (false, _) => PlacementStrategy::Position(placement),
+        (true, WaylandPlacement::Fullscreen) => PlacementStrategy::Fullscreen,
+        (true, WaylandPlacement::Compositor) => PlacementStrategy::Compositor,
+    }
+}
+
 /// Part maximale d'un écran occupée par une fenêtre placée dessus.
 const MAX_SHARE: f64 = 0.9;
 
@@ -156,5 +192,22 @@ mod tests {
         m.name = String::new();
         m.primary = false;
         assert_eq!(m.describe(), "écran sans nom — 3840×2160, échelle 2");
+    }
+
+    #[test]
+    fn repli_wayland() {
+        let placement = monitor("A", 0, 0, 1920, 1080).center(800, 600);
+        assert_eq!(
+            strategy(false, WaylandPlacement::Fullscreen, placement),
+            PlacementStrategy::Position(placement)
+        );
+        assert_eq!(
+            strategy(true, WaylandPlacement::Fullscreen, placement),
+            PlacementStrategy::Fullscreen
+        );
+        assert_eq!(
+            strategy(true, WaylandPlacement::Compositor, placement),
+            PlacementStrategy::Compositor
+        );
     }
 }
