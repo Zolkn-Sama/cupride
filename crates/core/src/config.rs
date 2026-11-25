@@ -41,6 +41,11 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # primaire, et le clic du milieu le colle. Sans effet sous Windows et macOS.
 # primary_selection = false
 
+# Indentation : "auto" (détectée dans chaque fichier ; espaces pour un fichier sans
+# indentation), "spaces" ou "tabs". Largeur d'un niveau, et d'une tabulation affichée.
+# indent_style = "auto"
+# indent_width = 4
+
 [font]
 # Famille de police : "monospace" (police à chasse fixe du système) ou un nom de famille
 # installée, par exemple "JetBrains Mono" ou "Fira Code" (ligatures).
@@ -71,6 +76,16 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # (son nom de fichier, sans .toml).
 # theme = "padparadscha"
 
+# Retour à la ligne visuel des lignes plus larges que la zone (le fichier n'est pas modifié).
+# wrap = false
+
+# Espaces et tabulations visibles (points et flèches discrets), fins de ligne visibles.
+# whitespace = false
+# line_endings = false
+
+# Règles verticales aux colonnes indiquées, par exemple [80, 100].
+# rulers = []
+
 [notifications]
 # Durée d'affichage des informations et avertissements, en millisecondes. 0 : jusqu'à un clic.
 # timeout_ms = 4000
@@ -81,9 +96,10 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 [status_bar]
 # Éléments de la barre d'état, à gauche et à droite : "file" (nom du fichier), "modified"
 # (modifications non enregistrées), "keys" (séquence de touches en cours), "selections" (nombre
-# de curseurs), "position" (ligne et colonne), "line_ending", "encoding", "language".
+# de curseurs), "position" (ligne et colonne), "indent" (tabulations ou espaces), "line_ending",
+# "encoding", "language".
 # left = ["file", "modified", "keys"]
-# right = ["selections", "position", "line_ending", "encoding", "language"]
+# right = ["selections", "position", "indent", "line_ending", "encoding", "language"]
 
 [tabs]
 # Onglet d'aperçu : un fichier ouvert depuis l'ouverture rapide ou l'explorateur remplace l'onglet
@@ -110,6 +126,11 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# Configuration de CuprIDE.
 # (window new --monitor, window move) : "fullscreen" (plein écran sur cet écran) ou
 # "compositor" (le compositeur choisit). Une notification le signale. Sans effet ailleurs.
 # wayland_placement = "fullscreen"
+
+# [languages.Makefile]
+# Réglages par langage (nom affiché dans la barre d'état), prioritaires sur [editor].
+# indent_style = "tabs"
+# indent_width = 8
 
 [keys]
 # Raccourcis : touches = "ligne de commande". Ils s'ajoutent aux raccourcis par défaut et les
@@ -153,6 +174,10 @@ pub struct EditorConfig {
     pub undo_group_delay_ms: u64,
     /// Sélection primaire de X11 et Wayland.
     pub primary_selection: bool,
+    /// Tabulations, espaces, ou détection.
+    pub indent_style: crate::indent::IndentStyle,
+    /// Largeur d'un niveau d'indentation.
+    pub indent_width: usize,
 }
 
 impl Default for EditorConfig {
@@ -161,6 +186,8 @@ impl Default for EditorConfig {
             line_ending: LineEndingSetting::Auto,
             undo_group_delay_ms: 1_000,
             primary_selection: false,
+            indent_style: crate::indent::IndentStyle::Auto,
+            indent_width: 4,
         }
     }
 }
@@ -221,6 +248,14 @@ pub struct ViewConfig {
     pub line_numbers: LineNumbers,
     /// Identifiant du thème.
     pub theme: String,
+    /// Retour à la ligne visuel des lignes trop longues.
+    pub wrap: bool,
+    /// Espaces et tabulations visibles.
+    pub whitespace: bool,
+    /// Fins de ligne visibles.
+    pub line_endings: bool,
+    /// Règles verticales, aux colonnes indiquées.
+    pub rulers: Vec<usize>,
 }
 
 impl Default for ViewConfig {
@@ -231,6 +266,10 @@ impl Default for ViewConfig {
             highlight_current_line: true,
             line_numbers: LineNumbers::Absolute,
             theme: "padparadscha".to_owned(),
+            wrap: false,
+            whitespace: false,
+            line_endings: false,
+            rulers: Vec::new(),
         }
     }
 }
@@ -292,6 +331,7 @@ impl Default for StatusBarConfig {
             right: names(&[
                 "selections",
                 "position",
+                "indent",
                 "line_ending",
                 "encoding",
                 "language",
@@ -314,6 +354,33 @@ pub struct TabsConfig {
 pub struct SessionConfig {
     /// Restaurer la session du projet au lancement.
     pub restore: bool,
+}
+
+impl Config {
+    /// Retour à la ligne et règles pour le langage `language`.
+    pub fn display_for(&self, language: Option<&str>) -> (bool, Vec<usize>) {
+        let specific = language.and_then(|l| self.languages.get(l));
+        (
+            specific.and_then(|l| l.wrap).unwrap_or(self.view.wrap),
+            specific
+                .and_then(|l| l.rulers.clone())
+                .unwrap_or_else(|| self.view.rulers.clone()),
+        )
+    }
+
+    /// Indentation réglée pour le langage `language` : celle de `[languages.<Nom>]`, sinon celle
+    /// de `[editor]`.
+    pub fn indent_for(&self, language: Option<&str>) -> (crate::indent::IndentStyle, usize) {
+        let specific = language.and_then(|l| self.languages.get(l));
+        (
+            specific
+                .and_then(|l| l.indent_style)
+                .unwrap_or(self.editor.indent_style),
+            specific
+                .and_then(|l| l.indent_width)
+                .unwrap_or(self.editor.indent_width),
+        )
+    }
 }
 
 impl Default for SessionConfig {
@@ -362,6 +429,25 @@ impl Default for WindowConfig {
     }
 }
 
+/// Section `[languages.<Nom>]` : réglages propres à un langage.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct LanguageConfig {
+    /// Indentation, à la place de `[editor] indent_style`.
+    pub indent_style: Option<crate::indent::IndentStyle>,
+    /// Largeur, à la place de `[editor] indent_width`.
+    pub indent_width: Option<usize>,
+    /// Début d'un commentaire de ligne (`//`, `#`…), pour `edit toggle-comment`.
+    pub comment: Option<String>,
+    /// Retour à la ligne visuel, à la place de `[view] wrap`.
+    pub wrap: Option<bool>,
+    /// Règles verticales, à la place de `[view] rulers`.
+    pub rulers: Option<Vec<usize>>,
+}
+
+/// Clés connues d'une section `[languages.<Nom>]`.
+const LANGUAGE_KEYS: [&str; 5] = ["indent_style", "indent_width", "comment", "wrap", "rulers"];
+
 /// Configuration complète.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
@@ -384,16 +470,25 @@ pub struct Config {
     pub explorer: ExplorerConfig,
     /// Section `[window]`.
     pub window: WindowConfig,
+    /// Sections `[languages.<Nom>]`, par nom de langage.
+    pub languages: BTreeMap<String, LanguageConfig>,
     /// Section `[keys]` : touches → ligne de commande (vide pour retirer un raccourci).
     pub keys: BTreeMap<String, String>,
 }
 
 /// Clés connues, pour signaler les fautes de frappe.
-const KNOWN_KEYS: [(&str, &[&str]); 10] = [
+const KNOWN_KEYS: [(&str, &[&str]); 11] = [
     (
         "editor",
-        &["line_ending", "undo_group_delay_ms", "primary_selection"],
+        &[
+            "line_ending",
+            "undo_group_delay_ms",
+            "primary_selection",
+            "indent_style",
+            "indent_width",
+        ],
     ),
+    ("languages", &[]),
     ("font", &["family", "size", "line_height"]),
     (
         "view",
@@ -403,6 +498,10 @@ const KNOWN_KEYS: [(&str, &[&str]); 10] = [
             "highlight_current_line",
             "line_numbers",
             "theme",
+            "wrap",
+            "whitespace",
+            "line_endings",
+            "rulers",
         ],
     ),
     ("notifications", &["timeout_ms", "error_timeout_ms"]),
@@ -528,6 +627,17 @@ fn unknown_keys(text: &str) -> Vec<String> {
         if section == "keys" {
             continue;
         }
+        if section == "languages" {
+            for (language, entries) in value.as_table().into_iter().flatten() {
+                let keys = entries.as_table().into_iter().flat_map(|t| t.keys());
+                for key in keys.filter(|k| !LANGUAGE_KEYS.contains(&k.as_str())) {
+                    warnings.push(format!(
+                        "option inconnue « languages.{language}.{key} » ignorée"
+                    ));
+                }
+            }
+            continue;
+        }
         if let Some(entries) = value.as_table() {
             for key in entries.keys().filter(|k| !known.contains(&k.as_str())) {
                 warnings.push(format!("option inconnue « {section}.{key} » ignorée"));
@@ -630,5 +740,26 @@ mod tests {
     fn position_en_caracteres() {
         assert_eq!(line_column("é = x", 5), (1, 5));
         assert_eq!(line_column("a\nbc", 3), (2, 2));
+    }
+
+    #[test]
+    fn reglages_par_langage() {
+        let loaded = parse_str(
+            "[editor]\nindent_width = 2\n\n[languages.Makefile]\nindent_style = \"tabs\"\nindent_widht = 8\n",
+        );
+        assert!(loaded.error.is_none(), "{:?}", loaded.error);
+        assert_eq!(
+            loaded.warnings,
+            ["option inconnue « languages.Makefile.indent_widht » ignorée"]
+        );
+        let config = loaded.config;
+        assert_eq!(
+            config.indent_for(Some("Makefile")),
+            (crate::indent::IndentStyle::Tabs, 2)
+        );
+        assert_eq!(
+            config.indent_for(Some("Rust")),
+            (crate::indent::IndentStyle::Auto, 2)
+        );
     }
 }

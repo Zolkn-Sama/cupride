@@ -16,6 +16,43 @@ const UTF8_BOM: &[u8] = b"\xEF\xBB\xBF";
 /// Nombre d'octets examinés pour reconnaître un fichier binaire (même heuristique que Git).
 const BINARY_SNIFF_LEN: usize = 8_000;
 
+/// Empreinte d'un fichier sur le disque : date de modification et taille.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DiskStamp {
+    modified: Option<std::time::SystemTime>,
+    len: u64,
+}
+
+/// Empreinte d'un texte, morceau par morceau (le découpage ne change pas le résultat).
+fn content_hash<'a>(chunks: impl IntoIterator<Item = &'a str>) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for chunk in chunks {
+        hasher.write(chunk.as_bytes());
+    }
+    hasher.finish()
+}
+
+/// Empreinte actuelle du fichier `path`, ou `None` s'il n'existe pas.
+fn disk_stamp(path: &Path) -> Option<DiskStamp> {
+    let metadata = fs::metadata(path).ok()?;
+    Some(DiskStamp {
+        modified: metadata.modified().ok(),
+        len: metadata.len(),
+    })
+}
+
+/// Le fichier d'un document, comparé à ce qu'il était à l'ouverture ou au dernier enregistrement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiskState {
+    /// Inchangé (ou document sans fichier).
+    Same,
+    /// Modifié par un autre programme.
+    Changed,
+    /// Supprimé ou déplacé.
+    Missing,
+}
+
 /// Fin de ligne d'un document.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum LineEnding {
@@ -139,6 +176,18 @@ pub struct Document {
     bom: bool,
     history: History,
     selections: Selections,
+    /// Empreinte du fichier à l'ouverture ou au dernier enregistrement (`None` : pas encore sur
+    /// le disque).
+    disk: Option<DiskStamp>,
+    /// Empreinte du contenu du fichier à ce moment-là.
+    disk_hash: u64,
+    /// Dernier changement du disque déjà signalé, pour ne pas le répéter.
+    pub(crate) disk_notice: Option<DiskState>,
+    /// Indentation : tabulations ou espaces, et largeur.
+    indent: crate::indent::Indent,
+    /// L'indentation a été choisie à la main (`edit indentation`) : la configuration ne la
+    /// change plus.
+    indent_set: bool,
     /// Panneau dont les sélections sont `selections`.
     view: Option<PanelId>,
     /// Sélections des autres panneaux qui affichent le document.
@@ -169,6 +218,11 @@ impl Document {
             bom: false,
             history: History::new(),
             selections: Selections::cursor(0),
+            disk: None,
+            disk_hash: 0,
+            disk_notice: None,
+            indent: crate::indent::Indent::default(),
+            indent_set: false,
             view: None,
             other_views: BTreeMap::new(),
             revision: 0,
@@ -190,6 +244,8 @@ impl Document {
         };
         let mut document = Self::from_text(&decoded.text);
         document.bom = decoded.bom;
+        document.disk = disk_stamp(&path);
+        document.disk_hash = content_hash([decoded.text.as_str()]);
         document.path = Some(path);
         Ok(document)
     }
@@ -207,10 +263,13 @@ impl Document {
         let (revision, saves) = (self.revision + 1, self.saves);
         let delay = self.history.group_delay();
         let (view, other_views) = (self.view, std::mem::take(&mut self.other_views));
+        let (indent, indent_set) = (self.indent, self.indent_set);
         *self = reloaded;
         self.revision = revision;
         self.saves = saves;
         self.history.set_group_delay(delay);
+        self.indent = indent;
+        self.indent_set = indent_set;
         self.view = view;
         for (id, selections) in other_views {
             let selections = self.clamped(selections);
@@ -236,7 +295,15 @@ impl Document {
         self.write_atomic(&path)?;
         self.modified = false;
         self.saves += 1;
+        self.written();
         Ok(())
+    }
+
+    /// Le texte vient d'être écrit : il est la nouvelle référence du disque.
+    fn written(&mut self) {
+        self.disk = self.path.as_deref().and_then(disk_stamp);
+        self.disk_hash = content_hash(self.buffer.chunks());
+        self.disk_notice = None;
     }
 
     /// Enregistre le document sous `path`, qui devient son fichier.
@@ -246,6 +313,7 @@ impl Document {
         self.path = Some(path);
         self.modified = false;
         self.saves += 1;
+        self.written();
         Ok(())
     }
 
@@ -278,6 +346,41 @@ impl Document {
         temp.persist(path)
             .map_err(|e| DocumentError::io(path, e.error))?;
         Ok(())
+    }
+
+    /// Le fichier a-t-il changé sur le disque depuis l'ouverture ou le dernier enregistrement ?
+    /// Une date changée sans changement de contenu (`touch`) n'est pas un changement.
+    pub fn disk_state(&self) -> DiskState {
+        let Some(path) = &self.path else {
+            return DiskState::Same;
+        };
+        let now = disk_stamp(path);
+        match (self.disk, now) {
+            (Some(_), None) => DiskState::Missing,
+            (None, None) => DiskState::Same,
+            (before, after) if before == after => DiskState::Same,
+            // Date ou taille changée : le contenu tranche (un `touch` ne change rien).
+            _ => match fs::read(path).ok().and_then(|b| decode(path, b).ok()) {
+                Some(decoded) if content_hash([decoded.text.as_str()]) == self.disk_hash => {
+                    DiskState::Same
+                }
+                _ => DiskState::Changed,
+            },
+        }
+    }
+
+    /// Prend l'état actuel du fichier comme référence : ses changements ne sont plus signalés.
+    pub fn accept_disk(&mut self) {
+        self.disk = self.path.as_deref().and_then(disk_stamp);
+        self.disk_hash = self.disk_text().map_or(0, |t| content_hash([t.as_str()]));
+        self.disk_notice = None;
+    }
+
+    /// Texte du fichier sur le disque, s'il est lisible.
+    pub fn disk_text(&self) -> Option<String> {
+        let path = self.path.as_deref()?;
+        let bytes = fs::read(path).ok()?;
+        decode(path, bytes).ok().map(|d| d.text)
     }
 
     /// Texte du document.
@@ -322,6 +425,19 @@ impl Document {
     /// l'enregistrement.
     pub fn has_bom(&self) -> bool {
         self.bom
+    }
+
+    /// Indentation du document.
+    pub fn indent(&self) -> crate::indent::Indent {
+        self.indent
+    }
+
+    /// Change l'indentation ; avec `manual`, la configuration ne la changera plus.
+    pub fn set_indent(&mut self, indent: crate::indent::Indent, manual: bool) {
+        if manual || !self.indent_set {
+            self.indent = indent;
+            self.indent_set |= manual;
+        }
     }
 
     /// Sélections du document.
@@ -705,5 +821,34 @@ mod tests {
         assert_eq!(doc.buffer().to_text(), "abc");
         assert!(!doc.is_modified());
         assert!(!doc.history().can_undo());
+    }
+
+    #[test]
+    fn changements_sur_le_disque() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        fs::write(&path, "un").unwrap();
+        let mut doc = Document::open(&path).unwrap();
+        assert_eq!(doc.disk_state(), DiskState::Same);
+        // Même contenu réécrit (date changée) : rien.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::write(&path, "un").unwrap();
+        assert_eq!(doc.disk_state(), DiskState::Same);
+        type_at_cursor(&mut doc, "x");
+        assert_eq!(doc.disk_state(), DiskState::Same, "modifié ici seulement");
+        fs::write(&path, "deux, ailleurs").unwrap();
+        assert_eq!(doc.disk_state(), DiskState::Changed);
+        assert_eq!(doc.disk_text().as_deref(), Some("deux, ailleurs"));
+        doc.accept_disk();
+        assert_eq!(doc.disk_state(), DiskState::Same, "garder sa version");
+        doc.save().unwrap();
+        assert_eq!(
+            doc.disk_state(),
+            DiskState::Same,
+            "son propre enregistrement"
+        );
+        fs::remove_file(&path).unwrap();
+        assert_eq!(doc.disk_state(), DiskState::Missing);
+        assert_eq!(Document::new().disk_state(), DiskState::Same);
     }
 }

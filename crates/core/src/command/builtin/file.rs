@@ -6,7 +6,9 @@ use clap::{Arg, ArgAction};
 
 use super::active;
 use crate::command::{CommandDef, CommandError, CommandOutput, CommandRegistry};
+use crate::document::DiskState;
 use crate::editor::normalize;
+use crate::text::TextBuffer;
 
 fn path_arg(help: &'static str) -> Arg {
     Arg::new("chemin")
@@ -37,6 +39,10 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
                 } else {
                     editor.open(&path)?
                 };
+                if let Some(&line) = args.get_one::<usize>("line") {
+                    let column = args.get_one::<usize>("column").copied().unwrap_or(1);
+                    editor.goto(line, column)?;
+                }
                 let name = editor
                     .document(id)
                     .map(|d| d.display_name())
@@ -50,19 +56,83 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
                 .long("preview")
                 .action(ArgAction::SetTrue)
                 .help("Ouvre dans l'onglet d'aperçu, si l'option [tabs] preview est activée"),
+        )
+        .arg(
+            Arg::new("line")
+                .long("line")
+                .value_name("N")
+                .value_parser(clap::value_parser!(usize))
+                .help("Place le curseur à la ligne N (à partir de 1)"),
+        )
+        .arg(
+            Arg::new("column")
+                .long("column")
+                .value_name("N")
+                .value_parser(clap::value_parser!(usize))
+                .requires("line")
+                .help("Et à la colonne N (en caractères, à partir de 1)"),
         ),
+    )?;
+
+    registry.register(
+        CommandDef::new(
+            "file",
+            "save",
+            "Enregistre le document actif ; refuse d'écraser un fichier modifié par un autre programme, sauf avec --force",
+            |editor, args| {
+                let (_, document) = active(editor)?;
+                if !args.get_flag("force") && document.disk_state() == DiskState::Changed {
+                    return Err(CommandError::Failed(format!(
+                        "« {} » a changé sur le disque depuis l'ouverture : file compare, file keep, \
+                         file reload --force, ou file save --force pour écraser",
+                        document.display_name()
+                    )));
+                }
+                document.save()?;
+                Ok(CommandOutput::message(format!(
+                    "« {} » enregistré",
+                    document.display_name()
+                )))
+            },
+        )
+        .arg(force_arg(
+            "Écrase le fichier même s'il a été modifié par un autre programme",
+        )),
     )?;
 
     registry.register(CommandDef::new(
         "file",
-        "save",
-        "Enregistre le document actif",
+        "keep",
+        "Garde la version de l'éditeur : le fichier modifié par un autre programme sera écrasé au prochain enregistrement",
         |editor, _| {
             let (_, document) = active(editor)?;
-            document.save()?;
+            document.accept_disk();
             Ok(CommandOutput::message(format!(
-                "« {} » enregistré",
+                "« {} » : version de l'éditeur gardée",
                 document.display_name()
+            )))
+        },
+    ))?;
+
+    registry.register(CommandDef::new(
+        "file",
+        "compare",
+        "Ouvre les différences entre le fichier sur le disque (-) et le document actif (+)",
+        |editor, _| {
+            let (_, document) = active(editor)?;
+            let name = document.display_name();
+            let disk = document.disk_text().ok_or_else(|| {
+                CommandError::Failed(format!("« {name} » : fichier illisible ou absent"))
+            })?;
+            let diff = crate::disk::compare(&name, &disk, &document.buffer().to_text());
+            if diff.is_empty() {
+                return Ok(CommandOutput::message(format!(
+                    "« {name} » : aucune différence"
+                )));
+            }
+            editor.insert_document(crate::Document::from_text(&diff));
+            Ok(CommandOutput::message(format!(
+                "différences de « {name} » : - disque, + éditeur"
             )))
         },
     ))?;

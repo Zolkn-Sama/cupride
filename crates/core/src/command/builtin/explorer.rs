@@ -12,8 +12,7 @@ use clap::Arg;
 
 use crate::command::{CommandDef, CommandError, CommandOutput, CommandRegistry};
 use crate::editor::Editor;
-use crate::layout::{Axis, Direction, PanelKind};
-use crate::panels::NewPanel;
+use crate::layout::PanelKind;
 use crate::ui_request::UiRequest;
 
 /// Part de la fenêtre donnée à l'explorateur quand il s'ouvre.
@@ -207,41 +206,7 @@ fn rename(editor: &mut Editor, from: &Path, to: &Path) -> Result<(), CommandErro
 
 /// Donne le focus à l'explorateur ; s'il n'y en a pas, l'ouvre à gauche, sur une colonne étroite.
 fn show(editor: &mut Editor) {
-    let existing = editor
-        .workspace()
-        .panels()
-        .find(|p| p.kind().as_str() == PanelKind::EXPLORER)
-        .map(|p| p.id());
-    if let Some(panel) = existing {
-        editor.focus_panel(panel);
-        return;
-    }
-    let had_panels = !editor.workspace().tree().is_empty();
-    let place = if had_panels {
-        NewPanel::Split(Direction::Left)
-    } else {
-        NewPanel::Tab
-    };
-    let panel = editor.open_panel(PanelKind::new(PanelKind::EXPLORER), place);
-    if had_panels {
-        let metrics = editor.layout_metrics();
-        let width = metrics.area.width;
-        let current = editor
-            .workspace()
-            .tree()
-            .areas(metrics.area, metrics.gap)
-            .iter()
-            .find(|a| a.group.contains(panel))
-            .map_or(width / 2.0, |a| a.bounds.width);
-        editor.workspace_mut().tree_mut().resize(
-            panel,
-            Axis::Horizontal,
-            width * EXPLORER_WIDTH - current,
-            metrics.area,
-            metrics.gap,
-            metrics.min_size,
-        );
-    }
+    editor.show_side_panel(PanelKind::EXPLORER, EXPLORER_WIDTH);
 }
 
 #[cfg(test)]

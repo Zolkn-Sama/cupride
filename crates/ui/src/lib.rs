@@ -38,6 +38,7 @@ mod blink;
 mod command_line;
 mod editor_view;
 mod explorer;
+mod find_bar;
 mod focus;
 mod fuzzy;
 mod gutter;
@@ -48,16 +49,19 @@ mod mouse;
 mod panels;
 mod picker;
 mod scroll;
+mod search_view;
 mod status_bar;
 mod style;
 mod text_input;
 mod theme;
 mod toasts;
+pub mod wrap;
 
 pub use blink::{BLINK_IDLE_STOP, CursorBlink};
 pub use command_line::{CommandLine, MessageKind};
-pub use editor_view::{EditorView, Pointer, Preedit, ViewSettings, WHEEL_LINES};
+pub use editor_view::{DisplayOptions, EditorView, Pointer, Preedit, ViewSettings, WHEEL_LINES};
 pub use explorer::{Entry, ExplorerTree, ExplorerView, Row};
+pub use find_bar::{FindBar, FindOption};
 pub use focus::Focus;
 pub use fuzzy::{Found, Fuzzy};
 pub use gutter::GutterMarker;
@@ -69,6 +73,7 @@ pub use panels::{
     panel_title,
 };
 pub use picker::{MAX_ROWS, Picker, PickerItem};
+pub use search_view::{ResultRow, SearchResultsView, result_rows};
 pub use status_bar::{StatusBar, StatusContext, StatusElement, StatusElements};
 pub use style::Style;
 pub use text_input::{InputEvent, TextInput};

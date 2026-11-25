@@ -146,6 +146,20 @@ impl PanelView for EditorView {
 
     fn prepare(&mut self, text: &mut TextSystem, cx: &PanelContext<'_>) {
         if let Some(document) = panel_document(cx) {
+            // Affichage des lignes : configuration, propre au langage, et `view wrap`.
+            let language = document
+                .path()
+                .and_then(cupride_core::language::language_of);
+            let config = cx.editor.config();
+            let display = crate::editor_view::DisplayOptions {
+                wrap: cx.editor.wrap_for(language),
+                whitespace: config.view.whitespace,
+                line_endings: config.view.line_endings,
+                rulers: config.display_for(language).1,
+            };
+            if &display != self.display() {
+                self.set_display(display);
+            }
             EditorView::prepare(self, text, document);
         }
     }
@@ -224,6 +238,16 @@ impl Default for ViewRegistry {
             PanelKind::EDITOR,
             Box::new(|panel, settings, scale| {
                 Box::new(EditorView::for_panel(panel, settings.clone(), scale))
+            }),
+        );
+        registry.register(
+            PanelKind::SEARCH,
+            Box::new(|panel, settings, scale| {
+                Box::new(crate::search_view::SearchResultsView::new(
+                    panel,
+                    settings.clone(),
+                    scale,
+                ))
             }),
         );
         registry.register(
@@ -317,6 +341,7 @@ pub fn panel_title(editor: &Editor, panel: PanelId) -> String {
     }
     match editor.workspace().panel(panel).map(|p| p.kind().as_str()) {
         Some(PanelKind::EXPLORER) => "Explorateur".to_owned(),
+        Some(PanelKind::SEARCH) => "Recherche".to_owned(),
         Some(kind) => kind.to_owned(),
         None => String::new(),
     }
@@ -871,7 +896,7 @@ mod tests {
         assert!(registry.contains("editor"));
         assert_eq!(
             registry.kinds().collect::<Vec<_>>(),
-            vec!["editor", "explorer"]
+            vec!["editor", "explorer", "search"]
         );
         let settings = ViewSettings::default();
         let view = registry

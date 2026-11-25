@@ -19,21 +19,26 @@
 pub mod clipboard;
 pub mod command;
 pub mod config;
+pub mod disk;
 mod document;
 mod editor;
 pub mod events;
+pub mod indent;
 pub mod keymap;
 pub mod language;
 pub mod monitors;
 pub mod notifications;
 mod panels;
+pub mod project_search;
+pub mod recovery;
+pub mod search;
 pub mod session;
 mod ui_request;
 mod windows;
 
 pub use cupride_layout as layout;
 pub use cupride_text as text;
-pub use document::{Document, DocumentError, LineEnding};
+pub use document::{DiskState, Document, DocumentError, LineEnding};
 pub use editor::{DocumentId, Editor, TrashFn};
 pub use panels::{LayoutMetrics, NewPanel};
 pub use ui_request::UiRequest;

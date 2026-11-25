@@ -27,9 +27,9 @@ use cupride_core::{DocumentId, Editor};
 use cupride_render::Frame;
 use cupride_render::{Acquire, Gpu, Rect, Renderer, TextSystem, WindowSurface};
 use cupride_ui::{
-    ClickCounter, ClickModifiers, CommandHistory, CommandLine, CursorBlink, EditorView, Focus,
-    MouseSelection, PanelViews, Picker, Pointer, Preedit, StatusBar, StatusContext, StatusElements,
-    Theme, Themes, Toasts, ViewAction, ViewRegistry, ViewSettings, WHEEL_LINES,
+    ClickCounter, ClickModifiers, CommandHistory, CommandLine, CursorBlink, EditorView, FindBar,
+    Focus, MouseSelection, PanelViews, Picker, Pointer, Preedit, StatusBar, StatusContext,
+    StatusElements, Theme, Themes, Toasts, ViewAction, ViewRegistry, ViewSettings, WHEEL_LINES,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
@@ -42,6 +42,7 @@ use winit::monitor::MonitorHandle;
 use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use winit::window::{CursorIcon, Fullscreen, Window, WindowId};
 
+mod find;
 mod overlays;
 mod pickers;
 
@@ -52,11 +53,16 @@ use crate::close::{CloseDecision, CloseGuard};
 use crate::file_index::{AppEvent, FileIndex};
 use crate::input;
 use crate::latency::LatencyStats;
+use crate::project_worker::ProjectWorker;
 use crate::redraw::Stamp;
+use crate::search_worker::SearchWorker;
 use crate::watcher::DiskWatcher;
 
 /// Taille initiale de la fenêtre, en pixels logiques.
 const INITIAL_SIZE: LogicalSize<f64> = LogicalSize::new(1_100.0, 720.0);
+
+/// Intervalle entre deux copies des documents non enregistrés (récupération après plantage).
+const BACKUP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Décalage d'une nouvelle fenêtre par rapport à la fenêtre courante, en pixels logiques.
 const CASCADE: f64 = 32.0;
@@ -85,6 +91,9 @@ impl WindowState {
         self.views.editor_view_mut(panel?)
     }
 }
+
+/// Occurrences de la recherche partagées par les vues : (document, révision, occurrences).
+type SharedMatches = (DocumentId, u64, Arc<Vec<std::ops::Range<usize>>>);
 
 /// Onglet saisi à la souris : il devient un glisser-déposer au-delà de quelques pixels.
 struct TabDrag {
@@ -170,6 +179,22 @@ pub(crate) struct App {
     completion: Option<CompletionCycle>,
     /// Sélecteur ouvert (palette de commandes…).
     picker: Option<(PickerKind, Picker)>,
+    /// Barre de recherche, quand elle est ouverte.
+    find: Option<FindBar>,
+    /// Recherches en arrière-plan.
+    search: SearchWorker,
+    /// Point de départ de la recherche incrémentale, et sélection de la première occurrence
+    /// trouvée à la prochaine réponse.
+    search_origin: Option<usize>,
+    search_jump: bool,
+    /// Dernier texte de remplacement saisi.
+    last_replacement: String,
+    /// Recherche dans le projet, en arrière-plan.
+    project_search: ProjectWorker,
+    /// Dernière copie des documents non enregistrés.
+    last_backup: Instant,
+    /// Occurrences surlignées, partagées par les vues : (document, révision, occurrences).
+    highlights: Option<SharedMatches>,
     /// Fichiers du projet, indexés en arrière-plan pour l'ouverture rapide.
     file_index: FileIndex,
     /// Dossiers surveillés sur le disque (explorateur).
@@ -250,6 +275,14 @@ impl App {
             history_path,
             completion: None,
             picker: None,
+            find: None,
+            search: SearchWorker::default(),
+            search_origin: None,
+            search_jump: false,
+            last_replacement: String::new(),
+            project_search: ProjectWorker::default(),
+            last_backup: Instant::now(),
+            highlights: None,
             file_index: FileIndex::default(),
             disk: DiskWatcher::new(proxy.clone()),
             proxy,
@@ -486,6 +519,11 @@ impl App {
     /// rechargés, curseur rallumé et nouvelle image.
     fn after_any_command(&mut self, start: Instant) {
         self.process_ui_requests();
+        // Barre de recherche ouverte : le texte ou le document actif ont pu changer.
+        if self.find.is_some() {
+            self.start_search();
+            self.refresh_highlights();
+        }
         self.sync_config();
         self.update_primary_selection();
         self.blink.reset(Instant::now());
@@ -578,6 +616,10 @@ impl App {
             if item.is_some() {
                 self.choose(item);
             }
+            return;
+        }
+        if self.find_clicked(x, y) {
+            self.request_redraw();
             return;
         }
         // Un clic dans l'éditeur ferme les couches et lui rend le focus.
@@ -1470,6 +1512,20 @@ impl App {
             picker.prepare(&mut self.text, &style, &self.theme, parts[0]);
             ime_area = Some(picker.cursor_rect(&style));
         }
+        if let Some(bar) = self.find.as_mut().filter(|_| current) {
+            // En haut à droite de la zone du panneau actif.
+            let zone = panel
+                .and_then(|p| state.views.zones().iter().find(|z| z.active == Some(p)))
+                .map_or(parts[0], |z| z.content);
+            bar.prepare(&mut self.text, &style, zone);
+            if self.focus.is_focused(Element::Find) {
+                ime_area = Some(bar.cursor_rect(&style));
+            }
+        }
+        if let Some(bar) = self.find.as_ref().filter(|_| current) {
+            let focused = self.focus.is_focused(Element::Find);
+            bar.draw(scene.push_layer(), &style, &self.theme, blink_on && focused);
+        }
         if let Some((_, picker)) = self.picker.as_ref().filter(|_| current) {
             picker.draw(scene.push_layer(), &style, &self.theme, blink_on);
         }
@@ -1542,11 +1598,16 @@ impl ApplicationHandler<AppEvent> for App {
         match event {
             AppEvent::FilesIndexed => self.files_indexed(),
             AppEvent::Remote => self.remote_requests(event_loop),
+            AppEvent::SearchDone => self.search_done(),
+            AppEvent::ProjectResults => self.project_results(),
             AppEvent::FilesChanged => {
                 let changed = self.disk.take_changed();
                 if changed.is_empty() {
                     return;
                 }
+                // Documents dont le fichier a changé : rechargés, ou conflit signalé.
+                self.editor.check_disk(Some(&changed));
+                self.after_any_command(Instant::now());
                 for state in self.windows.values_mut() {
                     for view in state.views.views_mut() {
                         view.files_changed(&changed);
@@ -1643,6 +1704,9 @@ impl ApplicationHandler<AppEvent> for App {
             } => self.paste_primary(),
             WindowEvent::Focused(true) => {
                 self.focused = true;
+                // Au retour dans l'IDE, les fichiers ont pu changer sans que rien ne le signale.
+                self.editor.check_disk(None);
+                self.after_any_command(Instant::now());
                 self.enter_window(id);
                 self.blink.reset(Instant::now());
                 self.redraw_all();
@@ -1681,22 +1745,45 @@ impl ApplicationHandler<AppEvent> for App {
             self.refresh_monitors(event_loop, false);
             self.sync_windows(event_loop);
         }
-        // Dossiers affichés par les explorateurs de toutes les fenêtres : surveillés.
-        let watched: BTreeSet<std::path::PathBuf> = self
+        // Dossiers affichés par les explorateurs de toutes les fenêtres, et dossiers des
+        // documents ouverts (fichiers modifiés hors de l'IDE) : surveillés.
+        let mut watched: BTreeSet<std::path::PathBuf> = self
             .windows
             .values()
             .flat_map(|s| s.views.watched_dirs())
             .collect();
+        watched.extend(
+            self.editor
+                .documents()
+                .filter_map(|(_, d)| d.path()?.parent().map(std::path::Path::to_path_buf))
+                .filter(|dir| dir.is_dir()),
+        );
         self.disk.sync(watched);
         // Prochain réveil : fin du délai de confirmation de fermeture, changement d'état du
         // curseur ou expiration d'une notification. Sans rien de tout cela, la boucle dort
         // jusqu'au prochain événement.
         let now = Instant::now();
+        // Copie des documents non enregistrés, au plus toutes les 15 s, s'il y a du nouveau.
+        let backup = self
+            .editor
+            .needs_backup()
+            .then(|| self.last_backup + BACKUP_INTERVAL);
+        if backup.is_some_and(|due| due <= now) {
+            if let Err(error) = self.editor.backup_documents() {
+                tracing::warn!("copie de récupération impossible : {error}");
+            }
+            self.last_backup = now;
+        }
+        let backup = self
+            .editor
+            .needs_backup()
+            .then(|| self.last_backup + BACKUP_INTERVAL);
         let blink = self.focused.then(|| self.blink.next_change(now)).flatten();
         let wake = [
             self.close_guard.deadline(),
             blink,
             self.toasts.next_expiry(),
+            backup,
         ]
         .into_iter()
         .flatten()
@@ -1718,6 +1805,10 @@ impl ApplicationHandler<AppEvent> for App {
             );
         }
         self.save_session();
+        // Fermeture normale : les copies de récupération ne servent plus.
+        if let Err(error) = self.editor.finish_recovery() {
+            tracing::warn!("récupération après plantage : {error}");
+        }
         // Les terminaux qui attendaient (--wait) sont libérés : l'instance s'arrête.
         for (_, responder) in std::mem::take(&mut self.waiting) {
             let _ = responder.finish(&[], 0);

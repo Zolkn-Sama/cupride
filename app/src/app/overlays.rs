@@ -29,6 +29,8 @@ pub(super) enum Element {
     CommandLine,
     /// Palette de commandes ou ouverture rapide.
     Picker,
+    /// Barre de recherche.
+    Find,
 }
 
 impl App {
@@ -41,6 +43,9 @@ impl App {
                     self.close_overlays();
                     self.open_palette();
                 }
+                UiRequest::Find(pattern) => self.open_find(&pattern),
+                UiRequest::Replace(pattern) => self.open_replace(&pattern),
+                UiRequest::ProjectSearch(generation) => self.start_project_search(generation),
                 UiRequest::QuickOpen => {
                     self.close_overlays();
                     self.open_quick_open();
@@ -80,8 +85,10 @@ impl App {
         self.request_redraw();
     }
 
-    /// Ferme toutes les couches (clic dans l'éditeur).
+    /// Ferme toutes les couches (clic dans l'éditeur). La barre de recherche reste affichée,
+    /// mais rend le clavier à l'éditeur.
     pub(super) fn close_overlays(&mut self) {
+        self.focus.remove(Element::Find);
         if self.command_line.is_some() {
             self.close_command_line();
         }
@@ -142,6 +149,7 @@ impl App {
     pub(super) fn overlay_key(&mut self, combo: Option<KeyCombo>, text: Option<&str>) -> bool {
         match self.focus.current() {
             Element::Picker => return self.picker_key(combo, text),
+            Element::Find => return self.find_key(combo, text),
             Element::CommandLine => {}
             Element::Editor => return false,
         }

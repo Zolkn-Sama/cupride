@@ -12,6 +12,12 @@ pub enum UiRequest {
     Palette,
     /// Ouvrir l'ouverture rapide de fichiers.
     QuickOpen,
+    /// Ouvrir la barre de recherche, préremplie avec ce motif.
+    Find(String),
+    /// Ouvrir la barre de recherche avec le champ de remplacement.
+    Replace(String),
+    /// Lancer la recherche dans le projet en cours (dans un thread), de ce numéro.
+    ProjectSearch(u64),
     /// Montrer ce fichier ou ce dossier dans l'explorateur (dossiers parents dépliés).
     Reveal(std::path::PathBuf),
     /// Placer la fenêtre sur l'écran `monitor` (numéro, à partir de 1).

@@ -8,8 +8,10 @@ mod file_index;
 mod input;
 mod latency;
 mod logging;
+mod project_worker;
 mod redraw;
 mod remote;
+mod search_worker;
 mod watcher;
 
 use anyhow::Context;
@@ -110,6 +112,28 @@ fn main() -> anyhow::Result<()> {
     for problem in problems {
         tracing::warn!("{problem}");
         editor.notify(Level::Warning, problem);
+    }
+
+    // Récupération après plantage : copies des documents non enregistrés dans le dossier de
+    // données ; celles d'une session interrompue sont proposées.
+    if let Some(dir) = editor.data_dir().map(|d| d.join("recovery")) {
+        match editor.start_recovery(dir) {
+            Ok(found) if !found.is_empty() => {
+                let message = format!(
+                    "{} document{} non enregistré{} retrouvé{} après un arrêt inattendu : \
+                     recovery restore pour les récupérer, recovery discard pour les oublier",
+                    found.len(),
+                    if found.len() > 1 { "s" } else { "" },
+                    if found.len() > 1 { "s" } else { "" },
+                    if found.len() > 1 { "s" } else { "" },
+                );
+                tracing::warn!("{message}");
+                editor.notify(Level::Warning, message);
+                editor.set_found_backups(found);
+            }
+            Ok(_) => {}
+            Err(error) => tracing::warn!("récupération après plantage indisponible : {error}"),
+        }
     }
 
     let event_loop = EventLoop::<file_index::AppEvent>::with_user_event()

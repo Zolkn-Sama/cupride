@@ -84,6 +84,8 @@ pub struct Editor {
     last_copy: Option<LastCopy>,
     /// Zoom de l'interface (1 : taille normale), multiplié par l'échelle de l'écran.
     zoom: f32,
+    /// Retour à la ligne imposé pour la session (`view wrap`), à la place de la configuration.
+    wrap_override: Option<bool>,
     /// Dossier ouvert comme projet, s'il y en a un.
     project: Option<PathBuf>,
     /// Dossier d'où partent les chemins relatifs de la commande en cours (commande venue d'un
@@ -92,6 +94,14 @@ pub struct Editor {
     /// Demandes à l'interface, pas encore lues.
     ui_requests: Vec<UiRequest>,
     notifications: Notifications,
+    /// Recherche en cours.
+    pub(crate) search: crate::search::SearchState,
+    /// Recherche dans le projet.
+    pub(crate) project_search: Option<crate::project_search::ProjectSearch>,
+    /// Copies des documents non enregistrés.
+    pub(crate) recovery: crate::recovery::Recovery,
+    /// Copies d'une session interrompue, trouvées au lancement.
+    pub(crate) recovery_found: Vec<crate::recovery::Backup>,
     /// Écrans, dans l'ordre de leur numérotation (fournis par l'interface).
     monitors: Vec<crate::monitors::MonitorInfo>,
     /// Thème en cours, et thèmes disponibles (fournis par l'interface).
@@ -129,7 +139,7 @@ impl Editor {
             workspace: Workspace::new(),
             panel_documents: BTreeMap::new(),
             panel_scrolls: BTreeMap::new(),
-            panel_kinds: [PanelKind::EDITOR, PanelKind::EXPLORER]
+            panel_kinds: [PanelKind::EDITOR, PanelKind::EXPLORER, PanelKind::SEARCH]
                 .into_iter()
                 .map(ToOwned::to_owned)
                 .collect(),
@@ -153,11 +163,16 @@ impl Editor {
             })),
             last_copy: None,
             zoom: 1.0,
+            wrap_override: None,
             project: None,
             base_dir: None,
             ui_requests: Vec::new(),
             notifications: Notifications::default(),
             monitors: Vec::new(),
+            search: crate::search::SearchState::default(),
+            project_search: None,
+            recovery: crate::recovery::Recovery::default(),
+            recovery_found: Vec::new(),
             theme: crate::config::ViewConfig::default().theme,
             themes: Vec::new(),
         }
@@ -487,9 +502,15 @@ impl Editor {
         self.keymap = keymap;
         self.theme = config.view.theme.clone();
         self.config = config;
-        let delay = self.config.editor.undo_group_delay();
+        let config = &self.config;
         for (_, document) in &mut self.documents {
-            document.history_mut().set_group_delay(delay);
+            document
+                .history_mut()
+                .set_group_delay(config.editor.undo_group_delay());
+            let language = document.path().and_then(crate::language::language_of);
+            let (style, width) = config.indent_for(language);
+            let sample = document_sample(document);
+            document.set_indent(crate::indent::resolve(style, width, &sample), false);
         }
         issues
     }
@@ -517,6 +538,10 @@ impl Editor {
         document
             .history_mut()
             .set_group_delay(self.config.editor.undo_group_delay());
+        let language = document.path().and_then(crate::language::language_of);
+        let (style, width) = self.config.indent_for(language);
+        let sample = document_sample(document);
+        document.set_indent(crate::indent::resolve(style, width, &sample), false);
     }
 
     /// Identifiant du thème en cours.
@@ -603,6 +628,26 @@ impl Editor {
         result
     }
 
+    /// Place le curseur du document actif à la ligne `line` et à la colonne `column` (à partir
+    /// de 1, colonne en caractères affichés), bornées au texte.
+    pub fn goto(&mut self, line: usize, column: usize) -> Result<(), CommandError> {
+        use cupride_text::TextBuffer;
+        let document = self
+            .active_document_mut()
+            .ok_or(CommandError::NoActiveDocument)?;
+        let buffer = document.buffer();
+        let line = line.max(1).min(buffer.len_lines()) - 1;
+        let range = buffer.line_content_range(line)?;
+        let start = cupride_text::position::grapheme_point_to_offset(
+            buffer,
+            cupride_text::Point::new(line, column.max(1) - 1),
+        )
+        .unwrap_or(range.end)
+        .min(range.end);
+        document.set_selections(cupride_text::Selections::cursor(start));
+        Ok(())
+    }
+
     /// Chemin absolu : un chemin relatif part du dossier de la commande en cours (terminal), sinon
     /// du dossier courant.
     pub fn resolve_path(&self, path: &Path) -> PathBuf {
@@ -634,6 +679,18 @@ impl Editor {
         }
         self.project = Some(path);
         Ok(())
+    }
+
+    /// Retour à la ligne pour un document de langage `language` : celui imposé par `view wrap`,
+    /// sinon la configuration.
+    pub fn wrap_for(&self, language: Option<&str>) -> bool {
+        self.wrap_override
+            .unwrap_or_else(|| self.config.display_for(language).0)
+    }
+
+    /// Impose le retour à la ligne pour la session (`None` : celui de la configuration).
+    pub fn set_wrap_override(&mut self, wrap: Option<bool>) {
+        self.wrap_override = wrap;
     }
 
     /// Zoom de l'interface : 1 pour la taille normale.
@@ -708,6 +765,19 @@ impl Editor {
     pub fn workspace_mut(&mut self) -> &mut Workspace {
         &mut self.workspace
     }
+}
+
+/// Début d'un document, assez pour détecter son indentation.
+fn document_sample(document: &Document) -> String {
+    use cupride_text::TextBuffer;
+    let buffer = document.buffer();
+    let end = buffer
+        .line_to_byte(buffer.len_lines().min(2_000).saturating_sub(1))
+        .unwrap_or(0);
+    let end = buffer
+        .line_content_range(buffer.byte_to_line(end).unwrap_or(0))
+        .map_or(end, |r| r.end);
+    buffer.slice(0..end).unwrap_or_default()
 }
 
 /// Chemin absolu et canonique : deux chemins menant au même fichier donnent le même résultat.
@@ -824,5 +894,24 @@ mod tests {
             .unwrap();
         assert!(dir.path().join("mon fichier'.txt").exists());
         assert!(editor.run_in(dir.path(), &args(&["nope", "x"])).is_err());
+    }
+
+    #[test]
+    fn aller_a_une_ligne() {
+        let mut editor = Editor::new();
+        editor.insert_document(Document::from_text("un\ndéjà vu\ntrois"));
+        let head = |e: &Editor| e.active_document().unwrap().selections().primary().head;
+        editor.goto(2, 3).unwrap();
+        assert_eq!(
+            head(&editor),
+            6,
+            "colonne en caractères : après « dé » (é : 2 octets)"
+        );
+        editor.goto(2, 99).unwrap();
+        assert_eq!(head(&editor), 12, "fin de la ligne");
+        editor.goto(99, 1).unwrap();
+        assert_eq!(head(&editor), 13, "dernière ligne");
+        editor.goto(0, 0).unwrap();
+        assert_eq!(head(&editor), 0);
     }
 }

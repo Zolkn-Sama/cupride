@@ -14,6 +14,7 @@ use cupride_text::{
 
 use super::active;
 use crate::clipboard::{ClipboardKind, LastCopy, split_for_cursors};
+use crate::command::CommandResult;
 use crate::command::{CommandDef, CommandError, CommandOutput, CommandRegistry};
 use crate::editor::Editor;
 
@@ -54,16 +55,142 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
     registry.register(CommandDef::new(
         "edit",
         "newline",
-        "Insère un saut de ligne à chaque curseur, avec la fin de ligne du document",
+        "Insère un saut de ligne à chaque curseur, avec la fin de ligne du document ; la nouvelle ligne garde l'indentation",
         |editor, _| {
             let (_, document) = active(editor)?;
             let newline = document.line_ending().as_str();
+            let buffer = document.buffer();
+            // Pour chaque curseur : saut de ligne, puis l'indentation de sa ligne (jusqu'au
+            // curseur).
+            let texts = document
+                .selections()
+                .iter()
+                .map(|selection| {
+                    let start = selection.start();
+                    let line = buffer.byte_to_line(start)?;
+                    let line_start = buffer.line_to_byte(line)?;
+                    let before = buffer.slice(line_start..start)?;
+                    let indent: String = before
+                        .chars()
+                        .take_while(|c| *c == ' ' || *c == '\t')
+                        .collect();
+                    Ok(format!("{newline}{indent}"))
+                })
+                .collect::<Result<Vec<String>, TextError>>()?;
             document.transact(EditKind::Insert, |buffer, tx| {
-                replace_selections(buffer, tx, newline)
+                replace_each(buffer, tx, &texts)
             })?;
             Ok(CommandOutput::None)
         },
     ))?;
+
+    registry.register(CommandDef::new(
+        "edit",
+        "indent",
+        "Indente : un niveau au début de chaque ligne sélectionnée, ou, sans sélection sur plusieurs lignes, jusqu'au prochain niveau au curseur",
+        |editor, _| {
+            let (_, document) = active(editor)?;
+            let indent = document.indent();
+            let multiline = spans_lines(document);
+            if multiline {
+                let lines = selected_lines(document)?;
+                let unit = indent.unit();
+                document.transact(EditKind::Other, |buffer, tx| {
+                    for &line in lines.iter().rev() {
+                        let start = buffer.line_to_byte(line)?;
+                        tx.apply(buffer, Edit::insert(start, unit.clone()))?;
+                    }
+                    Ok(())
+                })?;
+            } else {
+                let buffer = document.buffer();
+                let texts = document
+                    .selections()
+                    .iter()
+                    .map(|selection| {
+                        if indent.tabs {
+                            return Ok("\t".to_owned());
+                        }
+                        let column = offset_to_grapheme_point(buffer, selection.start())?.column;
+                        Ok(" ".repeat(indent.width - column % indent.width))
+                    })
+                    .collect::<Result<Vec<String>, TextError>>()?;
+                document.transact(EditKind::Insert, |buffer, tx| {
+                    replace_each(buffer, tx, &texts)
+                })?;
+            }
+            Ok(CommandOutput::None)
+        },
+    ))?;
+
+    registry.register(CommandDef::new(
+        "edit",
+        "outdent",
+        "Désindente : retire un niveau au début de chaque ligne des sélections",
+        |editor, _| {
+            let (_, document) = active(editor)?;
+            let indent = document.indent();
+            let lines = selected_lines(document)?;
+            let buffer = document.buffer();
+            let mut removals = Vec::new();
+            for &line in &lines {
+                let start = buffer.line_to_byte(line)?;
+                let content = buffer.line(line)?;
+                let length = if content.starts_with('\t') {
+                    1
+                } else {
+                    content
+                        .chars()
+                        .take(indent.width)
+                        .take_while(|c| *c == ' ')
+                        .count()
+                };
+                if length > 0 {
+                    removals.push(start..start + length);
+                }
+            }
+            document.transact(EditKind::Other, |buffer, tx| {
+                for range in removals.iter().rev() {
+                    let edit = Edit::delete(buffer, range.clone())?;
+                    tx.apply(buffer, edit)?;
+                }
+                Ok(())
+            })?;
+            Ok(CommandOutput::None)
+        },
+    ))?;
+
+    registry.register(
+        CommandDef::new(
+            "edit",
+            "indentation",
+            "Change l'indentation du document actif : tabulations ou espaces, et largeur",
+            |editor, args| {
+                let kind: &String = args.get_one("type").expect("argument requis");
+                let (_, document) = active(editor)?;
+                let mut indent = document.indent();
+                indent.tabs = kind == "tabs";
+                if let Some(&width) = args.get_one::<usize>("width") {
+                    indent.width = width.clamp(1, 16);
+                }
+                document.set_indent(indent, true);
+                Ok(CommandOutput::message(indent.describe()))
+            },
+        )
+        .arg(
+            Arg::new("type")
+                .required(true)
+                .value_parser(PossibleValuesParser::new(["tabs", "spaces"]))
+                .help("tabs ou spaces"),
+        )
+        .arg(
+            Arg::new("width")
+                .long("width")
+                .value_name("N")
+                .value_parser(clap::value_parser!(usize))
+                .help("Largeur d'un niveau (1 à 16)"),
+        ),
+    )?;
 
     registry.register(CommandDef::new(
         "edit",
@@ -209,6 +336,20 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
 
     registry.register(CommandDef::new(
         "edit",
+        "add-next-occurrence",
+        "Sélectionne le mot sous le curseur, puis ajoute une sélection à chaque occurrence suivante",
+        |editor, _| next_occurrence(editor),
+    ))?;
+
+    registry.register(CommandDef::new(
+        "edit",
+        "select-all-occurrences",
+        "Place une sélection sur chaque occurrence du texte sélectionné (ou du mot sous le curseur)",
+        |editor, _| all_occurrences(editor),
+    ))?;
+
+    registry.register(CommandDef::new(
+        "edit",
         "copy",
         "Copie les sélections dans le presse-papiers (un fragment par sélection)",
         |editor, _| {
@@ -273,6 +414,112 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
     )?;
 
     Ok(())
+}
+
+/// Une des sélections s'étend-elle sur plusieurs lignes ?
+fn spans_lines(document: &crate::Document) -> bool {
+    let buffer = document.buffer();
+    document.selections().iter().any(|s| {
+        !s.is_empty() && buffer.byte_to_line(s.start()).ok() != buffer.byte_to_line(s.end()).ok()
+    })
+}
+
+/// Lignes touchées par les sélections, sans doublon, dans l'ordre. Une sélection qui finit au
+/// tout début d'une ligne ne compte pas cette ligne.
+pub(super) fn selected_lines(document: &crate::Document) -> Result<Vec<usize>, TextError> {
+    let buffer = document.buffer();
+    let mut lines = Vec::new();
+    for selection in document.selections().iter() {
+        let first = buffer.byte_to_line(selection.start())?;
+        let mut last = buffer.byte_to_line(selection.end())?;
+        if last > first && buffer.line_to_byte(last)? == selection.end() {
+            last -= 1;
+        }
+        lines.extend(first..=last);
+    }
+    lines.sort_unstable();
+    lines.dedup();
+    Ok(lines)
+}
+
+/// Texte à chercher pour les occurrences : la sélection principale, ou le mot sous le curseur
+/// (qui devient alors la sélection principale ; le booléen le signale). `None` hors de tout mot.
+fn occurrence_text(document: &mut crate::Document) -> Result<Option<(String, bool)>, CommandError> {
+    let primary = document.selections().primary();
+    if !primary.is_empty() {
+        return Ok(Some((document.buffer().slice(primary.range())?, false)));
+    }
+    let word = movement::word_range(document.buffer(), primary.head)?;
+    if word.is_empty() {
+        return Ok(None);
+    }
+    let mut selections = document.selections().clone();
+    let index = selections.primary_index();
+    let mut ranges = selections.as_slice().to_vec();
+    ranges[index] = Selection::new(word.start, word.end);
+    if let Some(updated) = Selections::from_vec(ranges, index) {
+        selections = updated;
+    }
+    document.set_selections(selections);
+    Ok(Some((document.buffer().slice(word)?, true)))
+}
+
+/// `edit add-next-occurrence` : sur un curseur, sélectionne le mot ; sur une sélection, ajoute la
+/// prochaine occurrence de son texte (en revenant au début), qui devient la principale.
+fn next_occurrence(editor: &mut Editor) -> CommandResult {
+    let (_, document) = active(editor)?;
+    // Sur un curseur, la première fois, le mot est seulement sélectionné.
+    let Some((needle, false)) = occurrence_text(document)? else {
+        return Ok(CommandOutput::None);
+    };
+    let text = document.buffer().to_text();
+    let after = document.selections().primary().end();
+    let taken = |start: usize| {
+        document
+            .selections()
+            .iter()
+            .any(|s| s.start() == start && s.end() == start + needle.len())
+    };
+    let found = text[after..]
+        .match_indices(&needle)
+        .map(|(i, _)| after + i)
+        .chain(text[..after].match_indices(&needle).map(|(i, _)| i))
+        .find(|&start| !taken(start));
+    let Some(start) = found else {
+        return Ok(CommandOutput::message(
+            "toutes les occurrences sont sélectionnées",
+        ));
+    };
+    let mut selections = document.selections().clone();
+    selections.push(Selection::new(start, start + needle.len()));
+    document.set_selections(selections);
+    Ok(CommandOutput::None)
+}
+
+/// `edit select-all-occurrences` : une sélection par occurrence ; la principale reste où elle était.
+fn all_occurrences(editor: &mut Editor) -> CommandResult {
+    let (_, document) = active(editor)?;
+    let Some((needle, _)) = occurrence_text(document)? else {
+        return Ok(CommandOutput::None);
+    };
+    let primary = document.selections().primary();
+    let text = document.buffer().to_text();
+    let ranges: Vec<Selection> = text
+        .match_indices(&needle)
+        .map(|(i, _)| Selection::new(i, i + needle.len()))
+        .collect();
+    let index = ranges
+        .iter()
+        .position(|s| s.start() == primary.start())
+        .unwrap_or(0);
+    let count = ranges.len();
+    if let Some(selections) = Selections::from_vec(ranges, index) {
+        document.set_selections(selections);
+    }
+    Ok(CommandOutput::message(format!(
+        "{count} occurrence{}",
+        if count > 1 { "s" } else { "" }
+    )))
 }
 
 /// Copie le texte des sélections non vides dans le presse-papiers, séparé par la fin de ligne du
@@ -647,7 +894,11 @@ mod tests {
         let command = keymap.command_for(&tab).unwrap().to_owned();
         let mut e = editor_with("x", 0);
         run(&mut e, &[&command]);
-        assert_eq!(text(&e), "\tx");
+        assert_eq!(
+            text(&e),
+            "    x",
+            "un niveau d'indentation (4 espaces par défaut)"
+        );
     }
 
     #[test]
@@ -743,5 +994,96 @@ mod tests {
             e.execute("edit move nulle-part"),
             Err(CommandError::InvalidArguments { .. })
         ));
+    }
+
+    #[test]
+    fn occurrences_et_edition_a_chaque_curseur() {
+        let mut e = editor_with("chat chien chat\nun chat", 1);
+        run(&mut e, &["edit add-next-occurrence"]);
+        let sel = |e: &Editor| {
+            e.active_document()
+                .unwrap()
+                .selections()
+                .iter()
+                .map(|s| s.range())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(sel(&e), vec![0..4], "le mot sous le curseur");
+        run(
+            &mut e,
+            &["edit add-next-occurrence", "edit add-next-occurrence"],
+        );
+        assert_eq!(sel(&e), vec![0..4, 11..15, 19..23]);
+        assert_eq!(
+            e.execute("edit add-next-occurrence").unwrap(),
+            CommandOutput::message("toutes les occurrences sont sélectionnées")
+        );
+        // Toutes les commandes d'édition agissent à chaque curseur.
+        run(&mut e, &["edit insert 'loup'"]);
+        assert_eq!(text(&e), "loup chien loup\nun loup");
+        run(
+            &mut e,
+            &["edit delete-backward", "edit move left", "edit insert X"],
+        );
+        assert_eq!(text(&e), "loXu chien loXu\nun loXu");
+        run(&mut e, &["edit keep-primary"]);
+        assert_eq!(heads(&e).len(), 1, "Échap : un seul curseur");
+        let mut e = editor_with("a b a b a", 0);
+        assert_eq!(
+            e.execute("edit select-all-occurrences").unwrap(),
+            CommandOutput::message("3 occurrences")
+        );
+    }
+
+    #[test]
+    fn indenter_et_desindenter() {
+        // Au curseur : jusqu'au prochain niveau.
+        let mut e = editor_with("ab", 1);
+        run(&mut e, &["edit indent"]);
+        assert_eq!(text(&e), "a   b", "colonne 1 → colonne 4");
+        // Sélection sur plusieurs lignes : chaque ligne, la dernière vide exclue.
+        let mut e = editor_with("un\ndeux\ntrois", 0);
+        e.active_document_mut()
+            .unwrap()
+            .set_selections(Selections::single(Selection::new(0, 8)));
+        run(&mut e, &["edit indent"]);
+        assert_eq!(text(&e), "    un\n    deux\ntrois");
+        run(&mut e, &["edit outdent", "edit outdent"]);
+        assert_eq!(text(&e), "un\ndeux\ntrois");
+        // Tabulations.
+        run(&mut e, &["edit indentation tabs"]);
+        run(&mut e, &["edit indent"]);
+        assert_eq!(text(&e), "\tun\n\tdeux\ntrois");
+        run(&mut e, &["edit outdent"]);
+        assert_eq!(text(&e), "un\ndeux\ntrois");
+        assert_eq!(
+            e.execute("edit indentation spaces --width 2").unwrap(),
+            CommandOutput::message("Espaces : 2")
+        );
+    }
+
+    #[test]
+    fn entree_garde_l_indentation() {
+        let mut e = editor_with("    if x {", 10);
+        run(&mut e, &["edit newline", "edit insert y"]);
+        assert_eq!(text(&e), "    if x {\n    y");
+        // Au milieu de l'indentation : seulement ce qui précède le curseur.
+        let mut e = editor_with("\t\tz", 1);
+        run(&mut e, &["edit newline"]);
+        assert_eq!(text(&e), "\t\n\t\tz");
+    }
+
+    #[test]
+    fn indentation_detectee_a_l_ouverture() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Makefile");
+        std::fs::write(&path, "all:\n\techo\n").unwrap();
+        let mut e = Editor::new();
+        e.open(&path).unwrap();
+        assert!(e.active_document().unwrap().indent().tabs);
+        let other = dir.path().join("deux.js");
+        std::fs::write(&other, "a {\n  b\n}\n").unwrap();
+        e.open(&other).unwrap();
+        assert_eq!(e.active_document().unwrap().indent().width, 2);
     }
 }

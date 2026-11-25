@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
+use std::sync::Arc;
 use std::time::Instant;
 
 use cupride_core::Document;
@@ -17,12 +18,10 @@ use crate::gutter::{self, Gutter, GutterMarker, MARKER_LANE, NUMBER_GAP};
 use crate::label::attrs;
 use crate::scroll::Scroll;
 use crate::theme::Theme;
+use crate::wrap::{MAX_WRAPPED_BYTES, Wrapping, segments};
 
 /// Marge intérieure de la zone de texte, en pixels logiques.
 const PADDING: f32 = 8.0;
-
-/// Largeur d'une tabulation, en espaces.
-const TAB_WIDTH: u16 = 4;
 
 /// Épaisseur du curseur, en pixels logiques.
 const CURSOR_WIDTH: f32 = 2.0;
@@ -81,10 +80,29 @@ impl ViewSettings {
     }
 }
 
-/// Une ligne mise en forme, gardée tant que son texte ne change pas.
+/// Affichage des lignes d'un document : retour à la ligne, espaces et fins de ligne visibles,
+/// règles verticales.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DisplayOptions {
+    /// Retour à la ligne visuel.
+    pub wrap: bool,
+    /// Espaces et tabulations visibles.
+    pub whitespace: bool,
+    /// Fins de ligne visibles.
+    pub line_endings: bool,
+    /// Règles verticales, aux colonnes indiquées.
+    pub rulers: Vec<usize>,
+}
+
+/// Une rangée mise en forme (une ligne, ou un morceau de ligne avec le retour à la ligne),
+/// gardée tant que son texte ne change pas.
 struct CachedLine {
     hash: u64,
-    /// Position du début de la ligne dans le document, mise à jour à chaque préparation.
+    /// Ligne du document.
+    line: usize,
+    /// C'est le dernier morceau de la ligne (celui de sa fin).
+    last: bool,
+    /// Position du début de la rangée dans le document, mise à jour à chaque préparation.
     start: usize,
     /// Longueur du contenu, sans la fin de ligne.
     len: usize,
@@ -156,10 +174,21 @@ pub struct EditorView {
     gutter: Gutter,
     /// Marqueurs de la gouttière.
     markers: Vec<GutterMarker>,
+    /// Occurrences de la recherche, triées : surlignées dans le texte.
+    highlights: Arc<Vec<Range<usize>>>,
     /// Ligne du curseur principal, à la dernière préparation.
     cursor_line: usize,
     lines: HashMap<usize, CachedLine>,
     visible: Range<usize>,
+    /// Largeur d'une tabulation (celle de l'indentation du document) : les lignes sont remises en
+    /// forme quand elle change.
+    tab_width: u16,
+    /// Retour à la ligne, espaces visibles, règles.
+    display: DisplayOptions,
+    /// Découpe du document en rangées, avec le retour à la ligne.
+    wrapping: Option<Wrapping>,
+    /// Largeur d'une colonne (police à chasse fixe), mesurée à la première préparation.
+    column_width: f32,
 }
 
 impl std::fmt::Debug for EditorView {
@@ -189,9 +218,14 @@ impl EditorView {
             preedit: None,
             gutter: Gutter::default(),
             markers: Vec::new(),
+            highlights: Arc::default(),
             cursor_line: 0,
             lines: HashMap::new(),
             visible: 0..0,
+            tab_width: 4,
+            display: DisplayOptions::default(),
+            wrapping: None,
+            column_width: 0.0,
         }
     }
 
@@ -221,6 +255,27 @@ impl EditorView {
         &self.settings
     }
 
+    /// Change l'affichage des lignes (retour à la ligne, espaces visibles, règles).
+    pub fn set_display(&mut self, display: DisplayOptions) {
+        if display.wrap != self.display.wrap {
+            self.lines.clear();
+            self.wrapping = None;
+            let [_, y] = self.scroll.position();
+            self.scroll.jump_to([0.0, y]);
+        }
+        self.display = display;
+    }
+
+    /// Affichage des lignes.
+    pub fn display(&self) -> &DisplayOptions {
+        &self.display
+    }
+
+    /// Le retour à la ligne est-il appliqué ?
+    pub fn is_wrapping(&self) -> bool {
+        self.wrapping.is_some()
+    }
+
     /// Change les réglages d'affichage ; si la police change, toutes les lignes seront remises
     /// en forme.
     pub fn set_settings(&mut self, settings: ViewSettings) {
@@ -228,6 +283,8 @@ impl EditorView {
             self.lines.clear();
             self.gutter.clear();
             self.content_width = 0.0;
+            self.column_width = 0.0;
+            self.wrapping = None;
         }
         self.settings = settings;
     }
@@ -245,6 +302,8 @@ impl EditorView {
             self.lines.clear();
             self.gutter.clear();
             self.content_width = 0.0;
+            self.column_width = 0.0;
+            self.wrapping = None;
         }
     }
 
@@ -296,6 +355,72 @@ impl EditorView {
         self.lines.len()
     }
 
+    /// Nombre de rangées affichées : les lignes, ou leurs morceaux avec le retour à la ligne.
+    fn row_count(&self) -> usize {
+        self.wrapping
+            .as_ref()
+            .map_or(self.line_count, Wrapping::rows)
+    }
+
+    /// Première rangée de la ligne `line`.
+    fn first_row(&self, line: usize) -> usize {
+        self.wrapping.as_ref().map_or(line, |w| w.first_row(line))
+    }
+
+    /// Ligne de la rangée `row`.
+    fn line_of_row(&self, row: usize) -> usize {
+        self.wrapping.as_ref().map_or(row, |w| w.line_of(row))
+    }
+
+    /// Morceaux de la ligne `text`, un par rangée.
+    fn line_segments(&self, text: &str) -> Vec<Range<usize>> {
+        match &self.wrapping {
+            Some(w) => segments(text, w.columns, w.tab),
+            None => std::iter::once(0..text.len()).collect(),
+        }
+    }
+
+    /// Rangée de la position `offset` : à la fin d'un morceau qui n'est pas le dernier de sa
+    /// ligne, la rangée suivante.
+    fn row_of_offset(&self, buffer: &impl TextBuffer, offset: usize) -> usize {
+        let line = buffer.byte_to_line(offset).unwrap_or_default();
+        if self.wrapping.is_none() {
+            return line;
+        }
+        let start = buffer.line_to_byte(line).unwrap_or_default();
+        let text = buffer.line(line).unwrap_or_default();
+        let local = offset.saturating_sub(start);
+        let segments = self.line_segments(&text);
+        let index = segments
+            .iter()
+            .position(|r| local < r.end)
+            .unwrap_or(segments.len().saturating_sub(1));
+        self.first_row(line) + index
+    }
+
+    /// Rangées de la ligne `line`.
+    fn rows_of_line(&self, line: usize) -> Range<usize> {
+        self.first_row(line)..self.first_row(line + 1).max(self.first_row(line) + 1)
+    }
+
+    /// Mesure la largeur d'une colonne (police à chasse fixe).
+    fn measure_column(&mut self, text: &mut TextSystem) {
+        if self.column_width > 0.0 {
+            return;
+        }
+        let metrics = self.metrics();
+        let mut probe = Buffer::new(text.font_system(), metrics);
+        probe.set_wrap(Wrap::None);
+        probe.set_text(
+            "0000000000",
+            &attrs(&self.settings.font_family),
+            Shaping::Advanced,
+            None,
+        );
+        probe.shape_until_scroll(text.font_system(), false);
+        self.column_width = (x_at(&probe, 10) / 10.0).max(1.0);
+    }
+
     /// Lignes visibles pour un document de `line_count` lignes.
     fn compute_visible(&self, line_count: usize) -> Range<usize> {
         let line_height = self.line_height().max(1.0);
@@ -309,28 +434,69 @@ impl EditorView {
     /// Met en forme les lignes visibles de `document`. À appeler avant [`EditorView::frame`].
     pub fn prepare(&mut self, text: &mut TextSystem, document: &Document) {
         let buffer = document.buffer();
+        let tab_width = u16::try_from(document.indent().width.clamp(1, 16)).unwrap_or(4);
+        if tab_width != self.tab_width {
+            self.tab_width = tab_width;
+            self.lines.clear();
+            self.content_width = 0.0;
+        }
         self.line_count = buffer.len_lines();
+        self.measure_column(text);
+        // Retour à la ligne : découpe refaite quand le texte, la largeur ou la tabulation changent.
+        if self.display.wrap && buffer.len_bytes() <= MAX_WRAPPED_BYTES {
+            let columns = self.wrap_columns();
+            let tab = usize::from(self.tab_width);
+            let stale = self.wrapping.as_ref().is_none_or(|w| {
+                w.columns != columns
+                    || w.tab != tab
+                    || w.revision != document.revision()
+                    || w.lines() != self.line_count
+            });
+            if stale {
+                self.wrapping = Some(Wrapping::new(buffer, document.revision(), columns, tab));
+                self.lines.clear();
+            }
+        } else if self.wrapping.take().is_some() {
+            self.lines.clear();
+        }
         self.scroll.clamp(self.max_scroll());
         let head = self.selections(document).primary().head;
         let reveal = std::mem::take(&mut self.reveal);
         if reveal {
-            self.reveal_line(buffer.byte_to_line(head).unwrap_or_default());
+            self.reveal_row(self.row_of_offset(buffer, head));
         }
-        self.visible = self.compute_visible(self.line_count);
-        // Les lignes sorties de l'écran sont oubliées : la mémoire reste proportionnelle à l'écran.
+        self.visible = self.compute_visible(self.row_count());
+        // Les rangées sorties de l'écran sont oubliées : la mémoire reste proportionnelle à
+        // l'écran.
         let visible = self.visible.clone();
-        self.lines.retain(|line, _| visible.contains(line));
+        self.lines.retain(|row, _| visible.contains(row));
 
         let metrics = self.metrics();
         let family = self.settings.font_family.clone();
         let head_line = buffer.byte_to_line(head).unwrap_or_default();
-        for line in self.visible.clone() {
-            let start = buffer.line_to_byte(line).unwrap_or_default();
-            let mut content = buffer.line(line).unwrap_or_default();
+        let mut current: Option<(usize, usize, String, Vec<Range<usize>>)> = None;
+        for row in self.visible.clone() {
+            let line = self.line_of_row(row);
+            if current.as_ref().is_none_or(|(l, ..)| *l != line) {
+                let start = buffer.line_to_byte(line).unwrap_or_default();
+                let text = buffer.line(line).unwrap_or_default();
+                let segments = self.line_segments(&text);
+                current = Some((line, start, text, segments));
+            }
+            let Some((_, line_start, line_text, segments)) = &current else {
+                continue;
+            };
+            let index = (row - self.first_row(line)).min(segments.len() - 1);
+            let segment = segments[index].clone();
+            let last = index + 1 == segments.len();
+            let start = line_start + segment.start;
+            let mut content = line_text[segment.clone()].to_owned();
             let len = content.len();
-            // Le texte en composition est affiché dans la ligne du curseur, sans être inséré.
+            // Le texte en composition est affiché à la place du curseur, sans être inséré.
             let mut preedit = None;
+            let holds_head = head >= start && (head < start + len || (last && head == start + len));
             if line == head_line
+                && holds_head
                 && let Some(composing) = self.preedit.as_ref().filter(|p| !p.text.is_empty())
             {
                 let at = head.saturating_sub(start).min(len);
@@ -340,9 +506,11 @@ impl EditorView {
                 }
             }
             let hash = hash_text(&content);
-            if let Some(cached) = self.lines.get_mut(&line)
+            if let Some(cached) = self.lines.get_mut(&row)
                 && cached.hash == hash
             {
+                cached.line = line;
+                cached.last = last;
                 cached.start = start;
                 cached.len = len;
                 cached.preedit = preedit;
@@ -350,15 +518,17 @@ impl EditorView {
             }
             let mut shaped = Buffer::new(text.font_system(), metrics);
             shaped.set_wrap(Wrap::None);
-            shaped.set_tab_width(TAB_WIDTH);
+            shaped.set_tab_width(self.tab_width);
             shaped.set_size(None, Some(metrics.line_height));
             shaped.set_text(&content, &attrs(&family), Shaping::Advanced, None);
             shaped.shape_until_scroll(text.font_system(), false);
             self.content_width = self.content_width.max(x_at(&shaped, content.len()));
             self.lines.insert(
-                line,
+                row,
                 CachedLine {
                     hash,
+                    line,
+                    last,
                     start,
                     len,
                     preedit,
@@ -367,17 +537,47 @@ impl EditorView {
             );
         }
         self.cursor_line = head_line;
+        let lines = if self.visible.is_empty() {
+            0..0
+        } else {
+            self.line_of_row(self.visible.start)..self.line_of_row(self.visible.end - 1) + 1
+        };
         self.gutter.prepare(
             text,
             metrics,
             &attrs(&family),
-            self.visible.clone(),
+            lines,
             head_line,
             self.settings.line_numbers,
         );
-        if reveal {
+        if reveal && self.wrapping.is_none() {
             self.reveal_column(buffer, head);
         }
+        // À la première préparation, la gouttière n'était pas encore mesurée : la largeur en
+        // colonnes a pu changer, la découpe est refaite tout de suite.
+        if let Some(wrapping) = &self.wrapping
+            && wrapping.columns != self.wrap_columns()
+        {
+            self.reveal |= reveal;
+            self.prepare(text, document);
+        }
+    }
+
+    /// Largeur de la zone de texte, en colonnes, pour le retour à la ligne.
+    fn wrap_columns(&self) -> usize {
+        let width = self.text_area().width - 2.0 * self.padding();
+        ((width / self.column_width.max(1.0)).floor() as usize).max(8)
+    }
+
+    /// Occurrences de la recherche à surligner (triées, sans chevauchement) ; vide pour n'en
+    /// surligner aucune.
+    pub fn set_highlights(&mut self, highlights: Arc<Vec<Range<usize>>>) {
+        self.highlights = highlights;
+    }
+
+    /// Occurrences surlignées.
+    pub fn highlights(&self) -> &[Range<usize>] {
+        &self.highlights
     }
 
     /// Remplace les marqueurs de la gouttière.
@@ -428,7 +628,11 @@ impl EditorView {
     /// Défilement maximal : la dernière ligne peut monter jusqu'en haut de la vue ; à droite,
     /// jusqu'à la fin de la plus longue ligne vue, plus une marge.
     fn max_scroll(&self) -> [f32; 2] {
-        let max_y = self.line_count.saturating_sub(1) as f32 * self.line_height();
+        let max_y = self.row_count().saturating_sub(1) as f32 * self.line_height();
+        if self.wrapping.is_some() {
+            // Avec le retour à la ligne, rien ne dépasse à droite.
+            return [0.0, max_y];
+        }
         let max_x = self.content_width + 2.0 * self.padding() + self.reveal_margin()
             - self.text_area().width;
         [max_x.max(0.0), max_y]
@@ -507,8 +711,8 @@ impl EditorView {
         self.reveal = true;
     }
 
-    /// Fait défiler verticalement, au minimum, pour que la ligne `line` soit entièrement visible.
-    fn reveal_line(&mut self, line: usize) {
+    /// Fait défiler verticalement, au minimum, pour que la rangée `line` soit entièrement visible.
+    fn reveal_row(&mut self, line: usize) {
         let line_height = self.line_height();
         let top = self.padding() + line as f32 * line_height;
         let [x, y] = self.scroll.position();
@@ -525,10 +729,8 @@ impl EditorView {
 
     /// Fait défiler horizontalement, au minimum, pour que la position `offset` soit visible.
     fn reveal_column(&mut self, buffer: &impl TextBuffer, offset: usize) {
-        let Some(line) = buffer.byte_to_line(offset).ok() else {
-            return;
-        };
-        let Some(cached) = self.lines.get(&line) else {
+        let row = self.row_of_offset(buffer, offset);
+        let Some(cached) = self.lines.get(&row) else {
             return;
         };
         let cursor = self.padding() + cached.x(offset.saturating_sub(cached.start));
@@ -550,7 +752,7 @@ impl EditorView {
         self.text_area().x + self.padding() - self.scroll_x()
     }
 
-    /// Haut de la ligne `line`, en pixels physiques.
+    /// Haut de la rangée `line`, en pixels physiques.
     fn line_top(&self, line: usize) -> f32 {
         self.bounds.y + self.padding() + line as f32 * self.line_height() - self.scroll_y()
     }
@@ -586,10 +788,13 @@ impl EditorView {
 
         if self.settings.highlight_current_line {
             let line = line_of(selections.primary().head);
-            if self.visible.contains(&line) {
+            for row in self.rows_of_line(line) {
+                if !self.visible.contains(&row) {
+                    continue;
+                }
                 let rect = Rect::new(
                     self.bounds.x,
-                    self.line_top(line),
+                    self.line_top(row),
                     self.bounds.width,
                     line_height,
                 );
@@ -599,34 +804,40 @@ impl EditorView {
             }
         }
 
-        for selection in selections.iter().filter(|s| !s.is_empty()) {
-            let (first, last) = (line_of(selection.start()), line_of(selection.end()));
-            let lines = first.max(self.visible.start)..(last + 1).min(self.visible.end);
-            for line in lines {
-                let Some(cached) = self.lines.get(&line) else {
-                    continue;
-                };
-                let from = selection
-                    .start()
-                    .saturating_sub(cached.start)
-                    .min(cached.len);
-                let to = selection.end().saturating_sub(cached.start).min(cached.len);
-                let mut right = cached.x(to);
-                // La sélection continue après la fin de la ligne : le saut de ligne est inclus.
-                if selection.end() > cached.start + cached.len {
-                    right += self.newline_width();
-                }
-                let left = cached.x(from);
-                let rect = Rect::new(
-                    self.text_left() + left,
-                    self.line_top(line),
-                    right - left,
-                    line_height,
-                );
-                frame
-                    .quads
-                    .push(Quad::new(rect.intersect(&text_area), theme.selection));
+        // Règles verticales.
+        for &column in &self.display.rulers {
+            let x = (self.text_left() + column as f32 * self.column_width).round();
+            let rect = Rect::new(
+                x,
+                text_area.y,
+                self.scale.round().max(1.0),
+                text_area.height,
+            );
+            frame
+                .quads
+                .push(Quad::new(rect.intersect(&text_area), theme.border));
+        }
+
+        // Occurrences de la recherche visibles : retrouvées par dichotomie.
+        if let (Some(first), Some(last)) = (
+            self.lines.get(&self.visible.start),
+            self.visible
+                .end
+                .checked_sub(1)
+                .and_then(|l| self.lines.get(&l)),
+        ) {
+            let (from, to) = (first.start, last.start + last.len + 1);
+            let start = self.highlights.partition_point(|m| m.end <= from);
+            for found in self.highlights[start..]
+                .iter()
+                .take_while(|m| m.start <= to)
+            {
+                self.push_range(frame, buffer, found.clone(), theme.search_match());
             }
+        }
+
+        for selection in selections.iter().filter(|s| !s.is_empty()) {
+            self.push_range(frame, buffer, selection.range(), theme.selection);
         }
 
         for line in self.visible.clone() {
@@ -642,9 +853,12 @@ impl EditorView {
             });
         }
         self.draw_gutter(frame, theme);
+        if self.display.whitespace || self.display.line_endings {
+            self.draw_whitespace(frame, theme);
+        }
 
         // Texte en composition : souligné.
-        let head_line = line_of(selections.primary().head);
+        let head_line = self.row_of_offset(buffer, selections.primary().head);
         if let Some((cached, (at, len))) = self
             .lines
             .get(&head_line)
@@ -676,6 +890,110 @@ impl EditorView {
         }
     }
 
+    /// Rectangles d'une plage du texte, rangée par rangée, sur les rangées visibles.
+    fn push_range(
+        &self,
+        frame: &mut Layer<'_>,
+        buffer: &impl TextBuffer,
+        range: Range<usize>,
+        color: cupride_render::Color,
+    ) {
+        let text_area = self.text_area();
+        let first = self
+            .row_of_offset(buffer, range.start)
+            .max(self.visible.start);
+        let last = (self.row_of_offset(buffer, range.end) + 1).min(self.visible.end);
+        for row in first..last {
+            let Some(cached) = self.lines.get(&row) else {
+                continue;
+            };
+            let end = cached.start + cached.len;
+            if range.end < cached.start || range.start > end {
+                continue;
+            }
+            let from = range.start.saturating_sub(cached.start).min(cached.len);
+            let to = range.end.saturating_sub(cached.start).min(cached.len);
+            let mut right = cached.x(to);
+            // La plage continue après la fin de la ligne : le saut de ligne est inclus.
+            if cached.last && range.end > end {
+                right += self.newline_width();
+            }
+            let left = cached.x(from);
+            let rect = Rect::new(
+                self.text_left() + left,
+                self.line_top(row),
+                right - left,
+                self.line_height(),
+            );
+            frame
+                .quads
+                .push(Quad::new(rect.intersect(&text_area), color));
+        }
+    }
+
+    /// Espaces (points), tabulations (traits) et fins de ligne (petit coude) des rangées
+    /// visibles, discrets.
+    fn draw_whitespace(&self, frame: &mut Layer<'_>, theme: &Theme) {
+        let text_area = self.text_area();
+        let muted = theme.muted;
+        let color = cupride_render::Color::rgba(muted.r, muted.g, muted.b, 0x90);
+        let dot = (2.0 * self.scale).round().max(1.0);
+        let line = self.scale.round().max(1.0);
+        for row in self.visible.clone() {
+            let Some(cached) = self.lines.get(&row) else {
+                continue;
+            };
+            let top = self.line_top(row);
+            let middle = (top + self.line_height() / 2.0).round();
+            if self.display.whitespace {
+                let content = cached.buffer.lines.first().map_or("", |l| l.text());
+                for (index, c) in content.char_indices() {
+                    if cached
+                        .preedit
+                        .is_some_and(|(at, len)| index >= at && index < at + len)
+                    {
+                        continue;
+                    }
+                    let local = match cached.preedit {
+                        Some((at, len)) if index >= at + len => index - len,
+                        _ => index,
+                    };
+                    let (left, right) = (cached.x(local), cached.x(local + c.len_utf8()));
+                    let rect = match c {
+                        ' ' => Rect::new(
+                            (self.text_left() + (left + right - dot) / 2.0).round(),
+                            middle - dot / 2.0,
+                            dot,
+                            dot,
+                        ),
+                        '\t' => Rect::new(
+                            (self.text_left() + left + dot).round(),
+                            middle,
+                            (right - left - 2.0 * dot).max(dot),
+                            line,
+                        ),
+                        _ => continue,
+                    };
+                    frame
+                        .quads
+                        .push(Quad::new(rect.intersect(&text_area), color));
+                }
+            }
+            if self.display.line_endings && cached.last {
+                let x = (self.text_left() + cached.x(cached.len) + dot).round();
+                let width = (4.0 * self.scale).round();
+                for rect in [
+                    Rect::new(x + width, middle - width, line, width),
+                    Rect::new(x, middle, width + line, line),
+                ] {
+                    frame
+                        .quads
+                        .push(Quad::new(rect.intersect(&text_area), color));
+                }
+            }
+        }
+    }
+
     /// Numéros de ligne et marqueurs.
     fn draw_gutter<'a>(&'a self, frame: &mut Layer<'a>, theme: &Theme) {
         let gutter = Rect::new(
@@ -685,14 +1003,19 @@ impl EditorView {
             self.bounds.height,
         );
         let right = gutter.right() - (NUMBER_GAP * self.scale).round();
-        for line in self.visible.clone() {
+        for row in self.visible.clone() {
+            // Le numéro, sur la première rangée de chaque ligne.
+            let line = self.line_of_row(row);
+            if row != self.first_row(line) {
+                continue;
+            }
             let Some(number) = self.gutter.numbers.get(&line) else {
                 continue;
             };
             frame.texts.push(TextItem {
                 buffer: &number.buffer,
                 left: (right - number.width).round(),
-                top: self.line_top(line),
+                top: self.line_top(row),
                 clip: gutter,
                 color: if line == self.cursor_line {
                     theme.line_number_active
@@ -706,11 +1029,11 @@ impl EditorView {
         for marker in self
             .markers
             .iter()
-            .filter(|m| self.visible.contains(&m.line))
+            .filter(|m| self.visible.contains(&self.first_row(m.line)))
         {
             let rect = Rect::new(
                 (gutter.x + (lane - width) / 2.0).round(),
-                self.line_top(marker.line),
+                self.line_top(self.first_row(marker.line)),
                 width,
                 self.line_height(),
             );
@@ -722,7 +1045,7 @@ impl EditorView {
 
     /// Rectangle du curseur à la position `offset`, s'il est sur une ligne préparée.
     fn cursor_rect(&self, buffer: &impl TextBuffer, offset: usize, width: f32) -> Option<Rect> {
-        let line = buffer.byte_to_line(offset).ok()?;
+        let line = self.row_of_offset(buffer, offset);
         let cached = self.lines.get(&line)?;
         let index = offset.saturating_sub(cached.start);
         let x = match (cached.preedit, &self.preedit) {
@@ -751,13 +1074,15 @@ impl EditorView {
         if row < 0.0 {
             return 0;
         }
-        let line = row as usize;
-        if line >= buffer.len_lines() {
+        let row = row as usize;
+        if row >= self.row_count() {
             return buffer.len_bytes();
         }
-        let Some(cached) = self.lines.get(&line) else {
-            let range = buffer.line_content_range(line).unwrap_or(0..0);
-            return if line < self.visible.start {
+        let Some(cached) = self.lines.get(&row) else {
+            let range = buffer
+                .line_content_range(self.line_of_row(row))
+                .unwrap_or(0..0);
+            return if row < self.visible.start {
                 range.start
             } else {
                 range.end
@@ -1214,5 +1539,80 @@ mod tests {
         assert_eq!(view.visible_lines().start, 99);
         let zoomed = view.lines[&100].x(5);
         assert!((zoomed / width - 1.5).abs() < 0.05, "{width} → {zoomed}");
+    }
+
+    #[test]
+    fn retour_a_la_ligne() {
+        let mut text = TextSystem::new();
+        let long = "mot ".repeat(60);
+        let document = Document::from_text(&format!("{long}\ncourt\n"));
+        let mut view = EditorView::new(ViewSettings::default(), 1.0);
+        view.set_bounds(Rect::new(0.0, 0.0, 300.0, 600.0));
+        view.set_display(DisplayOptions {
+            wrap: true,
+            ..DisplayOptions::default()
+        });
+        view.prepare(&mut text, &document);
+        assert!(view.is_wrapping());
+        let rows = view.row_count();
+        assert!(
+            rows > 3,
+            "la longue ligne occupe plusieurs rangées : {rows}"
+        );
+        let second = view.first_row(1);
+        assert!(second > 1);
+        assert_eq!(view.line_of_row(second), 1);
+        assert_eq!(view.visible_lines().end, rows, "tout tient dans la hauteur");
+        // Pas de défilement horizontal.
+        assert_eq!(view.max_scroll()[0], 0.0);
+        // Un clic sur la deuxième rangée tombe dans la première ligne, plus loin.
+        let y = view.line_top(1) + 2.0;
+        let offset = view.offset_at(view.text_left() + 1.0, y, document.buffer());
+        assert!(offset > 0 && offset < long.len(), "{offset}");
+        // Le curseur à la fin d'un morceau s'affiche au début du suivant.
+        let cached = &view.lines[&0];
+        let boundary = cached.start + cached.len;
+        assert_eq!(view.row_of_offset(document.buffer(), boundary), 1);
+        // Numéro de ligne sur la première rangée de chaque ligne seulement.
+        let frame = view.frame(&Theme::default(), &document, false);
+        let numbers = frame.layers[0].texts.len() - rows;
+        assert_eq!(numbers, 3, "trois lignes, trois numéros");
+        // Sans retour à la ligne : une rangée par ligne.
+        view.set_display(DisplayOptions::default());
+        view.prepare(&mut text, &document);
+        assert_eq!(view.row_count(), 3);
+    }
+
+    #[test]
+    fn espaces_fins_de_ligne_et_regles() {
+        let mut text = TextSystem::new();
+        let document = Document::from_text("a b\tc\nd");
+        let mut view = view(600.0);
+        let quads = |view: &mut EditorView, text: &mut TextSystem| {
+            view.prepare(text, &document);
+            view.frame(&Theme::default(), &document, false).layers[0]
+                .quads
+                .len()
+        };
+        let plain = quads(&mut view, &mut text);
+        view.set_display(DisplayOptions {
+            whitespace: true,
+            ..DisplayOptions::default()
+        });
+        assert_eq!(
+            quads(&mut view, &mut text),
+            plain + 2,
+            "une espace, une tabulation"
+        );
+        view.set_display(DisplayOptions {
+            line_endings: true,
+            rulers: vec![80, 100],
+            ..DisplayOptions::default()
+        });
+        assert_eq!(
+            quads(&mut view, &mut text),
+            plain + 2 * 2 + 2,
+            "deux fins de ligne, deux règles"
+        );
     }
 }

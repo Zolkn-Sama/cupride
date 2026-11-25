@@ -19,6 +19,7 @@ cupride-ui.workspace = true
 directories.workspace = true
 ignore.workspace = true
 notify.workspace = true
+regex.workspace = true
 tempfile.workspace = true
 trash.workspace = true
 tracing.workspace = true

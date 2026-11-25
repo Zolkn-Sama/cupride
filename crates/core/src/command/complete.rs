@@ -215,7 +215,7 @@ mod tests {
         let editor = Editor::new();
         let completion = complete(editor.commands(), "edit mo left", 7);
         assert_eq!(completion.start, 5);
-        assert_eq!(completion.candidates, ["move"]);
+        assert_eq!(completion.candidates, ["move", "move-lines"]);
     }
 
     #[test]
@@ -223,7 +223,7 @@ mod tests {
         let editor = Editor::new();
         let hint = help_hint(editor.commands(), "file open src").unwrap();
         assert!(
-            hint.starts_with("file open <chemin> [--preview] —"),
+            hint.starts_with("file open <chemin> [--preview] [--line <N>]"),
             "{hint}"
         );
         assert_eq!(help_hint(editor.commands(), "file"), None);

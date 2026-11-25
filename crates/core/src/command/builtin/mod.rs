@@ -6,8 +6,11 @@ mod explorer;
 mod file;
 mod keys;
 mod layout;
+mod lines;
 mod notifications;
 mod panel;
+mod recovery;
+mod search;
 mod tab;
 mod theme;
 mod ui;
@@ -33,6 +36,9 @@ pub(crate) fn register_all(registry: &mut CommandRegistry) -> Result<(), Command
     layout::register(registry)?;
     explorer::register(registry)?;
     window::register(registry)?;
+    search::register(registry)?;
+    recovery::register(registry)?;
+    lines::register(registry)?;
     Ok(())
 }
 

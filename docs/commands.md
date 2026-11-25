@@ -80,12 +80,21 @@ pendant l'écriture laisse toujours l'ancien fichier intact.
 
 | Commande | Description |
 |---|---|
-| `file open <chemin> [--preview]` | Ouvre un fichier et en fait le document actif, dans un onglet de la zone active (`--preview` : dans l'onglet d'aperçu, voir [`tab`](#tab--onglets)). Un fichier déjà ouvert n'est pas dupliqué : son document redevient actif. Un fichier inexistant est créé au premier enregistrement. Fichier binaire ou non UTF-8 : refusé, jamais modifié. |
-| `file save` | Enregistre le document actif, en conservant ses fins de ligne. Un document sans fichier demande `file save-as`. |
+| `file open <chemin> [--preview] [--line N [--column N]]` | Ouvre un fichier et en fait le document actif, dans un onglet de la zone active (`--preview` : dans l'onglet d'aperçu, voir [`tab`](#tab--onglets)) ; `--line` et `--column` (à partir de 1, colonne en caractères) y placent le curseur. Un fichier déjà ouvert n'est pas dupliqué : son document redevient actif. Un fichier inexistant est créé au premier enregistrement. Fichier binaire ou non UTF-8 : refusé, jamais modifié. |
+| `file save [--force]` | Enregistre le document actif, en conservant ses fins de ligne. Un document sans fichier demande `file save-as`. Si le fichier a été modifié par un autre programme depuis l'ouverture, la commande refuse de l'écraser, sauf avec `--force`. |
+| `file keep` | Garde la version de l'éditeur d'un fichier modifié ailleurs : le prochain enregistrement l'écrasera. |
+| `file compare` | Ouvre, dans un nouveau document, les différences entre le fichier sur le disque (lignes `-`) et le document actif (lignes `+`). |
 | `file save-as <chemin>` | Enregistre le document actif sous `<chemin>`, qui devient son fichier. |
 | `file close [--force]` | Ferme le document actif, et tous les panneaux qui l'affichent. S'il a des modifications non enregistrées, la commande échoue, sauf avec `--force`. |
 | `file reload [--force]` | Relit le document actif depuis le disque ; l'historique est vidé. Mêmes règles que `file close` pour les modifications non enregistrées. |
 | `file list` | Liste les documents ouverts : `>` marque le document actif, `*` un document modifié. |
+
+**Fichier modifié hors de l'IDE** : les dossiers des documents ouverts sont surveillés (`notify`),
+et tout est revérifié quand l'IDE reprend le focus. Un document sans modification est rechargé.
+Un document modifié n'est jamais écrasé : une notification propose `file compare`, `file keep`
+(garder la sienne) ou `file reload --force` (prendre celle du disque). Un fichier supprimé ou
+déplacé est signalé ; le document reste ouvert, et `file save` le recrée. Réécrire le même contenu
+(ou seulement changer la date du fichier) ne déclenche rien.
 
 Exemples :
 
@@ -147,6 +156,92 @@ edit move word-right --extend
 edit add-cursor down
 ```
 
+## `search` — rechercher
+
+| Commande | Description |
+|---|---|
+| `search find <motif> [--case] [--word] [--regex]` | Cherche le motif dans le document actif et sélectionne l'occurrence suivante, à partir du début de la sélection ; affiche sa position (`3/12`). Par défaut, la casse est ignorée ; `--case` la respecte, `--word` ne garde que les mots entiers, `--regex` lit le motif comme une expression régulière (syntaxe de la crate `regex`). |
+| `search next` | Occurrence suivante ; après la dernière, la première (`F3` ; `Cmd+G` sous macOS). |
+| `search previous` | Occurrence précédente (`Maj+F3` ; `Cmd+Maj+G` sous macOS). |
+| `search replace <texte>` | Remplace l'occurrence sélectionnée par le texte, puis sélectionne la suivante. Avec `--regex` dans la recherche, `$1`, `${nom}` et `$0` reprennent les groupes de capture (`$$` pour un `$`) ; sinon le texte est pris tel quel. |
+| `search replace-all <texte>` | Remplace toutes les occurrences, en une seule modification : un seul `edit undo` les rétablit toutes. |
+| `search clear` | Arrête la recherche en cours. |
+| `search project <motif> [--case] [--word] [--regex]` | Cherche dans tous les fichiers du projet (le dossier ouvert, sinon le dossier courant), en arrière-plan. Les résultats s'affichent au fil de l'eau dans le panneau de recherche, qui s'ouvre à gauche (en onglet à côté de l'explorateur s'il est ouvert). Les fichiers ignorés par `.gitignore` et `.ignore`, les fichiers cachés et les fichiers binaires sont sautés ; au-delà de 10 000 occurrences, la recherche s'arrête. |
+| `search project-replace <texte>` | Aperçu : chaque ligne des résultats s'affiche dans le panneau telle qu'elle deviendrait. Rien n'est modifié. |
+| `search project-apply` | Confirme le remplacement en aperçu. Un fichier ouvert est modifié dans son document (une seule modification, annulable, à enregistrer) ; les autres sont réécrits sur le disque. |
+| `ui search-project` | Prépare `search project` dans la ligne de commande, avec la sélection (`mod+shift+f`). |
+| `ui find` | Ouvre la barre de recherche (`mod+f`), préremplie avec la sélection (sur une ligne) ou le motif en cours. |
+| `ui replace` | Ouvre la barre avec la ligne de remplacement (`Ctrl+H`, `Option+Cmd+F` sous macOS). |
+
+**Panneau de recherche** : en tête, le bilan (« 12 résultats dans 3 fichiers ») ; puis chaque
+fichier et ses lignes, les occurrences en couleur. Flèches, pages, Début et Fin pour se déplacer ;
+Entrée ou double clic ouvre le fichier à la ligne et à la colonne de l'occurrence ; Espace ou clic
+l'ouvre dans l'onglet d'aperçu.
+
+**Barre de recherche** : en haut à droite de la zone active. La recherche est incrémentale :
+chaque frappe sélectionne la première occurrence à partir du point de départ, et toutes les
+occurrences sont surlignées. Entrée (ou ↓) : suivante ; Maj+Entrée (ou ↑) : précédente ; Échap :
+fermer (le motif reste, `F3` continue). Options : `Alt+C` casse, `Alt+W` mot entier, `Alt+R`
+expression régulière, ou un clic sur `Aa`, `mot`, `.*`. Une expression invalide est signalée dans
+la barre. La recherche se fait dans un thread à part, sur une copie du document : l'interface ne
+bloque jamais, même sur un fichier de 100 Mo. Ligne de remplacement : Tab passe d'un champ à
+l'autre ; dans le champ de remplacement, Entrée remplace l'occurrence sélectionnée et passe à la
+suivante, `mod+Entrée` remplace tout. Au-delà de 100 000 occurrences, seules les
+100 000 premières sont gardées (« limite »).
+
+## Lignes
+
+Ces commandes agissent sur toutes les lignes touchées par les sélections (une sélection qui
+finit au tout début d'une ligne ne la compte pas), en une seule modification annulable.
+
+| Commande | Description |
+|---|---|
+| `edit goto <ligne[:colonne]>` | Place le curseur à la ligne et à la colonne (à partir de 1, colonne en caractères), bornées au texte. |
+| `ui goto` | Prépare `edit goto` dans la ligne de commande (`Ctrl+G`). |
+| `edit duplicate-lines` | Duplique les lignes ; les curseurs passent sur la copie du dessous (`Alt+Maj+↓`). |
+| `edit move-lines <up\|down>` | Déplace les lignes d'une ligne vers le haut ou le bas ; les sélections les suivent (`Alt+↑`, `Alt+↓`). |
+| `edit delete-lines` | Supprime les lignes (`mod+shift+k`). |
+| `edit join-lines` | Joint chaque ligne à la suivante, avec une espace, sans l'indentation de la suivante ; sur une seule ligne, avec la suivante (`mod+j`). |
+| `edit toggle-comment` | Commente les lignes non vides (au niveau d'indentation le plus faible du bloc), ou les décommente si elles le sont toutes (`mod+/`). La syntaxe vient du langage du fichier (`//`, `#`, `--`…), ou de l'option `[languages.<Nom>] comment` ; les paquets de langage la fourniront. |
+
+## Indentation
+
+| Commande | Description |
+|---|---|
+| `edit indent` | Sans sélection sur plusieurs lignes : insère jusqu'au prochain niveau, à chaque curseur (une tabulation, ou les espaces jusqu'à la prochaine colonne multiple de la largeur). Avec une sélection sur plusieurs lignes : un niveau au début de chaque ligne (`Tab`). |
+| `edit outdent` | Retire un niveau (une tabulation, ou jusqu'à la largeur en espaces) au début de chaque ligne des sélections (`Maj+Tab`). |
+| `edit indentation <tabs\|spaces> [--width N]` | Change l'indentation du document actif, pour la session : la configuration ne la change plus. |
+
+L'indentation de chaque document vient de la configuration (`[editor] indent_style`,
+`indent_width`, et `[languages.<Nom>]`) ; avec `auto`, elle est détectée à l'ouverture. La barre
+d'état l'affiche (`Espaces : 4`). Entrée (`edit newline`) garde l'indentation de la ligne : la
+nouvelle ligne commence par les mêmes espaces et tabulations, jusqu'au curseur.
+
+## Multi-curseurs
+
+| Commande | Description |
+|---|---|
+| `edit add-cursor up`, `down` | Ajoute un curseur sur la ligne au-dessus ou en dessous (aussi : Alt+clic). |
+| `edit add-next-occurrence` | Sur un curseur, sélectionne le mot ; puis ajoute une sélection à l'occurrence suivante de son texte, en revenant au début (`mod+d`). |
+| `edit select-all-occurrences` | Une sélection sur chaque occurrence du texte sélectionné ou du mot sous le curseur (`mod+shift+l`). |
+| `edit keep-primary` | Revient à un seul curseur (`Échap`). |
+
+Toutes les commandes d'édition (frappe, effacement, déplacements, couper, copier, coller)
+agissent à chaque curseur.
+
+## `recovery` — récupération après plantage
+
+Les documents qui ont des modifications non enregistrées sont copiés toutes les 15 secondes (s'ils
+ont changé) dans le dossier `recovery/` des données de l'OS — jamais dans les fichiers du projet.
+À la fermeture normale, ces copies sont effacées. Si CuprIDE s'est arrêté brutalement, une
+notification le signale au lancement suivant.
+
+| Commande | Description |
+|---|---|
+| `recovery list` | Liste les documents retrouvés. |
+| `recovery restore` | Restaure chaque document : le texte retrouvé remplace celui du fichier, en une modification annulable, non enregistrée (à vérifier, puis à enregistrer). Un document sans fichier devient un nouveau document. |
+| `recovery discard` | Oublie les modifications retrouvées. |
+
 ## `config` — configuration
 
 Voir [`configuration.md`](configuration.md) pour les options.
@@ -163,6 +258,7 @@ Voir [`configuration.md`](configuration.md) pour les options.
 | `view zoom-in` | Agrandit l'interface d'un cran (raccourcis `mod+=`, `mod+plus`). |
 | `view zoom-out` | Réduit l'interface d'un cran (`mod+-`). |
 | `view zoom-reset` | Revient à 100 % (`mod+0`). |
+| `view wrap [on\|off\|toggle]` | Retour à la ligne visuel pour la session, à la place de l'option `[view] wrap` (`Alt+Z` sous Windows et Linux). |
 
 Crans : 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250 et 300 %. Le zoom multiplie
 l'échelle de l'écran : le texte est remis en forme à la nouvelle taille, net, sans redémarrage ;

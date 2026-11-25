@@ -99,6 +99,7 @@ impl Default for StatusElements {
             }
             Some(text)
         });
+        elements.register("indent", |c| Some(c.document()?.indent().describe()));
         elements.register("line_ending", |c| {
             Some(match c.document()?.line_ending() {
                 cupride_core::LineEnding::Lf => "LF".to_owned(),
