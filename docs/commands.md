@@ -242,6 +242,16 @@ notification le signale au lancement suivant.
 | `recovery restore` | Restaure chaque document : le texte retrouvé remplace celui du fichier, en une modification annulable, non enregistrée (à vérifier, puis à enregistrer). Un document sans fichier devient un nouveau document. |
 | `recovery discard` | Oublie les modifications retrouvées. |
 
+## `syntax` — arbre syntaxique
+
+Le langage d'un document est détecté d'après l'extension ou le nom de son fichier, sinon d'après
+sa ligne `#!` (`#!/usr/bin/env python3`). Les grammaires Tree-sitter de Rust, C et Markdown sont
+intégrées en attendant les paquets de langage.
+
+| Commande | Description |
+|---|---|
+| `syntax tree [--full]` | Nœuds de l'arbre syntaxique sous le curseur, du plus large au plus précis, avec leur position (`source_file (1:1) › function_item (1:1) › …`) ; `--full` : tout l'arbre, en S-expression. Pour écrire des requêtes ou comprendre une coloration. |
+
 ## `config` — configuration
 
 Voir [`configuration.md`](configuration.md) pour les options.

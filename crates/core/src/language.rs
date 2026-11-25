@@ -1,7 +1,7 @@
-//! Langage d'un document, d'après l'extension ou le nom de son fichier.
+//! Langage d'un document, d'après l'extension ou le nom de son fichier, ou sa ligne `#!`.
 //!
-//! Sert à l'affichage (barre d'état) ; la coloration syntaxique (épic Syntaxe) s'appuiera sur sa
-//! propre détection.
+//! Le nom du langage sert à l'affichage (barre d'état), à la configuration propre au langage
+//! (`[languages.<Nom>]`) et à choisir sa grammaire (`cupride-syntax`).
 
 use std::path::Path;
 
@@ -50,6 +50,39 @@ pub fn language_of(path: &Path) -> Option<&'static str> {
         .map(|(_, language)| *language)
 }
 
+/// Langage d'un document : d'après son fichier `path` (extension ou nom), sinon d'après sa
+/// première ligne `first_line` (`#!/usr/bin/env python3`).
+pub fn detect(path: Option<&Path>, first_line: &str) -> Option<&'static str> {
+    path.and_then(language_of).or_else(|| shebang(first_line))
+}
+
+/// Programmes des lignes `#!` connus, et leur langage.
+const INTERPRETERS: &[(&[&str], &str)] = &[
+    (&["python", "pypy"], "Python"),
+    (&["sh", "bash", "zsh", "dash", "ksh"], "Shell"),
+    (&["node", "nodejs", "deno", "bun"], "JavaScript"),
+    (&["ruby"], "Ruby"),
+    (&["lua", "luajit"], "Lua"),
+    (&["php"], "PHP"),
+    (&["rust-script", "cargo"], "Rust"),
+];
+
+/// Langage désigné par la ligne `#!` `line` : `#!/bin/bash`, `#!/usr/bin/env python3`,
+/// `#!/usr/bin/env -S cargo +nightly -Zscript`.
+fn shebang(line: &str) -> Option<&'static str> {
+    let mut words = line.strip_prefix("#!")?.split_whitespace();
+    let mut program = words.next()?.rsplit('/').next()?;
+    if program == "env" {
+        program = words.find(|w| !w.starts_with('-') && !w.contains('='))?;
+    }
+    // python3.12 → python
+    let program = program.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
+    INTERPRETERS
+        .iter()
+        .find(|(names, _)| names.contains(&program))
+        .map(|(_, language)| *language)
+}
+
 /// Début d'un commentaire de ligne dans le langage `language` (en attendant les paquets de
 /// langage, qui le fourniront).
 pub fn line_comment(language: &str) -> Option<&'static str> {
@@ -74,5 +107,26 @@ mod tests {
         assert_eq!(language_of(Path::new("app/Dockerfile")), Some("Dockerfile"));
         assert_eq!(language_of(Path::new("notes.inconnu")), None);
         assert_eq!(language_of(Path::new("")), None);
+    }
+
+    #[test]
+    fn ligne_shebang() {
+        let none = None;
+        assert_eq!(detect(none, "#!/bin/bash"), Some("Shell"));
+        assert_eq!(detect(none, "#!/usr/bin/env python3.12"), Some("Python"));
+        assert_eq!(detect(none, "#! /usr/bin/env node"), Some("JavaScript"));
+        assert_eq!(
+            detect(none, "#!/usr/bin/env -S cargo +nightly -Zscript"),
+            Some("Rust")
+        );
+        assert_eq!(detect(none, "#!/usr/bin/env -S FOO=1 ruby"), Some("Ruby"));
+        assert_eq!(detect(none, "#!/opt/inconnu"), None);
+        assert_eq!(detect(none, "fn main() {}"), None);
+        // L'extension l'emporte sur la ligne `#!`.
+        assert_eq!(
+            detect(Some(Path::new("outil.rs")), "#!/bin/sh"),
+            Some("Rust")
+        );
+        assert_eq!(detect(Some(Path::new("outil")), "#!/bin/sh"), Some("Shell"));
     }
 }

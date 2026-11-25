@@ -194,6 +194,10 @@ pub struct Document {
     other_views: BTreeMap<PanelId, Selections>,
     revision: u64,
     saves: u64,
+    /// Langage, d'après le fichier ou la ligne `#!`.
+    language: Option<&'static str>,
+    /// Arbre syntaxique, si le langage a une grammaire et que l'analyse est activée.
+    syntax: Option<cupride_syntax::Syntax>,
 }
 
 impl Default for Document {
@@ -227,6 +231,8 @@ impl Document {
             other_views: BTreeMap::new(),
             revision: 0,
             saves: 0,
+            language: None,
+            syntax: None,
         }
     }
 
@@ -247,6 +253,7 @@ impl Document {
         document.disk = disk_stamp(&path);
         document.disk_hash = content_hash([decoded.text.as_str()]);
         document.path = Some(path);
+        document.detect_language();
         Ok(document)
     }
 
@@ -265,6 +272,7 @@ impl Document {
         let (view, other_views) = (self.view, std::mem::take(&mut self.other_views));
         let (indent, indent_set) = (self.indent, self.indent_set);
         *self = reloaded;
+        self.start_syntax();
         self.revision = revision;
         self.saves = saves;
         self.history.set_group_delay(delay);
@@ -311,6 +319,7 @@ impl Document {
         let path = path.into();
         self.write_atomic(&path)?;
         self.path = Some(path);
+        self.path_changed();
         self.modified = false;
         self.saves += 1;
         self.written();
@@ -396,6 +405,44 @@ impl Document {
     /// Change le fichier du document, sans rien écrire : le fichier a été renommé ou déplacé.
     pub(crate) fn set_path(&mut self, path: PathBuf) {
         self.path = Some(path);
+        self.path_changed();
+    }
+
+    /// Le fichier a changé : le langage est redétecté, et l'analyse refaite s'il a changé.
+    fn path_changed(&mut self) {
+        let before = self.language;
+        self.detect_language();
+        if self.language != before {
+            self.start_syntax();
+        }
+    }
+
+    fn detect_language(&mut self) {
+        let first_line = self.buffer.line(0).unwrap_or_default();
+        self.language = crate::language::detect(self.path.as_deref(), &first_line);
+    }
+
+    /// Langage du document, d'après son fichier ou sa ligne `#!` ; `None` pour du texte brut.
+    pub fn language(&self) -> Option<&'static str> {
+        self.language
+    }
+
+    /// Arbre syntaxique du document, si son langage a une grammaire.
+    pub fn syntax(&self) -> Option<&cupride_syntax::Syntax> {
+        self.syntax.as_ref()
+    }
+
+    /// Analyse le document avec la grammaire de son langage, s'il en a une.
+    pub fn start_syntax(&mut self) {
+        self.syntax = self
+            .language
+            .and_then(cupride_syntax::config_for)
+            .map(|config| cupride_syntax::Syntax::new(config, &self.buffer));
+    }
+
+    /// Arrête l'analyse syntaxique.
+    pub fn stop_syntax(&mut self) {
+        self.syntax = None;
     }
 
     /// Nom affiché : nom du fichier, ou « sans titre ».
@@ -510,6 +557,11 @@ impl Document {
     fn map_other_views(&mut self, edits: &[Edit]) {
         for selections in self.other_views.values_mut() {
             selections.map_all(edits);
+        }
+        if !edits.is_empty()
+            && let Some(syntax) = &mut self.syntax
+        {
+            syntax.reparse(&self.buffer);
         }
     }
 

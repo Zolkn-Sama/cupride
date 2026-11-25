@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 clap.workspace = true
 cupride-layout.workspace = true
+cupride-syntax.workspace = true
 cupride-text.workspace = true
 directories.workspace = true
 grep-regex.workspace = true

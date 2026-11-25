@@ -257,7 +257,7 @@ fn relocated(selections: &Selections, relocate: &dyn Fn(usize) -> usize) -> Sele
 /// `edit toggle-comment`.
 fn toggle_comment(editor: &mut Editor, _: &clap::ArgMatches) -> CommandResult {
     let (id, document) = active(editor)?;
-    let language = document.path().and_then(crate::language::language_of);
+    let language = document.language();
     let token = editor
         .config()
         .languages
