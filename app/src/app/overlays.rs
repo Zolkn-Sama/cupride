@@ -50,6 +50,10 @@ impl App {
                     self.close_overlays();
                     self.open_quick_open();
                 }
+                UiRequest::Outline => {
+                    self.close_overlays();
+                    self.open_outline();
+                }
                 UiRequest::PlaceWindow { window, monitor } => {
                     self.place_window(window, monitor);
                 }

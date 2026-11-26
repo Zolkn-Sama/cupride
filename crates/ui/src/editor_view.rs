@@ -9,19 +9,23 @@ use std::time::Instant;
 use cupride_core::Document;
 use cupride_core::config::{Config, LineNumbers};
 use cupride_core::layout::PanelId;
+use cupride_core::syntax::Highlight;
 use cupride_core::text::Selections;
 use cupride_core::text::TextBuffer;
-use cupride_render::text::{Buffer, Metrics, Shaping, Wrap};
+use cupride_render::text::{Buffer, Metrics, Shaping, Wrap, cosmic_text};
 use cupride_render::{Frame, Layer, Quad, Rect, TextItem, TextSystem};
 
 use crate::gutter::{self, Gutter, GutterMarker, MARKER_LANE, NUMBER_GAP};
 use crate::label::attrs;
 use crate::scroll::Scroll;
-use crate::theme::Theme;
+use crate::theme::{SyntaxColors, Theme};
 use crate::wrap::{MAX_WRAPPED_BYTES, Wrapping, segments};
 
 /// Marge intérieure de la zone de texte, en pixels logiques.
 const PADDING: f32 = 8.0;
+
+/// Affiché après la ligne d'en-tête d'un pli.
+const ELLIPSIS: &str = "…";
 
 /// Épaisseur du curseur, en pixels logiques.
 const CURSOR_WIDTH: f32 = 2.0;
@@ -189,6 +193,28 @@ pub struct EditorView {
     wrapping: Option<Wrapping>,
     /// Largeur d'une colonne (police à chasse fixe), mesurée à la première préparation.
     column_width: f32,
+    /// Couleurs de la coloration syntaxique (celles du thème).
+    syntax_colors: SyntaxColors,
+    /// Coloration des lignes visibles, gardée tant que le texte, l'arbre et la plage ne changent
+    /// pas.
+    colored: Option<Colored>,
+    /// Parenthèse à côté du curseur principal et sa correspondante, à surligner.
+    brackets: Option<(usize, usize)>,
+    /// Lignes masquées par des plis, triées et sans chevauchement.
+    folded: Vec<Range<usize>>,
+    /// Rangées masquées par les `i` premiers plis, pour `i` de 0 à leur nombre.
+    fold_prefix: Vec<usize>,
+    /// « … » affiché après la ligne d'en-tête d'un pli, mis en forme une fois.
+    ellipsis: Option<Buffer>,
+}
+
+/// Coloration syntaxique d'une plage du document.
+struct Colored {
+    /// Révision du document, version de son arbre syntaxique, plages colorées.
+    key: (u64, u64, Vec<Range<usize>>),
+    spans: Vec<(Range<usize>, Highlight)>,
+    /// Lignes d'en-tête des blocs repliables visibles.
+    foldable: Vec<usize>,
 }
 
 impl std::fmt::Debug for EditorView {
@@ -226,7 +252,115 @@ impl EditorView {
             display: DisplayOptions::default(),
             wrapping: None,
             column_width: 0.0,
+            syntax_colors: Theme::default().syntax,
+            colored: None,
+            brackets: None,
+            folded: Vec::new(),
+            fold_prefix: vec![0],
+            ellipsis: None,
         }
+    }
+
+    /// Couleurs de la coloration syntaxique ; les lignes sont remises en forme si elles
+    /// changent.
+    pub fn set_syntax_colors(&mut self, colors: &SyntaxColors) {
+        if &self.syntax_colors != colors {
+            self.syntax_colors = colors.clone();
+            self.lines.clear();
+        }
+    }
+
+    /// Colore les plages `ranges` (les lignes visibles), sauf si c'est déjà fait.
+    fn color_visible(&mut self, document: &Document, ranges: Vec<Range<usize>>) {
+        let Some(syntax) = document.syntax() else {
+            self.colored = None;
+            return;
+        };
+        let key = (document.revision(), syntax.version(), ranges);
+        if self.colored.as_ref().is_some_and(|c| c.key == key) {
+            return;
+        }
+        let buffer = document.buffer();
+        let spans = key
+            .2
+            .iter()
+            .flat_map(|range| syntax.highlights(buffer, range.clone()))
+            .collect();
+        let mut foldable: Vec<usize> = key
+            .2
+            .iter()
+            .flat_map(|range| syntax.fold_regions(buffer, range.clone()))
+            .map(|r| r.header)
+            .collect();
+        foldable.sort_unstable();
+        foldable.dedup();
+        self.colored = Some(Colored {
+            key,
+            spans,
+            foldable,
+        });
+    }
+
+    /// Lignes des rangées visibles, dans l'ordre, sans doublon.
+    fn visible_line_list(&self) -> Vec<usize> {
+        let mut lines: Vec<usize> = self
+            .visible
+            .clone()
+            .map(|row| self.line_of_row(row))
+            .collect();
+        lines.dedup();
+        lines
+    }
+
+    /// Couleur de chaque morceau d'une rangée : `start` et `len` sont la place de la rangée dans
+    /// le document ; `preedit`, le texte en composition inséré dans son contenu. Les plages
+    /// renvoyées couvrent tout le contenu, texte en composition compris (sans couleur).
+    fn row_colors(
+        &self,
+        start: usize,
+        len: usize,
+        preedit: Option<(usize, usize)>,
+    ) -> Vec<(Range<usize>, Option<cupride_render::Color>)> {
+        let total = len + preedit.map_or(0, |(_, l)| l);
+        let mut runs = Vec::new();
+        let Some(colored) = &self.colored else {
+            return vec![(0..total, None)];
+        };
+        let end = start + len;
+        let first = colored.spans.partition_point(|(r, _)| r.end <= start);
+        let shift = |p: usize| match preedit {
+            Some((at, l)) if p >= at => p + l,
+            _ => p,
+        };
+        let mut at = 0;
+        let mut push = |range: Range<usize>, color| {
+            if range.start > at {
+                runs.push((at..range.start, None));
+            }
+            if range.end > range.start {
+                at = range.end;
+                runs.push((range, color));
+            }
+        };
+        for (range, highlight) in colored.spans[first..].iter() {
+            if range.start >= end {
+                break;
+            }
+            let color = Some(syntax_color(&self.syntax_colors, *highlight));
+            let local = range.start.max(start) - start..range.end.min(end) - start;
+            match preedit {
+                // Le texte en composition coupe la plage : il reste sans couleur.
+                Some((p, _)) if local.start < p && p < local.end => {
+                    push(local.start..p, color);
+                    push(shift(p)..shift(local.end), color);
+                }
+                _ => push(shift(local.start)..shift(local.end), color),
+            }
+        }
+        if at < total {
+            runs.push((at..total, None));
+        }
+        runs
     }
 
     /// Vue du panneau `panel` : elle affiche les sélections de ce panneau.
@@ -282,6 +416,7 @@ impl EditorView {
         if !settings.same_shaping(&self.settings) {
             self.lines.clear();
             self.gutter.clear();
+            self.ellipsis = None;
             self.content_width = 0.0;
             self.column_width = 0.0;
             self.wrapping = None;
@@ -301,6 +436,7 @@ impl EditorView {
             self.scroll.jump_to([x, lines * self.line_height()]);
             self.lines.clear();
             self.gutter.clear();
+            self.ellipsis = None;
             self.content_width = 0.0;
             self.column_width = 0.0;
             self.wrapping = None;
@@ -355,21 +491,68 @@ impl EditorView {
         self.lines.len()
     }
 
-    /// Nombre de rangées affichées : les lignes, ou leurs morceaux avec le retour à la ligne.
+    /// Nombre de rangées affichées : les lignes, ou leurs morceaux avec le retour à la ligne,
+    /// sans celles masquées par des plis.
     fn row_count(&self) -> usize {
-        self.wrapping
+        let all = self
+            .wrapping
             .as_ref()
-            .map_or(self.line_count, Wrapping::rows)
+            .map_or(self.line_count, Wrapping::rows);
+        all - self.folded_rows_before(self.line_count)
     }
 
-    /// Première rangée de la ligne `line`.
-    fn first_row(&self, line: usize) -> usize {
+    /// Première rangée de la ligne `line`, sans les plis.
+    fn unfolded_row(&self, line: usize) -> usize {
         self.wrapping.as_ref().map_or(line, |w| w.first_row(line))
+    }
+
+    /// Rangées masquées par les plis avant la ligne `line` (celles d'un pli qui la contient
+    /// comprises jusqu'à elle).
+    fn folded_rows_before(&self, line: usize) -> usize {
+        // Plis entièrement avant la ligne, puis celui qui la contient.
+        let full = self.folded.partition_point(|r| r.end <= line);
+        let mut rows = self.fold_prefix.get(full).copied().unwrap_or_default();
+        if let Some(range) = self.folded.get(full)
+            && range.start < line
+        {
+            rows += self.unfolded_row(line) - self.unfolded_row(range.start);
+        }
+        rows
+    }
+
+    /// Première rangée de la ligne `line`. Une ligne masquée a la rangée de la ligne qui suit
+    /// son pli.
+    fn first_row(&self, line: usize) -> usize {
+        self.unfolded_row(line) - self.folded_rows_before(line)
     }
 
     /// Ligne de la rangée `row`.
     fn line_of_row(&self, row: usize) -> usize {
-        self.wrapping.as_ref().map_or(row, |w| w.line_of(row))
+        // Rangée sans les plis : chaque pli qui commence avant elle, en rangées affichées, la
+        // repousse de ses rangées masquées. Ces débuts croissent : recherche par dichotomie.
+        let shown_start = |i: usize| {
+            self.unfolded_row(self.folded[i].start) - self.fold_prefix.get(i).copied().unwrap_or(0)
+        };
+        let (mut low, mut high) = (0, self.folded.len());
+        while low < high {
+            let middle = (low + high) / 2;
+            if shown_start(middle) <= row {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        let unfolded = row + self.fold_prefix.get(low).copied().unwrap_or(0);
+        self.wrapping
+            .as_ref()
+            .map_or(unfolded, |w| w.line_of(unfolded))
+    }
+
+    /// La ligne `line` est l'en-tête d'un pli (la suivante est masquée).
+    fn is_fold_header(&self, line: usize) -> bool {
+        self.folded
+            .binary_search_by_key(&(line + 1), |r| r.start)
+            .is_ok()
     }
 
     /// Morceaux de la ligne `text`, un par rangée.
@@ -385,7 +568,7 @@ impl EditorView {
     fn row_of_offset(&self, buffer: &impl TextBuffer, offset: usize) -> usize {
         let line = buffer.byte_to_line(offset).unwrap_or_default();
         if self.wrapping.is_none() {
-            return line;
+            return self.first_row(line);
         }
         let start = buffer.line_to_byte(line).unwrap_or_default();
         let text = buffer.line(line).unwrap_or_default();
@@ -442,6 +625,20 @@ impl EditorView {
         }
         self.line_count = buffer.len_lines();
         self.measure_column(text);
+        if self.ellipsis.is_none() {
+            let metrics = self.metrics();
+            let mut shaped = Buffer::new(text.font_system(), metrics);
+            shaped.set_wrap(Wrap::None);
+            shaped.set_size(None, Some(metrics.line_height));
+            shaped.set_text(
+                ELLIPSIS,
+                &attrs(&self.settings.font_family),
+                Shaping::Advanced,
+                None,
+            );
+            shaped.shape_until_scroll(text.font_system(), false);
+            self.ellipsis = Some(shaped);
+        }
         // Retour à la ligne : découpe refaite quand le texte, la largeur ou la tabulation changent.
         if self.display.wrap && buffer.len_bytes() <= MAX_WRAPPED_BYTES {
             let columns = self.wrap_columns();
@@ -459,6 +656,21 @@ impl EditorView {
         } else if self.wrapping.take().is_some() {
             self.lines.clear();
         }
+        // Plis : les rangées changent, les lignes en cache aussi.
+        let folded = document.hidden_lines();
+        if folded != self.folded.as_slice() {
+            self.folded = folded.to_vec();
+            self.lines.clear();
+        }
+        // Rangées masquées cumulées, pli par pli (elles dépendent du retour à la ligne).
+        self.fold_prefix.clear();
+        self.fold_prefix.push(0);
+        for index in 0..self.folded.len() {
+            let range = &self.folded[index];
+            let rows = self.unfolded_row(range.end) - self.unfolded_row(range.start);
+            let total = self.fold_prefix[index] + rows;
+            self.fold_prefix.push(total);
+        }
         self.scroll.clamp(self.max_scroll());
         let head = self.selections(document).primary().head;
         let reveal = std::mem::take(&mut self.reveal);
@@ -470,6 +682,23 @@ impl EditorView {
         // l'écran.
         let visible = self.visible.clone();
         self.lines.retain(|row, _| visible.contains(row));
+
+        // Coloration syntaxique des seules lignes visibles : par suites de lignes consécutives,
+        // les plis coupant l'écran.
+        let mut ranges: Vec<Range<usize>> = Vec::new();
+        for line in self.visible_line_list() {
+            let start = buffer.line_to_byte(line).unwrap_or_default();
+            let end = buffer
+                .line_range(line)
+                .map_or(buffer.len_bytes(), |r| r.end);
+            match ranges.last_mut() {
+                Some(last) if last.end == start => last.end = end,
+                _ => ranges.push(start..end),
+            }
+        }
+        self.color_visible(document, ranges);
+
+        self.brackets = cupride_core::brackets::bracket_pair(document, head);
 
         let metrics = self.metrics();
         let family = self.settings.font_family.clone();
@@ -505,7 +734,8 @@ impl EditorView {
                     preedit = Some((at, composing.text.len()));
                 }
             }
-            let hash = hash_text(&content);
+            let colors = self.row_colors(start, len, preedit);
+            let hash = hash_line(&content, &colors);
             if let Some(cached) = self.lines.get_mut(&row)
                 && cached.hash == hash
             {
@@ -520,7 +750,17 @@ impl EditorView {
             shaped.set_wrap(Wrap::None);
             shaped.set_tab_width(self.tab_width);
             shaped.set_size(None, Some(metrics.line_height));
-            shaped.set_text(&content, &attrs(&family), Shaping::Advanced, None);
+            let base = attrs(&family);
+            let spans = colors.iter().map(|(range, color)| {
+                let attrs = match color {
+                    Some(c) => base
+                        .clone()
+                        .color(cosmic_text::Color::rgba(c.r, c.g, c.b, c.a)),
+                    None => base.clone(),
+                };
+                (&content[range.clone()], attrs)
+            });
+            shaped.set_rich_text(spans, &base, Shaping::Advanced, None);
             shaped.shape_until_scroll(text.font_system(), false);
             self.content_width = self.content_width.max(x_at(&shaped, content.len()));
             self.lines.insert(
@@ -537,16 +777,12 @@ impl EditorView {
             );
         }
         self.cursor_line = head_line;
-        let lines = if self.visible.is_empty() {
-            0..0
-        } else {
-            self.line_of_row(self.visible.start)..self.line_of_row(self.visible.end - 1) + 1
-        };
+        let lines = self.visible_line_list();
         self.gutter.prepare(
             text,
             metrics,
             &attrs(&family),
-            lines,
+            &lines,
             head_line,
             self.settings.line_numbers,
         );
@@ -836,6 +1072,13 @@ impl EditorView {
             }
         }
 
+        // Parenthèse à côté du curseur principal et sa correspondante.
+        if let Some(pair) = self.brackets {
+            for at in [pair.0, pair.1] {
+                self.push_range(frame, buffer, at..at + 1, theme.bracket_match());
+            }
+        }
+
         for selection in selections.iter().filter(|s| !s.is_empty()) {
             self.push_range(frame, buffer, selection.range(), theme.selection);
         }
@@ -851,6 +1094,24 @@ impl EditorView {
                 clip: text_area,
                 color: theme.foreground,
             });
+        }
+        // « … » après l'en-tête de chaque pli visible.
+        if let Some(ellipsis) = &self.ellipsis {
+            for row in self.visible.clone() {
+                let Some(rect) = self.ellipsis_rect(row) else {
+                    continue;
+                };
+                frame
+                    .quads
+                    .push(Quad::new(rect.intersect(&text_area), theme.bracket_match()));
+                frame.texts.push(TextItem {
+                    buffer: ellipsis,
+                    left: rect.x + (4.0 * self.scale).round(),
+                    top: rect.y,
+                    clip: text_area,
+                    color: theme.muted,
+                });
+            }
         }
         self.draw_gutter(frame, theme);
         if self.display.whitespace || self.display.line_endings {
@@ -1024,8 +1285,24 @@ impl EditorView {
                 },
             });
         }
-        let width = (3.0 * self.scale).round().max(1.0);
+        // Pli : un carré dans la colonne des marqueurs, sur la ligne d'en-tête.
         let lane = self.marker_lane();
+        let size = (lane * 0.5).round().max(2.0);
+        for row in self.visible.clone() {
+            let line = self.line_of_row(row);
+            if row == self.first_row(line) && self.is_fold_header(line) {
+                let rect = Rect::new(
+                    (gutter.x + (lane - size) / 2.0).round(),
+                    (self.line_top(row) + (self.line_height() - size) / 2.0).round(),
+                    size,
+                    size,
+                );
+                frame
+                    .quads
+                    .push(Quad::new(rect.intersect(&gutter), theme.accent));
+            }
+        }
+        let width = (3.0 * self.scale).round().max(1.0);
         for marker in self
             .markers
             .iter()
@@ -1092,6 +1369,51 @@ impl EditorView {
         cached.start + index
     }
 
+    /// Ligne dont le pli se bascule par un clic au point (`x`, `y`) : dans la colonne des
+    /// marqueurs de la gouttière, ou sur le « … » d'un pli. `None` ailleurs.
+    pub fn fold_line_at(&self, x: f32, y: f32) -> Option<usize> {
+        if !self.bounds.contains(x, y) {
+            return None;
+        }
+        let row =
+            (y - self.bounds.y - self.padding() + self.scroll_y()) / self.line_height().max(1.0);
+        if row < 0.0 || row as usize >= self.row_count() {
+            return None;
+        }
+        let row = row as usize;
+        let line = self.line_of_row(row);
+        let foldable = self
+            .colored
+            .as_ref()
+            .is_some_and(|c| c.foldable.binary_search(&line).is_ok());
+        if x < self.bounds.x + self.marker_lane()
+            && row == self.first_row(line)
+            && (foldable || self.is_fold_header(line))
+        {
+            return Some(line);
+        }
+        let ellipsis = self.ellipsis_rect(row)?;
+        ellipsis.contains(x, y).then_some(line)
+    }
+
+    /// Zone du « … » après la rangée `row`, si elle finit l'en-tête d'un pli.
+    fn ellipsis_rect(&self, row: usize) -> Option<Rect> {
+        let cached = self.lines.get(&row)?;
+        if !cached.last || !self.is_fold_header(cached.line) {
+            return None;
+        }
+        let ellipsis = self.ellipsis.as_ref()?;
+        let gap = (4.0 * self.scale).round();
+        let left = self.text_left() + cached.x(cached.len) + gap;
+        let width = x_at(ellipsis, ELLIPSIS.len()) + 2.0 * gap;
+        Some(Rect::new(
+            left,
+            self.line_top(row),
+            width,
+            self.line_height(),
+        ))
+    }
+
     /// Forme du pointeur au point (`x`, `y`) de la fenêtre.
     pub fn pointer_at(&self, x: f32, y: f32) -> Pointer {
         if self.text_area().contains(x, y) {
@@ -1140,10 +1462,31 @@ fn x_at(buffer: &Buffer, index: usize) -> f32 {
     end
 }
 
-fn hash_text(text: &str) -> u64 {
+/// Empreinte d'une rangée : son texte et ses couleurs.
+fn hash_line(text: &str, colors: &[(Range<usize>, Option<cupride_render::Color>)]) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     text.hash(&mut hasher);
+    for (range, color) in colors {
+        range.hash(&mut hasher);
+        color.map(|c| (c.r, c.g, c.b, c.a)).hash(&mut hasher);
+    }
     hasher.finish()
+}
+
+/// Couleur du thème pour la catégorie `highlight`.
+fn syntax_color(colors: &SyntaxColors, highlight: Highlight) -> cupride_render::Color {
+    match highlight {
+        Highlight::Comment => colors.comment,
+        Highlight::Keyword => colors.keyword,
+        Highlight::String => colors.string,
+        Highlight::Number => colors.number,
+        Highlight::Constant => colors.constant,
+        Highlight::Function => colors.function,
+        Highlight::Type => colors.r#type,
+        Highlight::Variable => colors.variable,
+        Highlight::Operator => colors.operator,
+        Highlight::Punctuation => colors.punctuation,
+    }
 }
 
 #[cfg(test)]
@@ -1539,6 +1882,150 @@ mod tests {
         assert_eq!(view.visible_lines().start, 99);
         let zoomed = view.lines[&100].x(5);
         assert!((zoomed / width - 1.5).abs() < 0.05, "{width} → {zoomed}");
+    }
+
+    #[test]
+    fn coloration_des_lignes_visibles() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.rs");
+        let body: String = (0..200).map(|i| format!("    let v{i} = {i};\n")).collect();
+        std::fs::write(&path, format!("fn main() {{\n{body}}}\n")).unwrap();
+        let mut document = Document::open(&path).unwrap();
+        document.start_syntax();
+        let mut text = TextSystem::new();
+        let mut view = EditorView::new(ViewSettings::default(), 1.0);
+        view.set_bounds(Rect::new(0.0, 0.0, 400.0, 200.0));
+        view.prepare(&mut text, &document);
+        // Seules les lignes visibles sont colorées.
+        let colored = view.colored.as_ref().expect("coloration");
+        let visible_end = document
+            .buffer()
+            .line_to_byte(view.visible_lines().end)
+            .unwrap();
+        assert!(colored.spans.iter().all(|(r, _)| r.end <= visible_end));
+        assert!(colored.key.2.iter().all(|r| r.end <= visible_end));
+        // « fn » a la couleur des mots-clés.
+        let keyword = Theme::default().syntax.keyword;
+        let glyph = view.lines[&0]
+            .buffer
+            .layout_runs()
+            .flat_map(|run| run.glyphs.iter())
+            .next()
+            .unwrap()
+            .color_opt
+            .expect("couleur du mot-clé");
+        assert_eq!(
+            (glyph.r(), glyph.g(), glyph.b()),
+            (keyword.r, keyword.g, keyword.b)
+        );
+        // Changer de thème remet les lignes en forme.
+        let mut colors = Theme::default().syntax;
+        colors.keyword = cupride_render::Color::from_hex("#00ff00").unwrap();
+        view.set_syntax_colors(&colors);
+        assert_eq!(view.cached_lines(), 0);
+    }
+
+    #[test]
+    fn parentheses_correspondantes_surlignees() {
+        let mut text = TextSystem::new();
+        let mut document = Document::from_text("f(a, (b))\n");
+        document.set_selections(Selections::cursor(1));
+        let mut view = EditorView::new(ViewSettings::default(), 1.0);
+        view.set_bounds(Rect::new(0.0, 0.0, 400.0, 200.0));
+        view.prepare(&mut text, &document);
+        assert_eq!(view.brackets, Some((1, 8)));
+        let theme = Theme::default();
+        let frame = view.frame(&theme, &document, false);
+        let marks = frame.layers[0]
+            .quads
+            .iter()
+            .filter(|q| q.color == theme.bracket_match())
+            .count();
+        assert_eq!(marks, 2);
+        document.set_selections(Selections::cursor(3));
+        view.prepare(&mut text, &document);
+        assert_eq!(view.brackets, None);
+    }
+
+    #[test]
+    fn lignes_repliees() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.rs");
+        let body: String = (0..50).map(|i| format!("    let v{i} = {i};\n")).collect();
+        std::fs::write(
+            &path,
+            format!("fn a() {{\n{body}}}\nfn b() {{\n    x();\n}}\n"),
+        )
+        .unwrap();
+        let mut editor = cupride_core::Editor::new();
+        editor.open(&path).unwrap();
+        editor.execute("fold close --line 1").unwrap();
+        let document = editor.active_document().unwrap();
+        assert_eq!(
+            document.hidden_lines(),
+            std::iter::once(1..51).collect::<Vec<_>>()
+        );
+        let mut text = TextSystem::new();
+        let mut view = EditorView::new(ViewSettings::default(), 1.0);
+        view.set_bounds(Rect::new(0.0, 0.0, 400.0, 400.0));
+        view.prepare(&mut text, document);
+        assert_eq!(view.row_count(), 6, "56 lignes, dont 50 masquées");
+        assert_eq!(view.line_of_row(0), 0);
+        assert_eq!(view.line_of_row(1), 51, "la ligne de l'accolade fermante");
+        assert_eq!(view.line_of_row(2), 52);
+        assert_eq!(view.first_row(52), 2);
+        assert_eq!(view.first_row(20), 1, "ligne masquée : rangée de la suite");
+        assert_eq!(view.visible_line_list(), [0, 51, 52, 53, 54, 55]);
+        // Les numéros sont ceux des lignes réelles.
+        assert!(view.gutter.numbers.contains_key(&52));
+        assert!(!view.gutter.numbers.contains_key(&20));
+        // Clic sur le « … » ou le marqueur : la ligne d'en-tête.
+        let rect = view.ellipsis_rect(0).expect("« … » après l'en-tête");
+        assert_eq!(view.fold_line_at(rect.x + 1.0, rect.y + 1.0), Some(0));
+        assert_eq!(
+            view.fold_line_at(1.0, view.line_top(2) + 1.0),
+            Some(52),
+            "bloc repliable"
+        );
+        assert_eq!(
+            view.fold_line_at(1.0, view.line_top(1) + 1.0),
+            None,
+            "accolade fermante : rien"
+        );
+        // Marqueur dans la gouttière, « … » dans le texte.
+        let theme = Theme::default();
+        let frame = view.frame(&theme, document, false);
+        assert!(
+            frame.layers[0]
+                .quads
+                .iter()
+                .any(|q| q.color == theme.accent)
+        );
+    }
+
+    #[test]
+    fn couleurs_avec_texte_en_composition() {
+        let mut view = EditorView::new(ViewSettings::default(), 1.0);
+        let keyword = Theme::default().syntax.keyword;
+        view.colored = Some(Colored {
+            key: (0, 0, std::iter::once(0..10).collect()),
+            spans: vec![(2..6, Highlight::Keyword)],
+            foldable: Vec::new(),
+        });
+        // Rangée « 0123456789 », texte en composition de 3 octets inséré en 4.
+        let runs = view.row_colors(0, 10, Some((4, 3)));
+        assert_eq!(
+            runs,
+            [
+                (0..2, None),
+                (2..4, Some(keyword)),
+                (4..7, None),
+                (7..9, Some(keyword)),
+                (9..13, None),
+            ]
+        );
+        view.colored = None;
+        assert_eq!(view.row_colors(5, 4, None), [(0..4, None)]);
     }
 
     #[test]

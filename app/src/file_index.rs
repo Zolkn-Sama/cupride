@@ -32,6 +32,8 @@ pub(crate) enum AppEvent {
     SearchDone,
     /// Des résultats de la recherche dans le projet attendent.
     ProjectResults,
+    /// Une analyse syntaxique en arrière-plan est finie.
+    SyntaxParsed,
 }
 
 /// Ce que le thread d'indexation envoie.

@@ -28,6 +28,7 @@ options, commentées, avec leur valeur par défaut. `config reload` l'applique s
 | `primary_selection` | `true`, `false` | `false` | Sélection primaire (Linux, X11 et Wayland) : le texte sélectionné y est copié, et le clic du milieu le colle. Sans effet sous Windows et macOS. |
 | `indent_style` | `"auto"`, `"spaces"`, `"tabs"` | `"auto"` | Indentation. `auto` : détectée dans chaque fichier existant (tabulations si la plupart des lignes indentées en commencent par une ; sinon espaces, de la largeur la plus fréquente entre deux niveaux) ; espaces pour un fichier sans indentation. |
 | `indent_width` | entier, de 1 à 16 | `4` | Largeur d'un niveau d'indentation, et largeur affichée d'une tabulation. |
+| `auto_close` | `true`, `false` | `true` | Paires fermées automatiquement : taper `(` insère `()` (devant une espace, une fin de ligne, une fermante ou une ponctuation), taper `)` devant un `)` passe par-dessus, retour arrière entre les deux les efface, et une sélection tapée `(` est entourée. Paires : `()`, `[]`, `{}`, `""`, plus `''` dans les langages de code sauf Rust (durées de vie), et ` `` ` en Markdown. Un guillemet ne se ferme pas juste après une lettre. |
 
 ### `[languages.<Nom>]`
 
@@ -41,6 +42,7 @@ d'état (`Rust`, `Python`, `Makefile`…).
 | `comment` | texte | Début d'un commentaire de ligne, pour `edit toggle-comment` (`"//"`, `"#"`…). |
 | `wrap` | `true`, `false` | Retour à la ligne pour ce langage (par exemple pour Markdown). |
 | `rulers` | liste de colonnes | Règles verticales pour ce langage. |
+| `auto_close` | `true`, `false` | Paires fermées automatiquement pour ce langage. |
 
 ```toml
 [languages.Makefile]
@@ -207,6 +209,7 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `split right` | `Ctrl+\` | `Cmd+\` |
 | `split down` | `Ctrl+K Ctrl+\` | `Cmd+K Cmd+\` |
 | `explorer show` | `Ctrl+Maj+E` | `Cmd+Maj+E` |
+| `ui outline` | `Ctrl+Maj+O` | `Cmd+Maj+O` |
 | `ui find` | `Ctrl+F` | `Cmd+F` |
 | `ui replace` | `Ctrl+H` | `Option+Cmd+F` |
 | `ui search-project` | `Ctrl+Maj+F` | `Cmd+Maj+F` |
@@ -219,6 +222,16 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `edit delete-lines` | `Ctrl+Maj+K` | `Cmd+Maj+K` |
 | `edit join-lines` | `Ctrl+J` | `Cmd+J` |
 | `edit toggle-comment` | `Ctrl+/` | `Cmd+/` |
+| `fold close` | `Ctrl+Maj+[` | `Option+Cmd+[` |
+| `fold open` | `Ctrl+Maj+]` | `Option+Cmd+]` |
+| `fold toggle` | `Ctrl+K Ctrl+L` | `Cmd+K Cmd+L` |
+| `fold close-all` | `Ctrl+K Ctrl+0` | `Cmd+K Cmd+0` |
+| `fold open-all` | `Ctrl+K Ctrl+J` | `Cmd+K Cmd+J` |
+| `edit goto-bracket` | `Ctrl+Maj+\` | `Cmd+Maj+\` |
+| `edit expand-selection` | `Alt+Maj+→` | `Ctrl+Maj+Cmd+→` |
+| `edit shrink-selection` | `Alt+Maj+←` | `Ctrl+Maj+Cmd+←` |
+| `edit next-function` | `Ctrl+Maj+↓` | `Ctrl+Maj+↓` |
+| `edit previous-function` | `Ctrl+Maj+↑` | `Ctrl+Maj+↑` |
 | `view wrap` | `Alt+Z` | — (Option+Z tape un caractère) |
 | `window new` | `Ctrl+Maj+N` | `Cmd+Maj+N` |
 | `window close` | `Ctrl+Maj+W` | `Cmd+Maj+W` |
@@ -273,6 +286,12 @@ keyword = "#ff5c8a"
 |---|---|
 | `[ui]` | `background`, `foreground`, `cursor`, `selection`, `current_line`, `line_number`, `line_number_active`, `panel`, `popup`, `border`, `accent`, `muted`, `list_selection`, `info`, `warning`, `error` |
 | `[syntax]` | `comment`, `keyword`, `string`, `number`, `constant`, `function`, `type`, `variable`, `operator`, `punctuation` |
+
+Les couleurs `[syntax]` colorent le code d'après son arbre syntaxique (Tree-sitter) : les
+captures des requêtes de coloration des grammaires sont ramenées à ces catégories
+(`@keyword.return` → `keyword`, `@string.escape` → `constant`, `@function.macro` → `function`,
+`@type.builtin` → `type`, titres Markdown → `keyword`…). Le texte sans catégorie garde la couleur
+`foreground`.
 
 Les fichiers des thèmes intégrés servent d'exemples complets :
 [`crates/ui/themes/`](../crates/ui/themes/).

@@ -229,6 +229,30 @@ nouvelle ligne commence par les mêmes espaces et tabulations, jusqu'au curseur.
 Toutes les commandes d'édition (frappe, effacement, déplacements, couper, copier, coller)
 agissent à chaque curseur.
 
+## Sélection structurelle
+
+D'après l'arbre syntaxique du document (langages qui ont une grammaire : Rust, C, Markdown).
+
+| Commande | Description |
+|---|---|
+| `edit expand-selection` | Étend chaque sélection au nœud qui la contient : identifiant, expression, instruction, bloc, fonction… (`Alt+Maj+→` ; `Ctrl+Maj+Cmd+→` sous macOS). |
+| `edit shrink-selection` | Réduit chaque sélection : défait les extensions précédentes dans l'ordre, sinon sélectionne le nœud enfant qui contient le curseur (`Alt+Maj+←` ; `Ctrl+Maj+Cmd+←`). |
+| `edit next-function` | Chaque curseur va au début de la fonction suivante ; en Markdown, au titre suivant (`Ctrl+Maj+↓`). |
+| `edit previous-function` | Au début de la fonction (ou du titre) précédente (`Ctrl+Maj+↑`). |
+
+## Parenthèses et paires
+
+La parenthèse (crochet, accolade) à côté du curseur principal et sa correspondante sont
+surlignées. La correspondance vient de l'arbre syntaxique quand il y en a un (les parenthèses des
+chaînes et des commentaires ne comptent pas), sinon du texte (64 Ko au plus de part et d'autre).
+
+| Commande | Description |
+|---|---|
+| `edit goto-bracket` | Chaque curseur va à la parenthèse qui correspond à celle à côté de lui (`Ctrl+Maj+\` ; `Cmd+Maj+\`). |
+| `edit type <texte>` | Tape du texte comme au clavier (c'est ce que fait la frappe) : avec `[editor] auto_close`, `(` insère `()`, une fermante devant la même fermante passe par-dessus, une sélection est entourée. `edit insert` insère le texte tel quel. |
+
+Retour arrière entre deux caractères d'une paire vide (`(|)`) efface les deux.
+
 ## `recovery` — récupération après plantage
 
 Les documents qui ont des modifications non enregistrées sont copiés toutes les 15 secondes (s'ils
@@ -241,6 +265,47 @@ notification le signale au lancement suivant.
 | `recovery list` | Liste les documents retrouvés. |
 | `recovery restore` | Restaure chaque document : le texte retrouvé remplace celui du fichier, en une modification annulable, non enregistrée (à vérifier, puis à enregistrer). Un document sans fichier devient un nouveau document. |
 | `recovery discard` | Oublie les modifications retrouvées. |
+
+## `fold` — repliage
+
+Les blocs repliables viennent de l'arbre syntaxique : blocs, listes d'arguments ou de champs,
+commentaires sur plusieurs lignes, directives `#if` en C, sections, blocs de code, listes et
+citations en Markdown. La ligne d'en-tête reste visible, suivie de « … » ; la ligne d'une
+accolade fermante seule aussi. Un carré dans la gouttière marque un bloc replié ; un clic dessus,
+sur le « … » ou dans la gouttière d'un bloc repliable le bascule.
+
+Les curseurs sautent les lignes masquées (↑, ↓, ←, →) ; un curseur placé dans un bloc replié
+(recherche, aller à la ligne…) le déplie. Les plis suivent les modifications du texte.
+
+| Commande | Description |
+|---|---|
+| `fold close [--line N]` | Replie le plus petit bloc qui contient la ligne du curseur (ou la ligne `N`) et n'est pas encore replié : répétée, elle replie les blocs englobants (`Ctrl+Maj+[` ; `Option+Cmd+[`). |
+| `fold open [--line N]` | Déplie le bloc replié sur cette ligne, ou qui la contient (`Ctrl+Maj+]` ; `Option+Cmd+]`). |
+| `fold toggle [--line N]` | Déplie le bloc replié sur cette ligne, sinon replie le bloc qui la contient (`mod+k mod+l`). |
+| `fold close-all` | Replie tous les blocs du document (`mod+k mod+0`). |
+| `fold open-all` | Déplie tout (`mod+k mod+j`). |
+| `fold list` | Blocs repliés : ligne d'en-tête et lignes masquées. |
+
+## `outline` — plan du document
+
+Fonctions, méthodes, types, traits, modules et macros du document (titres en Markdown), d'après
+son arbre syntaxique.
+
+| Commande | Description |
+|---|---|
+| `ui outline` | Plan dans un sélecteur, dans l'ordre du texte : taper une partie d'un nom (recherche floue), Entrée pour aller au symbole (`mod+shift+o`). |
+| `outline list` | Plan en texte : `ligne:colonne genre nom`, une ligne par symbole. |
+
+## `syntax` — arbre syntaxique
+
+Le langage d'un document est détecté d'après l'extension ou le nom de son fichier, sinon d'après
+sa ligne `#!` (`#!/usr/bin/env python3`). Les grammaires Tree-sitter de Rust, C et Markdown sont
+intégrées en attendant les paquets de langage. Le code de ces langages est coloré selon les
+couleurs `[syntax]` du thème, blocs de code Markdown compris (`` ```rust ``, `` ```c ``).
+
+| Commande | Description |
+|---|---|
+| `syntax tree [--full]` | Nœuds de l'arbre syntaxique sous le curseur, du plus large au plus précis, avec leur position (`source_file (1:1) › function_item (1:1) › …`) ; `--full` : tout l'arbre, en S-expression. Pour écrire des requêtes ou comprendre une coloration. |
 
 ## `config` — configuration
 

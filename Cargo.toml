@@ -8,6 +8,7 @@ members = [
     "crates/render",
     "crates/ui",
     "crates/ipc",
+    "crates/syntax",
     "tools/repl",
 ]
 default-members = ["app"]
@@ -29,6 +30,7 @@ cupride-core = { path = "crates/core" }
 cupride-render = { path = "crates/render" }
 cupride-ui = { path = "crates/ui" }
 cupride-ipc = { path = "crates/ipc" }
+cupride-syntax = { path = "crates/syntax" }
 
 # Erreurs : thiserror dans les bibliothèques, anyhow dans les binaires.
 anyhow = "1.0.100"
@@ -71,6 +73,13 @@ similar = "2.7.0"
 nucleo-matcher = "0.3.1"
 ignore = "0.4.23"
 
+# Analyse syntaxique : Tree-sitter et grammaires intégrées (en attendant les paquets)
+tree-sitter = "0.27.2"
+tree-sitter-c = "0.24.2"
+tree-sitter-md = "0.5.4"
+tree-sitter-rust = "0.24.2"
+streaming-iterator = "0.1.9"
+
 # Journalisation
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
@@ -96,6 +105,17 @@ unreachable_pub = "warn"
 dbg_macro = "warn"
 todo = "warn"
 unwrap_used = "warn"
+
+# Tree-sitter et ses grammaires sont du C : optimisés même en développement, pour que la frappe
+# reste fluide dans les gros fichiers.
+[profile.dev.package.tree-sitter]
+opt-level = 3
+[profile.dev.package.tree-sitter-c]
+opt-level = 3
+[profile.dev.package.tree-sitter-rust]
+opt-level = 3
+[profile.dev.package.tree-sitter-md]
+opt-level = 3
 
 # Profil de release : binaire le plus petit et le plus rapide possible.
 [profile.release]

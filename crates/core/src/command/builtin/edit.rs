@@ -195,11 +195,22 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
     registry.register(CommandDef::new(
         "edit",
         "delete-backward",
-        "Supprime la sélection, ou le caractère avant chaque curseur (retour arrière)",
+        "Supprime la sélection, ou le caractère avant chaque curseur (retour arrière) ; une \
+         paire vide autour du curseur, « (|) », est effacée d'un coup",
         |editor, _| {
+            let language = editor.active_document().and_then(|d| d.language());
+            let pairs = super::pairs::active_pairs(editor, language);
             let (_, document) = active(editor)?;
             document.transact(EditKind::Delete, |buffer, tx| {
-                delete_each(buffer, tx, movement::delete_backward_range)
+                delete_each(
+                    buffer,
+                    tx,
+                    |buffer: &Rope, head| match super::pairs::empty_pair_around(buffer, head, pairs)
+                    {
+                        Some(range) => Ok(range),
+                        None => movement::delete_backward_range(buffer, head),
+                    },
+                )
             })?;
             Ok(CommandOutput::None)
         },
@@ -252,7 +263,14 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
             let extend = args.get_flag("extend");
             let page = editor.page_lines();
             let (_, document) = active(editor)?;
-            let selections = move_selections(document.buffer(), document.selections(), direction, extend, page)?;
+            let hidden = document.hidden_lines();
+            let moved = Moved {
+                direction,
+                extend,
+                page,
+                hidden,
+            };
+            let selections = move_selections(document.buffer(), document.selections(), &moved)?;
             document.set_selections(selections);
             Ok(CommandOutput::None)
         })
@@ -317,7 +335,8 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
                 let direction: &String = args.get_one("direction").expect("argument requis");
                 let (_, document) = active(editor)?;
                 let head = document.selections().primary().head;
-                let target = vertical(document.buffer(), head, direction == "up", 1)?;
+                let hidden = document.hidden_lines();
+                let target = vertical(document.buffer(), head, direction == "up", 1, hidden)?;
                 if target != head {
                     let mut selections = document.selections().clone();
                     selections.push(Selection::cursor(target));
@@ -583,7 +602,7 @@ fn replace_selections(
 fn delete_each(
     buffer: &mut Rope,
     tx: &mut Transaction,
-    range_for: fn(&Rope, usize) -> Result<std::ops::Range<usize>, TextError>,
+    range_for: impl Fn(&Rope, usize) -> Result<std::ops::Range<usize>, TextError>,
 ) -> Result<(), TextError> {
     let mut i = 0;
     // Des curseurs voisins peuvent fusionner pendant la boucle : la longueur est relue à chaque tour.
@@ -614,9 +633,18 @@ fn collapse_to_end(tx: &mut Transaction) {
 /// Position atteinte en montant ou en descendant de `lines` lignes depuis `offset`, à la même
 /// colonne (en graphèmes) si la ligne est assez longue, sinon à sa fin. Au-delà de la première ou
 /// de la dernière ligne : début ou fin du texte.
-fn vertical(buffer: &Rope, offset: usize, up: bool, lines: usize) -> Result<usize, TextError> {
+///
+/// Une ligne masquée par un pli (`hidden`) est sautée : en montant, vers la ligne d'en-tête du
+/// pli ; en descendant, vers la ligne qui le suit.
+fn vertical(
+    buffer: &Rope,
+    offset: usize,
+    up: bool,
+    lines: usize,
+    hidden: &[std::ops::Range<usize>],
+) -> Result<usize, TextError> {
     let point = offset_to_grapheme_point(buffer, offset)?;
-    let line = if up {
+    let mut line = if up {
         match point.line.checked_sub(lines) {
             Some(line) => line,
             None => return Ok(0),
@@ -626,18 +654,61 @@ fn vertical(buffer: &Rope, offset: usize, up: bool, lines: usize) -> Result<usiz
     } else {
         return Ok(buffer.len_bytes());
     };
+    if let Some(range) = hidden.iter().find(|r| r.contains(&line)) {
+        line = if up {
+            range.start.saturating_sub(1)
+        } else if range.end < buffer.len_lines() {
+            range.end
+        } else {
+            return Ok(buffer.len_bytes());
+        };
+    }
     let target = Point::new(line, point.column);
     grapheme_point_to_offset(buffer, target).or_else(|_| Ok(buffer.line_content_range(line)?.end))
 }
 
-/// Nouvelle position de la tête d'une sélection après un déplacement.
-fn moved_head(
-    buffer: &Rope,
-    selection: Selection,
-    direction: &str,
+/// Un déplacement : direction, extension de la sélection, taille d'une page, lignes masquées par
+/// des plis.
+struct Moved<'a> {
+    direction: &'a str,
     extend: bool,
     page: usize,
+    hidden: &'a [std::ops::Range<usize>],
+}
+
+/// Position `target`, atteinte en avançant (`forward`) ou en reculant, ramenée hors des lignes
+/// masquées : au début de la ligne qui suit le pli, ou à la fin de sa ligne d'en-tête.
+fn skip_hidden(
+    buffer: &Rope,
+    target: usize,
+    forward: bool,
+    hidden: &[std::ops::Range<usize>],
 ) -> Result<usize, TextError> {
+    let line = buffer.byte_to_line(target)?;
+    let Some(range) = hidden.iter().find(|r| r.contains(&line)) else {
+        return Ok(target);
+    };
+    if forward {
+        if range.end < buffer.len_lines() {
+            buffer.line_to_byte(range.end)
+        } else {
+            Ok(buffer.len_bytes())
+        }
+    } else {
+        Ok(buffer
+            .line_content_range(range.start.saturating_sub(1))?
+            .end)
+    }
+}
+
+/// Nouvelle position de la tête d'une sélection après un déplacement.
+fn moved_head(buffer: &Rope, selection: Selection, moved: &Moved<'_>) -> Result<usize, TextError> {
+    let Moved {
+        direction,
+        extend,
+        page,
+        hidden,
+    } = *moved;
     let head = selection.head;
     // Sans extension, gauche et droite réduisent d'abord une sélection à son bord.
     if !extend && !selection.is_empty() {
@@ -648,14 +719,19 @@ fn moved_head(
         }
     }
     match direction {
-        "left" => movement::prev_grapheme(buffer, head),
-        "right" => movement::next_grapheme(buffer, head),
-        "up" => vertical(buffer, head, true, 1),
-        "down" => vertical(buffer, head, false, 1),
-        "page-up" => vertical(buffer, head, true, page.max(1)),
-        "page-down" => vertical(buffer, head, false, page.max(1)),
-        "word-left" => movement::prev_word(buffer, head),
-        "word-right" => movement::next_word(buffer, head),
+        "left" => skip_hidden(
+            buffer,
+            movement::prev_grapheme(buffer, head)?,
+            false,
+            hidden,
+        ),
+        "right" => skip_hidden(buffer, movement::next_grapheme(buffer, head)?, true, hidden),
+        "up" => vertical(buffer, head, true, 1, hidden),
+        "down" => vertical(buffer, head, false, 1, hidden),
+        "page-up" => vertical(buffer, head, true, page.max(1), hidden),
+        "page-down" => vertical(buffer, head, false, page.max(1), hidden),
+        "word-left" => skip_hidden(buffer, movement::prev_word(buffer, head)?, false, hidden),
+        "word-right" => skip_hidden(buffer, movement::next_word(buffer, head)?, true, hidden),
         "line-start" => movement::line_start(buffer, head),
         "line-end" => movement::line_end(buffer, head),
         "doc-start" => Ok(movement::document_start(buffer)),
@@ -668,14 +744,13 @@ fn moved_head(
 fn move_selections(
     buffer: &Rope,
     selections: &Selections,
-    direction: &str,
-    extend: bool,
-    page: usize,
+    moved: &Moved<'_>,
 ) -> Result<Selections, TextError> {
+    let extend = moved.extend;
     let moved = selections
         .iter()
         .map(|&selection| {
-            let head = moved_head(buffer, selection, direction, extend, page)?;
+            let head = moved_head(buffer, selection, moved)?;
             Ok(if extend {
                 Selection::new(selection.anchor, head)
             } else {

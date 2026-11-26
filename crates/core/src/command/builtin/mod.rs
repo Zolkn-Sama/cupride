@@ -4,18 +4,25 @@ mod config;
 mod edit;
 mod explorer;
 mod file;
+mod folds;
 mod keys;
 mod layout;
 mod lines;
 mod notifications;
+mod pairs;
 mod panel;
 mod recovery;
 mod search;
+mod structure;
+mod syntax;
 mod tab;
 mod theme;
 mod ui;
 mod view;
 mod window;
+
+pub(crate) use structure::Expansions;
+pub(crate) use syntax::outline;
 
 use super::{CommandError, CommandRegistry};
 use crate::document::Document;
@@ -39,6 +46,10 @@ pub(crate) fn register_all(registry: &mut CommandRegistry) -> Result<(), Command
     search::register(registry)?;
     recovery::register(registry)?;
     lines::register(registry)?;
+    syntax::register(registry)?;
+    structure::register(registry)?;
+    pairs::register(registry)?;
+    folds::register(registry)?;
     Ok(())
 }
 

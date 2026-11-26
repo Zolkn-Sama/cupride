@@ -1,4 +1,4 @@
-//! Sélecteurs : palette de commandes et ouverture rapide de fichiers.
+//! Sélecteurs : palette de commandes, ouverture rapide de fichiers, plan du document.
 
 use std::time::Instant;
 
@@ -16,6 +16,8 @@ pub(super) enum PickerKind {
     Commands,
     /// Fichiers du projet.
     Files,
+    /// Symboles du document actif.
+    Symbols,
 }
 
 /// Raccourci tel qu'affiché : `cmd` sous macOS plutôt que `meta`.
@@ -88,6 +90,38 @@ impl App {
         self.picker = Some((
             PickerKind::Files,
             Picker::new("Fichier…", items, priority, true),
+        ));
+        self.focus.push(Element::Picker);
+        self.blink.reset(Instant::now());
+        self.request_redraw();
+    }
+
+    /// Ouvre le plan du document actif : ses symboles, dans l'ordre du texte.
+    pub(super) fn open_outline(&mut self) {
+        let symbols = match cupride_core::command::outline(&self.editor) {
+            Ok(symbols) => symbols,
+            Err(error) => {
+                self.editor.notify(
+                    cupride_core::notifications::Level::Warning,
+                    error.to_string(),
+                );
+                return;
+            }
+        };
+        let mut items = Vec::with_capacity(symbols.len());
+        self.outline_targets.clear();
+        for (line, column, symbol) in symbols {
+            items.push(PickerItem {
+                label: symbol.name,
+                detail: symbol.kind.to_owned(),
+                hint: format!("ligne {line}"),
+            });
+            self.outline_targets.push(format!("{line}:{column}"));
+        }
+        let priority = (0..items.len()).collect();
+        self.picker = Some((
+            PickerKind::Symbols,
+            Picker::new("Symbole…", items, priority, false),
         ));
         self.focus.push(Element::Picker);
         self.blink.reset(Instant::now());
@@ -177,6 +211,7 @@ impl App {
             return;
         };
         let kind = *kind;
+        let target = self.outline_targets.get(index).cloned();
         self.close_picker();
         match kind {
             PickerKind::Commands => {
@@ -200,6 +235,12 @@ impl App {
                     &["--preview".to_owned(), path.to_string_lossy().into_owned()],
                 );
                 self.after_command(result, Instant::now());
+            }
+            PickerKind::Symbols => {
+                if let Some(target) = target {
+                    let result = self.editor.run("edit goto", &[target]);
+                    self.after_command(result, Instant::now());
+                }
             }
         }
     }

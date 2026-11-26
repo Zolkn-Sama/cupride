@@ -3,6 +3,7 @@
 //! - [`Editor`] : état global de l'éditeur (documents ouverts, document actif, workspace).
 //!   Chaque document affiché l'est dans un panneau ; le panneau actif décide du document actif
 //!   ([`NewPanel`] : où placer un nouveau panneau).
+//! - [`brackets`] : parenthèse correspondante, paires fermées automatiquement.
 //! - [`clipboard`] : presse-papiers, fourni par l'application (mémoire par défaut).
 //! - [`command`] : registre unique des commandes, utilisé par toutes les sources d'actions.
 //! - [`config`] : configuration TOML de l'utilisateur.
@@ -12,10 +13,12 @@
 //! - [`keymap`] : raccourcis clavier, simples ou en séquence, sans aucune logique.
 //! - [`Document`] : un texte, son fichier, son historique et ses sélections.
 //! - [`session`] : espace de travail enregistré à la fermeture et restauré au lancement.
+//! - [`syntax`] : la crate `cupride-syntax` (Tree-sitter), dont le document tient l'arbre.
 //!
 //! Ne dépend jamais de `render`, `ui` ou `app` : tout le noyau se teste avec `cargo test` et se
 //! pilote depuis le REPL console.
 
+pub mod brackets;
 pub mod clipboard;
 pub mod command;
 pub mod config;
@@ -37,6 +40,7 @@ mod ui_request;
 mod windows;
 
 pub use cupride_layout as layout;
+pub use cupride_syntax as syntax;
 pub use cupride_text as text;
 pub use document::{DiskState, Document, DocumentError, LineEnding};
 pub use editor::{DocumentId, Editor, TrashFn};

@@ -147,9 +147,7 @@ impl PanelView for EditorView {
     fn prepare(&mut self, text: &mut TextSystem, cx: &PanelContext<'_>) {
         if let Some(document) = panel_document(cx) {
             // Affichage des lignes : configuration, propre au langage, et `view wrap`.
-            let language = document
-                .path()
-                .and_then(cupride_core::language::language_of);
+            let language = document.language();
             let config = cx.editor.config();
             let display = crate::editor_view::DisplayOptions {
                 wrap: cx.editor.wrap_for(language),
@@ -160,6 +158,7 @@ impl PanelView for EditorView {
             if &display != self.display() {
                 self.set_display(display);
             }
+            self.set_syntax_colors(&cx.theme.syntax);
             EditorView::prepare(self, text, document);
         }
     }

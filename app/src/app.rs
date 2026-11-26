@@ -160,6 +160,8 @@ pub(crate) struct App {
     mouse_position: (f32, f32),
     clicks: ClickCounter,
     mouse: MouseSelection,
+    /// Position (`ligne:colonne`) de chaque symbole du plan ouvert.
+    outline_targets: Vec<String>,
     /// Séparation entre deux zones, saisie à la souris.
     divider_drag: Option<Divider>,
     /// Onglet saisi à la souris, pour le déplacer.
@@ -217,6 +219,11 @@ impl App {
         remote: Arc<Mutex<Vec<cupride_ipc::Incoming>>>,
     ) -> Self {
         let text = TextSystem::new();
+        // Les analyses syntaxiques longues se font dans un thread, qui réveille la boucle.
+        let waker = proxy.clone();
+        editor.set_syntax_waker(cupride_core::syntax::Waker::new(move || {
+            let _ = waker.send_event(AppEvent::SyntaxParsed);
+        }));
         // Thèmes intégrés, puis ceux du dossier themes/ de la configuration.
         let mut themes = Themes::default();
         if let Some(dir) = editor
@@ -265,6 +272,7 @@ impl App {
             mouse_position: (0.0, 0.0),
             clicks: ClickCounter::default(),
             mouse: MouseSelection::default(),
+            outline_targets: Vec::new(),
             divider_drag: None,
             tab_drag: None,
             pointer: Pointer::Default,
@@ -486,9 +494,9 @@ impl App {
         }
     }
 
-    /// Insère du texte à chaque curseur.
+    /// Tape du texte à chaque curseur (les paires se ferment toutes seules).
     fn insert(&mut self, text: &str, start: Instant) {
-        let result = self.editor.run("edit insert", &[text.to_owned()]);
+        let result = self.editor.run("edit type", &[text.to_owned()]);
         self.after_command(result, start);
     }
 
@@ -675,6 +683,12 @@ impl App {
         };
         let (x, y) = self.mouse_position;
         let now = Instant::now();
+        // Clic sur le marqueur ou le « … » d'un pli : il est basculé.
+        if let Some(line) = view.fold_line_at(x, y) {
+            let line = format!("fold toggle --line {}", line + 1);
+            self.execute(&line, now);
+            return;
+        }
         let clicks = self
             .clicks
             .click(now, x, y, state.window.scale_factor() as f32);
@@ -1600,6 +1614,11 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::Remote => self.remote_requests(event_loop),
             AppEvent::SearchDone => self.search_done(),
             AppEvent::ProjectResults => self.project_results(),
+            AppEvent::SyntaxParsed => {
+                if self.editor.poll_syntax() {
+                    self.redraw_all();
+                }
+            }
             AppEvent::FilesChanged => {
                 let changed = self.disk.take_changed();
                 if changed.is_empty() {

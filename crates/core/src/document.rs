@@ -194,6 +194,19 @@ pub struct Document {
     other_views: BTreeMap<PanelId, Selections>,
     revision: u64,
     saves: u64,
+    /// Langage, d'après le fichier ou la ligne `#!`.
+    language: Option<&'static str>,
+    /// Arbre syntaxique, si le langage a une grammaire et que l'analyse est activée.
+    syntax: Option<cupride_syntax::Syntax>,
+    /// Réveil de l'application quand une analyse en arrière-plan est finie.
+    syntax_waker: Option<cupride_syntax::Waker>,
+    /// Étapes de `edit expand-selection`, que `edit shrink-selection` défait.
+    pub(crate) expansions: crate::command::builtin::Expansions,
+    /// Plis : du début du nœud replié (sur sa ligne d'en-tête) à la fin de sa dernière ligne
+    /// masquée, en octets. Décalés à chaque modification.
+    folds: Vec<std::ops::Range<usize>>,
+    /// Lignes masquées par les plis, triées et fusionnées.
+    hidden: Vec<std::ops::Range<usize>>,
 }
 
 impl Default for Document {
@@ -227,6 +240,12 @@ impl Document {
             other_views: BTreeMap::new(),
             revision: 0,
             saves: 0,
+            language: None,
+            syntax: None,
+            syntax_waker: None,
+            expansions: Default::default(),
+            folds: Vec::new(),
+            hidden: Vec::new(),
         }
     }
 
@@ -247,6 +266,7 @@ impl Document {
         document.disk = disk_stamp(&path);
         document.disk_hash = content_hash([decoded.text.as_str()]);
         document.path = Some(path);
+        document.detect_language();
         Ok(document)
     }
 
@@ -264,7 +284,10 @@ impl Document {
         let delay = self.history.group_delay();
         let (view, other_views) = (self.view, std::mem::take(&mut self.other_views));
         let (indent, indent_set) = (self.indent, self.indent_set);
+        let waker = self.syntax_waker.take();
         *self = reloaded;
+        self.syntax_waker = waker;
+        self.start_syntax();
         self.revision = revision;
         self.saves = saves;
         self.history.set_group_delay(delay);
@@ -311,6 +334,7 @@ impl Document {
         let path = path.into();
         self.write_atomic(&path)?;
         self.path = Some(path);
+        self.path_changed();
         self.modified = false;
         self.saves += 1;
         self.written();
@@ -396,6 +420,63 @@ impl Document {
     /// Change le fichier du document, sans rien écrire : le fichier a été renommé ou déplacé.
     pub(crate) fn set_path(&mut self, path: PathBuf) {
         self.path = Some(path);
+        self.path_changed();
+    }
+
+    /// Le fichier a changé : le langage est redétecté, et l'analyse refaite s'il a changé.
+    fn path_changed(&mut self) {
+        let before = self.language;
+        self.detect_language();
+        if self.language != before {
+            self.start_syntax();
+        }
+    }
+
+    fn detect_language(&mut self) {
+        let first_line = self.buffer.line(0).unwrap_or_default();
+        self.language = crate::language::detect(self.path.as_deref(), &first_line);
+    }
+
+    /// Langage du document, d'après son fichier ou sa ligne `#!` ; `None` pour du texte brut.
+    pub fn language(&self) -> Option<&'static str> {
+        self.language
+    }
+
+    /// Arbre syntaxique du document, si son langage a une grammaire.
+    pub fn syntax(&self) -> Option<&cupride_syntax::Syntax> {
+        self.syntax.as_ref()
+    }
+
+    /// Analyse le document avec la grammaire de son langage, s'il en a une.
+    pub fn start_syntax(&mut self) {
+        let waker = self.syntax_waker.clone();
+        self.syntax = self
+            .language
+            .and_then(cupride_syntax::config_for)
+            .map(|config| cupride_syntax::Syntax::new(config, &self.buffer, waker));
+    }
+
+    /// Fonction appelée (depuis un autre thread) quand une analyse en arrière-plan est finie :
+    /// l'application y réveille sa boucle, qui appelle [`Document::poll_syntax`]. Sans elle,
+    /// l'analyse est toujours faite sur place.
+    pub fn set_syntax_waker(&mut self, waker: Option<cupride_syntax::Waker>) {
+        if let Some(syntax) = &mut self.syntax {
+            syntax.set_waker(waker.clone());
+        }
+        self.syntax_waker = waker;
+    }
+
+    /// Récupère le résultat d'une analyse en arrière-plan. Renvoie `true` si l'arbre a changé.
+    pub fn poll_syntax(&mut self) -> bool {
+        match &mut self.syntax {
+            Some(syntax) => syntax.poll(&self.buffer),
+            None => false,
+        }
+    }
+
+    /// Arrête l'analyse syntaxique.
+    pub fn stop_syntax(&mut self) {
+        self.syntax = None;
     }
 
     /// Nom affiché : nom du fichier, ou « sans titre ».
@@ -449,6 +530,166 @@ impl Document {
     /// caractère.
     pub fn set_selections(&mut self, selections: Selections) {
         self.selections = self.clamped(selections);
+        self.reveal_folds();
+    }
+
+    /// Plis du document (voir [`Document::fold`]).
+    pub fn folds(&self) -> &[std::ops::Range<usize>] {
+        &self.folds
+    }
+
+    /// Lignes masquées d'un pli.
+    fn hidden_of(&self, fold: &std::ops::Range<usize>) -> std::ops::Range<usize> {
+        let first = self.buffer.byte_to_line(fold.start).unwrap_or_default() + 1;
+        let last = self.buffer.byte_to_line(fold.end).unwrap_or_default();
+        first..(last + 1).max(first)
+    }
+
+    /// Lignes masquées par les plis, triées et fusionnées (un pli dans un pli est couvert par
+    /// l'extérieur).
+    pub fn hidden_lines(&self) -> &[std::ops::Range<usize>] {
+        &self.hidden
+    }
+
+    /// Recalcule les lignes masquées, après un changement des plis ou du texte.
+    fn refresh_hidden(&mut self) {
+        let mut hidden: Vec<_> = self
+            .folds
+            .iter()
+            .map(|f| self.hidden_of(f))
+            .filter(|r| !r.is_empty())
+            .collect();
+        hidden.sort_by_key(|r| r.start);
+        let mut merged: Vec<std::ops::Range<usize>> = Vec::with_capacity(hidden.len());
+        for range in hidden {
+            match merged.last_mut() {
+                Some(last) if range.start <= last.end => last.end = last.end.max(range.end),
+                _ => merged.push(range),
+            }
+        }
+        self.hidden = merged;
+    }
+
+    /// Lignes masquées qui contiennent la ligne `line`, si elle l'est.
+    pub fn hidden_range_of(&self, line: usize) -> Option<std::ops::Range<usize>> {
+        let index = self.hidden.partition_point(|r| r.end <= line);
+        self.hidden
+            .get(index)
+            .filter(|r| r.contains(&line))
+            .cloned()
+    }
+
+    /// Replie la zone `region` : ses lignes masquées disparaissent de l'affichage. Les curseurs
+    /// qu'elle masquerait passent à la fin de sa ligne d'en-tête. Renvoie `false` si elle était
+    /// déjà repliée.
+    pub fn fold(&mut self, region: &cupride_syntax::FoldRegion) -> bool {
+        self.fold_all(std::slice::from_ref(region)) == 1
+    }
+
+    /// Replie les zones `regions` d'un coup ; renvoie le nombre de zones repliées (celles déjà
+    /// repliées sont ignorées). Les curseurs masqués passent à la fin de la ligne d'en-tête du
+    /// pli le plus extérieur.
+    pub fn fold_all(&mut self, regions: &[cupride_syntax::FoldRegion]) -> usize {
+        let existing: std::collections::HashSet<std::ops::Range<usize>> =
+            self.folds.iter().map(|f| self.hidden_of(f)).collect();
+        let mut added = 0;
+        for region in regions {
+            if region.hidden.is_empty() || existing.contains(&region.hidden) {
+                continue;
+            }
+            let Ok(end) = self
+                .buffer
+                .line_content_range(region.hidden.end - 1)
+                .map(|r| r.end)
+            else {
+                continue;
+            };
+            self.folds.push(region.start..end);
+            added += 1;
+        }
+        if added == 0 {
+            return 0;
+        }
+        self.refresh_hidden();
+        let mut selections = self.selections.clone();
+        selections.transform(|s| {
+            let line = self.buffer.byte_to_line(s.head).unwrap_or_default();
+            match self.hidden_range_of(line) {
+                Some(range) => {
+                    let header = self
+                        .buffer
+                        .line_content_range(range.start - 1)
+                        .map_or(s.head, |r| r.end);
+                    cupride_text::Selection::cursor(header)
+                }
+                None => s,
+            }
+        });
+        self.selections = selections;
+        added
+    }
+
+    /// Déplie les plis dont la ligne d'en-tête est `header`. Renvoie `false` s'il n'y en avait
+    /// pas.
+    pub fn unfold(&mut self, header: usize) -> bool {
+        let before = self.folds.len();
+        let buffer = &self.buffer;
+        self.folds
+            .retain(|f| buffer.byte_to_line(f.start).ok() != Some(header));
+        let changed = self.folds.len() != before;
+        if changed {
+            self.refresh_hidden();
+        }
+        changed
+    }
+
+    /// Déplie tout. Renvoie le nombre de plis retirés.
+    pub fn unfold_all(&mut self) -> usize {
+        self.hidden.clear();
+        std::mem::take(&mut self.folds).len()
+    }
+
+    /// Déplie les plis qui masqueraient un curseur.
+    fn reveal_folds(&mut self) {
+        let lines: Vec<usize> = self
+            .selections
+            .iter()
+            .filter_map(|s| self.buffer.byte_to_line(s.head).ok())
+            .filter(|&line| self.hidden_range_of(line).is_some())
+            .collect();
+        if lines.is_empty() {
+            return;
+        }
+        let folds = std::mem::take(&mut self.folds);
+        self.folds = folds
+            .into_iter()
+            .filter(|f| {
+                let hidden = self.hidden_of(f);
+                !lines.iter().any(|l| hidden.contains(l))
+            })
+            .collect();
+        self.refresh_hidden();
+    }
+
+    /// Décale les plis après les modifications `edits` ; un pli qui ne masque plus rien
+    /// disparaît.
+    fn map_folds(&mut self, edits: &[Edit]) {
+        if self.folds.is_empty() {
+            return;
+        }
+        for fold in &mut self.folds {
+            for edit in edits {
+                fold.start = edit.map_offset(fold.start, cupride_text::Assoc::After);
+                fold.end = edit.map_offset(fold.end, cupride_text::Assoc::Before);
+            }
+        }
+        let folds = std::mem::take(&mut self.folds);
+        self.folds = folds
+            .into_iter()
+            .filter(|f| f.start < f.end && !self.hidden_of(f).is_empty())
+            .collect();
+        self.refresh_hidden();
+        self.reveal_folds();
     }
 
     /// Sélections ramenées dans le texte et sur des frontières de caractère.
@@ -510,6 +751,11 @@ impl Document {
     fn map_other_views(&mut self, edits: &[Edit]) {
         for selections in self.other_views.values_mut() {
             selections.map_all(edits);
+        }
+        self.map_folds(edits);
+        // Tree-sitter reçoit les modifications : seule la zone modifiée est réanalysée.
+        if let Some(syntax) = &mut self.syntax {
+            syntax.edited(&mut self.buffer, edits);
         }
     }
 

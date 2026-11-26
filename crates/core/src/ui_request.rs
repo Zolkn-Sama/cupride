@@ -12,6 +12,8 @@ pub enum UiRequest {
     Palette,
     /// Ouvrir l'ouverture rapide de fichiers.
     QuickOpen,
+    /// Ouvrir le plan du document actif (symboles).
+    Outline,
     /// Ouvrir la barre de recherche, préremplie avec ce motif.
     Find(String),
     /// Ouvrir la barre de recherche avec le champ de remplacement.

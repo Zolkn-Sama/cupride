@@ -6,7 +6,6 @@
 
 use std::collections::BTreeMap;
 
-use cupride_core::language::language_of;
 use cupride_core::layout::PanelId;
 use cupride_core::text::Selections;
 use cupride_core::text::TextBuffer;
@@ -114,8 +113,9 @@ impl Default for StatusElements {
             })
         });
         elements.register("language", |c| {
-            let path = c.document()?.path()?;
-            Some(language_of(path).unwrap_or("Texte brut").to_owned())
+            let document = c.document()?;
+            document.path()?;
+            Some(document.language().unwrap_or("Texte brut").to_owned())
         });
         elements
     }

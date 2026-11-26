@@ -31,10 +31,7 @@ pub(super) fn register(registry: &mut CommandRegistry) -> Result<(), CommandErro
             "wrap",
             "Retour à la ligne visuel des lignes trop longues : on, off, ou toggle (par défaut)",
             |editor, args| {
-                let language = editor
-                    .active_document()
-                    .and_then(|d| d.path())
-                    .and_then(crate::language::language_of);
+                let language = editor.active_document().and_then(|d| d.language());
                 let current = editor.wrap_for(language);
                 let wrap = match args.get_one::<String>("etat").map(String::as_str) {
                     Some("on") => true,

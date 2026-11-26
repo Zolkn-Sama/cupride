@@ -93,6 +93,11 @@ pub struct Theme {
 
 impl Theme {
     /// Surlignage des occurrences de la recherche : la couleur d'accent, translucide.
+    /// Fond d'une parenthèse et de sa correspondante.
+    pub fn bracket_match(&self) -> Color {
+        Color::rgba(self.muted.r, self.muted.g, self.muted.b, 0x48)
+    }
+
     pub fn search_match(&self) -> Color {
         Color::rgba(self.accent.r, self.accent.g, self.accent.b, 0x55)
     }
