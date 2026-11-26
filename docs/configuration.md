@@ -209,6 +209,7 @@ configuration), `keys describe <touches>` la commande d'une combinaison.
 | `split right` | `Ctrl+\` | `Cmd+\` |
 | `split down` | `Ctrl+K Ctrl+\` | `Cmd+K Cmd+\` |
 | `explorer show` | `Ctrl+Maj+E` | `Cmd+Maj+E` |
+| `ui outline` | `Ctrl+Maj+O` | `Cmd+Maj+O` |
 | `ui find` | `Ctrl+F` | `Cmd+F` |
 | `ui replace` | `Ctrl+H` | `Option+Cmd+F` |
 | `ui search-project` | `Ctrl+Maj+F` | `Cmd+Maj+F` |

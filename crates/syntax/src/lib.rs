@@ -8,7 +8,7 @@
 //!   imbriqués compris (blocs de code dans du Markdown).
 //! - Structure du code : nœud parent ou enfant d'une sélection ([`Syntax::expand`],
 //!   [`Syntax::shrink`]), fonctions ([`Syntax::functions`]), zones repliables
-//!   ([`Syntax::fold_regions`]).
+//!   ([`Syntax::fold_regions`]), symboles pour le plan du document ([`Syntax::symbols`]).
 //!
 //! Cette crate ne dépend que de `cupride-text` : elle ignore tout des documents, des vues et du
 //! thème.
@@ -19,6 +19,7 @@ mod highlight;
 pub mod languages;
 mod source;
 mod structure;
+mod symbols;
 mod syntax;
 
 pub use edits::{MAX_INCREMENTAL_EDITS, input_edits};
@@ -26,5 +27,6 @@ pub use folds::FoldRegion;
 pub use highlight::{Highlight, MAX_HIGHLIGHT_BYTES};
 pub use languages::{LanguageConfig, config_for};
 pub use structure::partner;
+pub use symbols::Symbol;
 pub use syntax::{SYNC_BUDGET, Syntax, Waker};
 pub use tree_sitter::{Node, Tree};

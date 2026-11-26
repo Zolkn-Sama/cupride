@@ -547,6 +547,7 @@ pub fn default_bindings(platform: Platform) -> Vec<(&'static str, &'static str)>
         ("mod+;", "ui command-line"),
         ("mod+shift+p", "ui palette"),
         ("mod+p", "ui quick-open"),
+        ("mod+shift+o", "ui outline"),
         ("f1", "ui palette"),
         ("mod+s", "file save"),
         ("mod+shift+s", "ui command-line 'file save-as '"),
