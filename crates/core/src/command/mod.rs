@@ -26,6 +26,13 @@ pub(crate) fn builtin_active(
     builtin::active(editor)
 }
 
+/// Symboles du document actif (plan) : ligne et colonne de leur nom (à partir de 1), symbole.
+pub fn outline(
+    editor: &crate::Editor,
+) -> Result<Vec<(usize, usize, cupride_syntax::Symbol)>, CommandError> {
+    builtin::outline(editor)
+}
+
 /// Registre des seules commandes intégrées : pour reconnaître une commande sans éditeur (CLI).
 pub fn builtin_registry() -> CommandRegistry {
     let mut registry = CommandRegistry::new();

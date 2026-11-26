@@ -25,6 +25,8 @@ pub struct LanguageConfig {
     pub(crate) functions: Option<Query>,
     /// Requête des zones repliables (`@fold`).
     pub(crate) folds: Option<Query>,
+    /// Requête des symboles (`@name` dans `@definition.<genre>`), pour le plan du document.
+    pub(crate) symbols: Option<Query>,
 }
 
 impl std::fmt::Debug for LanguageConfig {
@@ -106,6 +108,7 @@ impl LanguageConfig {
         injections: Option<&str>,
         functions: &[&str],
         folds: &[&str],
+        symbols: Option<&str>,
     ) -> Self {
         let highlights = query(name, "coloration", &language, &highlights.concat());
         let paints = highlights.as_ref().map_or_else(Vec::new, |q| {
@@ -122,6 +125,7 @@ impl LanguageConfig {
         };
         let functions = kinds_query(functions, "function", "fonctions");
         let folds = kinds_query(folds, "fold", "repliage");
+        let symbols = symbols.and_then(|source| query(name, "symboles", &language, source));
         Self {
             name,
             language,
@@ -130,6 +134,7 @@ impl LanguageConfig {
             injections,
             functions,
             folds,
+            symbols,
         }
     }
 }
@@ -159,6 +164,12 @@ const C_HIGHLIGHTS: &str = r#"
 ((identifier) @constant
  (#match? @constant "^[A-Z][A-Z\d_]*$"))
 (primitive_type) @type.builtin
+"#;
+
+/// Titres Markdown, pour le plan du document.
+const MARKDOWN_SYMBOLS: &str = r#"
+(atx_heading (inline) @name) @definition.heading
+(setext_heading (paragraph) @name) @definition.heading
 "#;
 
 fn rust() -> LanguageConfig {
@@ -191,6 +202,7 @@ fn rust() -> LanguageConfig {
             "block_comment",
             "macro_definition",
         ],
+        Some(tree_sitter_rust::TAGS_QUERY),
     )
 }
 
@@ -213,6 +225,7 @@ fn c() -> LanguageConfig {
             "preproc_ifdef",
             "preproc_function_def",
         ],
+        Some(tree_sitter_c::TAGS_QUERY),
     )
 }
 
@@ -231,6 +244,7 @@ fn markdown() -> LanguageConfig {
             "block_quote",
             "html_block",
         ],
+        Some(MARKDOWN_SYMBOLS),
     )
 }
 
@@ -242,6 +256,7 @@ fn markdown_inline() -> LanguageConfig {
         Some(tree_sitter_md::INJECTION_QUERY_INLINE),
         &[],
         &[],
+        None,
     )
 }
 
@@ -287,6 +302,7 @@ mod tests {
         for name in ["Rust", "C", "Markdown"] {
             assert!(config_for(name).unwrap().functions.is_some(), "{name}");
             assert!(config_for(name).unwrap().folds.is_some(), "{name}");
+            assert!(config_for(name).unwrap().symbols.is_some(), "{name}");
         }
     }
 }

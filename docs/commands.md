@@ -286,6 +286,16 @@ Les curseurs sautent les lignes masquées (↑, ↓, ←, →) ; un curseur plac
 | `fold open-all` | Déplie tout (`mod+k mod+j`). |
 | `fold list` | Blocs repliés : ligne d'en-tête et lignes masquées. |
 
+## `outline` — plan du document
+
+Fonctions, méthodes, types, traits, modules et macros du document (titres en Markdown), d'après
+son arbre syntaxique.
+
+| Commande | Description |
+|---|---|
+| `ui outline` | Plan dans un sélecteur, dans l'ordre du texte : taper une partie d'un nom (recherche floue), Entrée pour aller au symbole (`mod+shift+o`). |
+| `outline list` | Plan en texte : `ligne:colonne genre nom`, une ligne par symbole. |
+
 ## `syntax` — arbre syntaxique
 
 Le langage d'un document est détecté d'après l'extension ou le nom de son fichier, sinon d'après

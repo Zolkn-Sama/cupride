@@ -22,6 +22,7 @@ mod view;
 mod window;
 
 pub(crate) use structure::Expansions;
+pub(crate) use syntax::outline;
 
 use super::{CommandError, CommandRegistry};
 use crate::document::Document;

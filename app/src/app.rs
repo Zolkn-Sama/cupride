@@ -160,6 +160,8 @@ pub(crate) struct App {
     mouse_position: (f32, f32),
     clicks: ClickCounter,
     mouse: MouseSelection,
+    /// Position (`ligne:colonne`) de chaque symbole du plan ouvert.
+    outline_targets: Vec<String>,
     /// Séparation entre deux zones, saisie à la souris.
     divider_drag: Option<Divider>,
     /// Onglet saisi à la souris, pour le déplacer.
@@ -270,6 +272,7 @@ impl App {
             mouse_position: (0.0, 0.0),
             clicks: ClickCounter::default(),
             mouse: MouseSelection::default(),
+            outline_targets: Vec::new(),
             divider_drag: None,
             tab_drag: None,
             pointer: Pointer::Default,
